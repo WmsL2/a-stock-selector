@@ -19,6 +19,9 @@ Completed
 - mypy configuration
 - README
 - .gitignore
+- README correctly tracked
+- generated egg-info excluded
+- repository scaffold repaired
 
 ## Tests
 
@@ -26,8 +29,8 @@ Completed
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector` — PASS
-- `python -m pytest` — PASS (4 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (4 passed)
+- `python -m pytest` — PASS (5 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (5 passed)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 

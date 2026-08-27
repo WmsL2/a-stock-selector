@@ -38,3 +38,11 @@ def test_cli_version() -> None:
     result = run_module("version")
     assert result.returncode == 0
     assert "0.1.0" in result.stdout
+
+
+def test_cli_without_arguments() -> None:
+    """The CLI exits successfully without arguments or a traceback."""
+    result = run_module()
+    assert result.returncode == 0
+    assert "Traceback" not in result.stdout
+    assert "Traceback" not in result.stderr
