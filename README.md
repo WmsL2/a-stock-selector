@@ -35,3 +35,15 @@ pytest
 ruff check .
 mypy src
 ```
+
+## 配置
+
+工程基础配置位于 `config/default.yaml`、`config/markets.yaml` 和
+`config/factors.yaml`。可使用以下命令检查配置及项目路径：
+
+```powershell
+python -m stock_selector config check
+python -m stock_selector config paths
+```
+
+项目仍处于工程基础阶段，尚未实现任何金融数据或选股功能。

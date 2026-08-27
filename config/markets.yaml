@@ -1,0 +1,12 @@
+universe:
+  include_sh_main: true
+  include_sz_main: true
+  include_chinext: true
+  include_star_market: true
+  include_bse: true
+  min_listing_days: 0
+  exclude_st: true
+  exclude_delisting_period: true
+  exclude_suspended: true
+  liquidity_filter_enabled: false
+  min_avg_turnover_20d: 0

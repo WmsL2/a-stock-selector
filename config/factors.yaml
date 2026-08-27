@@ -1,0 +1,16 @@
+factors:
+  quality:
+    enabled: true
+    weight: 0.30
+  value:
+    enabled: true
+    weight: 0.25
+  growth:
+    enabled: true
+    weight: 0.20
+  momentum:
+    enabled: true
+    weight: 0.15
+  low_volatility:
+    enabled: true
+    weight: 0.10

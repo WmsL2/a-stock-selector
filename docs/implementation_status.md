@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 00 - Project Scaffold
+Task 01 - Application Configuration and Logging
 
 ## Status
 
@@ -22,17 +22,27 @@ Completed
 - README correctly tracked
 - generated egg-info excluded
 - repository scaffold repaired
+- Pydantic configuration models
+- YAML configuration loader
+- recursive config merge
+- application paths
+- logging infrastructure
+- configuration CLI
+- configuration tests
+- logging tests
 
 ## Tests
 
 - `python -m pip install -e ".[dev]"` — PASS
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
-- `python -m stock_selector` — PASS
-- `python -m pytest` — PASS (5 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (5 passed)
+- `python -m stock_selector config check` — PASS
+- `python -m stock_selector config paths` — PASS
+- `python -m pytest` — PASS (30 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (30 passed)
 - `ruff check .` — PASS
 - `mypy src` — PASS
+- `git diff --check` — PASS
 
 ## Not Implemented Yet
 
@@ -64,4 +74,4 @@ Completed
 
 ## Next Task
 
-Task 01 - Application Configuration and Logging
+Task 02 - Core Data Models

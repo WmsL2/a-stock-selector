@@ -8,6 +8,11 @@ version = "0.1.0"
 description = "Personal A-share quantitative research and stock selection system."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.10,<3",
+    "PyYAML>=6.0,<7",
+    "tzdata>=2024.1",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -37,3 +42,7 @@ line-length = 88
 python_version = "3.12"
 strict = true
 files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true

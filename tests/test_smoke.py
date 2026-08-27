@@ -46,3 +46,17 @@ def test_cli_without_arguments() -> None:
     assert result.returncode == 0
     assert "Traceback" not in result.stdout
     assert "Traceback" not in result.stderr
+
+
+def test_config_check() -> None:
+    """The CLI validates the default project configuration."""
+    result = run_module("config", "check")
+    assert result.returncode == 0
+    assert "Configuration valid" in result.stdout
+
+
+def test_config_paths() -> None:
+    """The CLI exposes key project paths for engineering checks."""
+    result = run_module("config", "paths")
+    assert result.returncode == 0
+    assert "Project root" in result.stdout

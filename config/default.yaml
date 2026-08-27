@@ -1,0 +1,19 @@
+app:
+  name: "A Stock Selector"
+  timezone: "Asia/Shanghai"
+
+selection:
+  top_n: 20
+  watchlist_n: 10
+
+realtime:
+  enabled: true
+  snapshot_interval_seconds: 30
+
+logging:
+  level: "INFO"
+  console_enabled: true
+  file_enabled: true
+  filename: "a-stock-selector.log"
+  max_bytes: 10485760
+  backup_count: 5
