@@ -1,0 +1,10 @@
+pyproject.toml
+src/a_stock_selector.egg-info/PKG-INFO
+src/a_stock_selector.egg-info/SOURCES.txt
+src/a_stock_selector.egg-info/dependency_links.txt
+src/a_stock_selector.egg-info/requires.txt
+src/a_stock_selector.egg-info/top_level.txt
+src/stock_selector/__init__.py
+src/stock_selector/__main__.py
+src/stock_selector/cli.py
+tests/test_smoke.py

@@ -1,0 +1,3 @@
+"""A Stock Selector package."""
+
+__version__ = "0.1.0"
