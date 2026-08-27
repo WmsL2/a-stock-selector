@@ -54,6 +54,8 @@ def _load_yaml_mapping(path: Path) -> dict[str, object]:
         raise ConfigurationError(f"Configuration file not found: {path}") from exc
     except OSError as exc:
         raise ConfigurationError(f"Unable to read configuration file: {path}") from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(f"Invalid UTF-8 in configuration file: {path}") from exc
     except yaml.YAMLError as exc:
         raise ConfigurationError(f"Invalid YAML in configuration file: {path}") from exc
     if not isinstance(contents, Mapping):

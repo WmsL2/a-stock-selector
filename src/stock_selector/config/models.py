@@ -106,12 +106,10 @@ class LoggingConfig(StrictConfigModel):
     max_bytes: int = Field(default=10_485_760, gt=0)
     backup_count: int = Field(default=5, ge=0)
 
-    @field_validator("level", mode="before")
+    @field_validator("level")
     @classmethod
-    def normalize_level(cls, value: object) -> str:
+    def normalize_level(cls, value: str) -> str:
         """Normalize and validate a conventional logging level."""
-        if not isinstance(value, str):
-            raise TypeError("Logging level must be a string")
         normalized = value.upper()
         if normalized not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError(f"Unsupported logging level: {value}")

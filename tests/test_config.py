@@ -93,6 +93,24 @@ def test_logging_filename_must_be_simple(filename: str) -> None:
         LoggingConfig(filename=filename)
 
 
+def test_numeric_logging_level_raises_validation_error() -> None:
+    """Pydantic rejects a non-string log level instead of leaking TypeError."""
+    with pytest.raises(ValidationError):
+        LoggingConfig(level=123)
+
+
+def test_lowercase_logging_level_is_normalized() -> None:
+    """Valid lowercase logging levels are normalized to uppercase."""
+    config = LoggingConfig(level="info")
+    assert config.level == "INFO"
+
+
+def test_unsupported_logging_level_raises_validation_error() -> None:
+    """Unknown logging levels remain configuration validation errors."""
+    with pytest.raises(ValidationError):
+        LoggingConfig(level="TRACE")
+
+
 def test_missing_yaml_file_raises_configuration_error(tmp_path: Path) -> None:
     """Missing required YAML files fail explicitly."""
     with pytest.raises(ConfigurationError, match="not found"):
@@ -110,6 +128,21 @@ def test_yaml_root_must_be_mapping(tmp_path: Path) -> None:
     """A YAML sequence cannot serve as a configuration document root."""
     _write_config_files(tmp_path, default="- not-a-mapping")
     with pytest.raises(ConfigurationError, match="must be a mapping"):
+        load_settings(tmp_path)
+
+
+def test_numeric_log_level_from_yaml_raises_configuration_error(tmp_path: Path) -> None:
+    """A YAML type error is wrapped at the public configuration boundary."""
+    _write_config_files(tmp_path, default="logging:\n  level: 123\n")
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(tmp_path)
+
+
+def test_invalid_utf8_yaml_raises_configuration_error(tmp_path: Path) -> None:
+    """Invalid UTF-8 input cannot escape as a decoding traceback."""
+    _write_config_files(tmp_path)
+    (tmp_path / "default.yaml").write_bytes(b"\xff\xfe")
+    with pytest.raises(ConfigurationError, match="Invalid UTF-8"):
         load_settings(tmp_path)
 
 

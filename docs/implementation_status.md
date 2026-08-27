@@ -30,16 +30,14 @@ Completed
 - configuration CLI
 - configuration tests
 - logging tests
+- hardened configuration error handling
 
 ## Tests
 
 - `python -m pip install -e ".[dev]"` — PASS
-- `python -m stock_selector --help` — PASS
-- `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m stock_selector config paths` — PASS
-- `python -m pytest` — PASS (30 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (30 passed)
+- `python -m pytest` — PASS (35 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (35 passed)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
