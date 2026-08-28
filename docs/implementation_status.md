@@ -2,11 +2,11 @@
 
 ## Current Task
 
-Task 04 - AKShare Provider
+Task 05 - Lightweight Tiered Parquet and DuckDB Storage
 
 ## Status
 
-Completed
+Pending external daily-history smoke validation
 
 ## Completed
 
@@ -53,6 +53,14 @@ Completed
 - daily bar mapping
 - lot-to-share volume normalization
 - provider error translation
+- lightweight tiered storage architecture
+- explicit PyArrow schemas
+- selective per-symbol daily persistence
+- selective realtime snapshot persistence
+- atomic Parquet writes
+- DuckDB external views
+- storage coverage statistics
+- disk usage reporting
 
 ## Tests
 
@@ -60,26 +68,32 @@ Completed
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (128 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (128 passed, 87% coverage)
+- `python -m pip install -e ".[dev]"` — PASS
+- `python -m stock_selector --help` — PASS
+- `python -m stock_selector version` — PASS
+- `python -m stock_selector config check` — PASS
+- `python -m pytest` — PASS (143 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
+  (143 passed, 87% coverage)
+- `ruff check .` — PASS
+- `mypy src` — PASS
+- `git diff --check` — PASS
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
 
 ## Live Smoke
 
-- `data instruments-once` — PASS; 5,551 instruments
-  (SH Main 1,699; STAR 616; SZ Main 1,494; ChiNext 1,403; BSE 339).
-- `data realtime-once` — PASS via Sina fallback after Eastmoney connection failure;
-  5,546 valid rows (4 rows skipped for invalid prices).
-- `data daily-once 600519.SH --start 2026-08-03 --end 2026-08-07` — PASS;
-  5 rows from 2026-08-03 through 2026-08-07.
+- `storage smoke 600519.SH --start 2026-08-03 --end 2026-08-07` — FAIL after
+  one retry at the external AKShare daily-history request. Both attempts saved
+  the lightweight Instrument master before the failure; no daily or realtime
+  snapshots were written.
+- `storage status` — PASS offline: Instrument universe 5,551; Daily stored
+  symbols 0 / rows 0; Realtime stored symbols 0 / snapshots 0 / rows 0;
+  disk usage 638.5 KB.
 
 ## Not Implemented Yet
 
-- Market data
-- AKShare provider
-- Storage
 - A-share universe
 - Data quality pipeline
 - Daily price data
@@ -90,7 +104,7 @@ Completed
 - Factor engine
 - BaseScore
 - Explanation engine
-- Realtime market data
+- Realtime scanner / engine
 - Minute bars
 - Intraday factors
 - IntradayScore
@@ -103,4 +117,4 @@ Completed
 
 ## Next Task
 
-Task 05 - Parquet and DuckDB Storage
+Task 05A - Streamlit UI Skeleton

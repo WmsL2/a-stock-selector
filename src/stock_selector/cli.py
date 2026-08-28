@@ -46,6 +46,19 @@ def build_parser() -> argparse.ArgumentParser:
     daily_parser.add_argument("symbol", help="Canonical symbol, for example 600519.SH.")
     daily_parser.add_argument("--start", required=True, help="Inclusive start date: YYYY-MM-DD.")
     daily_parser.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    storage_parser = subparsers.add_parser(
+        "storage", help="Inspect or run explicit local storage operations."
+    )
+    storage_subparsers = storage_parser.add_subparsers(dest="storage_command")
+    storage_subparsers.add_parser("status", help="Show offline selective storage coverage.")
+    storage_smoke = storage_subparsers.add_parser(
+        "smoke", help="Persist and validate one explicitly requested symbol."
+    )
+    storage_smoke.add_argument("symbol", help="Canonical symbol, for example 600519.SH.")
+    storage_smoke.add_argument(
+        "--start", required=True, help="Inclusive start date: YYYY-MM-DD."
+    )
+    storage_smoke.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
     return parser
 
 
@@ -59,6 +72,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_config_command(arguments.config_command)
     elif arguments.command == "data":
         return _run_data_command(arguments)
+    elif arguments.command == "storage":
+        return _run_storage_command(arguments)
     else:
         parser.print_help()
     return 0
@@ -136,6 +151,27 @@ def _run_data_command(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _run_storage_command(arguments: argparse.Namespace) -> int:
+    """Run an offline status read or an explicitly bounded provider-to-storage smoke."""
+    from stock_selector.providers import ProviderError
+    from stock_selector.storage import LocalMarketRepository, StorageError
+
+    try:
+        repository = LocalMarketRepository(AppPaths.from_project_root())
+        repository.initialize()
+        if arguments.storage_command == "status":
+            _print_storage_status(repository)
+        elif arguments.storage_command == "smoke":
+            _run_storage_smoke(repository, arguments)
+        else:
+            print("A storage subcommand is required: status or smoke.", file=sys.stderr)
+            return 2
+    except (ProviderError, StorageError, ValidationError, ValueError) as exc:
+        print(f"Storage error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _provider_label(provider: AKShareProvider) -> str:
     """Return a concise provider identity without implementation details."""
     return f"{provider.info.name} {provider.info.version or 'unknown'}"
@@ -188,3 +224,73 @@ def _print_daily_summary(provider: AKShareProvider, request: DailyBarsRequest) -
     for bar in bars[:3]:
         print(f"{bar.trade_date} close={bar.close} volume={bar.volume}")
     print("Validation: PASS")
+
+
+def _print_storage_status(repository) -> None:  # type: ignore[no-untyped-def]
+    """Print offline coverage without calling a provider or claiming full detail coverage."""
+    stats = repository.get_stats()
+    print(f"Storage root: {repository.paths.processed_data_dir}")
+    print(f"DuckDB: {repository.catalog_path}")
+    print(f"Instrument universe: {stats.instrument_rows}")
+    print(f"Daily stored symbols: {stats.daily_symbols}")
+    print(f"Daily rows: {stats.daily_bar_rows}")
+    print(f"Realtime stored symbols: {stats.realtime_symbols}")
+    print(f"Realtime snapshots: {stats.realtime_snapshots}")
+    print(f"Realtime rows: {stats.realtime_quote_rows}")
+    print(
+        "Latest realtime: "
+        f"{stats.latest_realtime_at.isoformat() if stats.latest_realtime_at else 'unavailable'}"
+    )
+    print(f"Disk usage: {_format_bytes(stats.disk_usage_bytes)}")
+
+
+def _run_storage_smoke(repository, arguments: argparse.Namespace) -> None:  # type: ignore[no-untyped-def]
+    """Fetch and persist only one explicitly requested daily and realtime symbol."""
+    from stock_selector.providers import (
+        AKShareProvider,
+        DailyBarsRequest,
+        RealtimeQuotesRequest,
+    )
+
+    provider = AKShareProvider()
+    instruments = provider.get_instruments()
+    repository.save_instruments(instruments)
+    daily_request = DailyBarsRequest(
+        symbol=arguments.symbol,
+        start_date=date.fromisoformat(arguments.start),
+        end_date=date.fromisoformat(arguments.end),
+    )
+    daily_bars = provider.get_daily_bars(daily_request)
+    repository.upsert_daily_bars(daily_bars)
+    quotes = provider.get_realtime_quotes(
+        RealtimeQuotesRequest(symbols=(daily_request.symbol,))
+    )
+    repository.save_realtime_snapshot(quotes)
+    stored_instruments = repository.load_instruments()
+    stored_daily = repository.load_daily_bars(daily_request.symbol)
+    stored_quotes = repository.load_latest_realtime_snapshot()
+    if (
+        len(stored_instruments) != len(instruments)
+        or stored_daily != daily_bars
+        or stored_quotes != quotes
+    ):
+        raise ValueError("storage smoke round-trip validation failed")
+    stats = repository.get_stats()
+    print(f"Instrument universe rows: {stats.instrument_rows}")
+    print(f"Daily stored symbol: {daily_request.symbol}")
+    print(f"Daily rows: {len(stored_daily)}")
+    print(f"Realtime stored symbol: {stored_quotes[0].symbol}")
+    print(f"Realtime rows: {len(stored_quotes)}")
+    print(f"Realtime source: {stored_quotes[0].source}")
+    print(f"Disk usage: {_format_bytes(stats.disk_usage_bytes)}")
+    print("Round-trip validation: PASS")
+
+
+def _format_bytes(value: int) -> str:
+    """Format a nonnegative disk size with the smallest readable binary unit."""
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    raise AssertionError("unreachable")
