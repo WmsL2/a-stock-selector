@@ -48,4 +48,11 @@ python -m stock_selector config paths
 
 项目仍处于工程基础阶段，尚未实现任何金融数据或选股功能。
 
-目前已完成工程骨架、配置与日志、核心领域数据模型和 Provider 抽象；尚未接入任何真实市场数据。
+目前已完成工程骨架、配置与日志、核心领域数据模型、Provider 抽象和 AKShare 基础 Provider。
+当前仅接入 Instrument、DailyBar 与 RealtimeQuote；尚未完成存储、股票池、因子、实时评分、前端和回测。
+
+```powershell
+python -m stock_selector data instruments-once
+python -m stock_selector data realtime-once
+python -m stock_selector data daily-once 600519.SH --start 2026-08-03 --end 2026-08-07
+```

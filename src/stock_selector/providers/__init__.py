@@ -1,5 +1,6 @@
 """Public provider abstractions, typed requests, and provider errors."""
 
+from stock_selector.providers.akshare_provider import AKShareProvider
 from stock_selector.providers.base import (
     DailyMarketDataProvider,
     FundamentalDataProvider,
@@ -25,6 +26,7 @@ from stock_selector.providers.requests import (
 )
 
 __all__ = [
+    "AKShareProvider",
     "DailyBarsRequest",
     "DailyMarketDataProvider",
     "FinancialRecordsRequest",

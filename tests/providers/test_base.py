@@ -195,10 +195,11 @@ def test_fake_provider_returns_typed_domain_batches() -> None:
 
 
 def test_provider_abstractions_do_not_depend_on_data_source_packages() -> None:
-    """The abstraction layer remains independent of concrete data-source libraries."""
+    """The abstract provider layer remains independent of concrete data sources."""
     providers_dir = Path(__file__).resolve().parents[2] / "src" / "stock_selector" / "providers"
     forbidden_modules = ("akshare", "pandas", "numpy", "streamlit", "duckdb", "pyarrow")
-    for path in providers_dir.glob("*.py"):
+    for filename in ("base.py", "errors.py", "requests.py"):
+        path = providers_dir / filename
         contents = path.read_text(encoding="utf-8")
         for module in forbidden_modules:
             assert f"import {module}" not in contents

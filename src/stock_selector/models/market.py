@@ -24,7 +24,7 @@ def _validate_ohlc(
 
 
 class DailyBar(DomainModel):
-    """One end-of-day OHLCV record for a canonical security."""
+    """One end-of-day OHLCV record; volume uses shares and amount uses RMB."""
 
     symbol: str
     trade_date: date
@@ -124,7 +124,8 @@ class RealtimeQuote(DomainModel):
     """A timezone-aware, possibly partial real-time quote snapshot.
 
     ``change_pct`` and ``turnover_rate`` use percentage units (for example,
-    ``3.25`` denotes 3.25%), rather than fractional units.
+    ``3.25`` denotes 3.25%), rather than fractional units. Volume uses shares
+    and amount uses RMB.
     """
 
     symbol: str
