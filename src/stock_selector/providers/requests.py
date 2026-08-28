@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 from pydantic import ValidationInfo, field_validator, model_validator
 
+from stock_selector.models import AdjustmentType
 from stock_selector.models.common import (
     DomainModel,
     ensure_aware_datetime,
@@ -28,6 +29,7 @@ class DailyBarsRequest(DomainModel):
     symbol: str
     start_date: date
     end_date: date
+    adjustment: AdjustmentType = AdjustmentType.RAW
 
     @field_validator("symbol")
     @classmethod

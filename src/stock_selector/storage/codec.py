@@ -51,6 +51,7 @@ def daily_bars_to_table(bars: tuple[DailyBar, ...]) -> pa.Table:
             {
                 "symbol": item.symbol,
                 "trade_date": item.trade_date,
+                "adjustment": item.adjustment.value,
                 "open": item.open,
                 "high": item.high,
                 "low": item.low,

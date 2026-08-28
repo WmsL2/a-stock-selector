@@ -12,7 +12,12 @@ from stock_selector.models.instruments import (
     Instrument,
     SecurityStatus,
 )
-from stock_selector.models.market import DailyBar, MinuteBar, RealtimeQuote
+from stock_selector.models.market import (
+    AdjustmentType,
+    DailyBar,
+    MinuteBar,
+    RealtimeQuote,
+)
 from stock_selector.models.selection import (
     Evidence,
     RiskFlag,
@@ -22,6 +27,7 @@ from stock_selector.models.selection import (
 )
 
 __all__ = [
+    "AdjustmentType",
     "Board",
     "DailyBar",
     "Evidence",

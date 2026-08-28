@@ -6,7 +6,14 @@ from zoneinfo import ZoneInfo
 import duckdb
 
 from stock_selector.config.paths import AppPaths
-from stock_selector.models import Board, DailyBar, Exchange, Instrument, RealtimeQuote
+from stock_selector.models import (
+    AdjustmentType,
+    Board,
+    DailyBar,
+    Exchange,
+    Instrument,
+    RealtimeQuote,
+)
 from stock_selector.storage import LocalMarketRepository
 
 
@@ -30,6 +37,7 @@ def _bar() -> DailyBar:
     return DailyBar(
         symbol="600519.SH",
         trade_date=date(2026, 8, 3),
+        adjustment=AdjustmentType.RAW,
         open=9.0,
         high=11.0,
         low=8.0,
@@ -73,6 +81,7 @@ def test_catalog_views_query_selective_parquet_and_stats(tmp_path) -> None:  # t
     try:
         assert connection.execute("SELECT COUNT(*) FROM instruments").fetchone() == (1,)
         assert connection.execute("SELECT COUNT(DISTINCT symbol) FROM daily_bars").fetchone() == (1,)
+        assert connection.execute("SELECT adjustment FROM daily_bars").fetchone() == ("raw",)
         assert connection.execute("SELECT COUNT(DISTINCT symbol) FROM realtime_quotes").fetchone() == (1,)
     finally:
         connection.close()

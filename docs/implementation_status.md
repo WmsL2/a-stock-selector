@@ -6,7 +6,7 @@ Task 05 - Lightweight Tiered Parquet and DuckDB Storage
 
 ## Status
 
-Pending external daily-history smoke validation
+Completed
 
 ## Completed
 
@@ -53,6 +53,9 @@ Pending external daily-history smoke validation
 - daily bar mapping
 - lot-to-share volume normalization
 - provider error translation
+- explicit DailyBar adjustment basis
+- Eastmoney daily primary with Sina connection-failure fallback
+- RAW-only AKShare daily capability
 - lightweight tiered storage architecture
 - explicit PyArrow schemas
 - selective per-symbol daily persistence
@@ -61,6 +64,7 @@ Pending external daily-history smoke validation
 - DuckDB external views
 - storage coverage statistics
 - disk usage reporting
+- AKShare-to-storage selective live smoke
 
 ## Tests
 
@@ -68,29 +72,26 @@ Pending external daily-history smoke validation
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pip install -e ".[dev]"` — PASS
-- `python -m stock_selector --help` — PASS
-- `python -m stock_selector version` — PASS
-- `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (143 passed)
+- `python -m pytest` — PASS (153 passed)
 - `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
-  (143 passed, 87% coverage)
-- `ruff check .` — PASS
-- `mypy src` — PASS
-- `git diff --check` — PASS
+  (153 passed, 87% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
 
 ## Live Smoke
 
-- `storage smoke 600519.SH --start 2026-08-03 --end 2026-08-07` — FAIL after
-  one retry at the external AKShare daily-history request. Both attempts saved
-  the lightweight Instrument master before the failure; no daily or realtime
-  snapshots were written.
+- `storage smoke 600519.SH --start 2026-08-03 --end 2026-08-07` — PASS.
+  Eastmoney daily and realtime calls both failed at their connection boundaries,
+  then completed through Sina: daily source `akshare:stock_zh_a_daily`,
+  adjustment `raw`; realtime source `akshare:stock_zh_a_spot`.
+  The successful snapshot round-trip saved Instrument universe 5,551,
+  Daily `600519.SH` 5 rows, and one selected realtime quote.
 - `storage status` — PASS offline: Instrument universe 5,551; Daily stored
-  symbols 0 / rows 0; Realtime stored symbols 0 / snapshots 0 / rows 0;
-  disk usage 638.5 KB.
+  symbols 1 / rows 5; Realtime stored symbols 1 / snapshots 3 / rows 3;
+  latest realtime 2026-08-28T17:26:59.333499+08:00; disk usage 909.4 KB.
+  The additional snapshots are prior bounded retry attempts for the same
+  single symbol, not all-market realtime persistence.
 
 ## Not Implemented Yet
 

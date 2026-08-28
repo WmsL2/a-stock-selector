@@ -72,6 +72,7 @@ class FakeProvider(
             DailyBar(
                 symbol=request.symbol,
                 trade_date=request.start_date,
+                adjustment=request.adjustment,
                 open=10,
                 high=11,
                 low=9,

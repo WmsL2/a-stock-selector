@@ -60,6 +60,8 @@ python -m stock_selector config paths
 只保存调用者明确指定的 symbol；RealtimeQuote 只保存调用者明确选择的快照。Parquet 是数据
 源，DuckDB 仅通过外部 view 查询 Parquet，不复制一份数据。未来由 BaseScore / candidate pool
 决定详细持久化覆盖范围；当前未实现候选池选择。
+每个持久化的 DailyBar 都带有显式 adjustment basis；当前 AKShare 基础日线 Provider 仅支持
+RAW，不会暗中以 RAW 代替 QFQ 或 HFQ。
 
 长期方向是 Task 08 保存全市场有限滚动日线窗口、Task 16 仅为候选/关注层保存分钟线、Task 25
 执行 retention cleanup；Task 23 的大型历史回测数据将显式构建，而不会要求日常运行无限保留历史。

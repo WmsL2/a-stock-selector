@@ -6,13 +6,15 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
-from stock_selector.models import Board, SecurityStatus
+from stock_selector.models import AdjustmentType, Board, SecurityStatus
 from stock_selector.providers.akshare_mapping import (
     canonical_symbol_from_akshare_code,
     canonical_symbol_from_sina_code,
     lots_to_shares,
     map_sh_instruments,
+    map_sina_daily_bars,
     map_sina_realtime_quotes,
+    sina_symbol_from_canonical,
     to_optional_float,
 )
 from stock_selector.providers.errors import ProviderDataError
@@ -64,6 +66,21 @@ def test_invalid_sina_codes_are_rejected(value: str) -> None:
     """Sina codes are never guessed from incomplete or malformed values."""
     with pytest.raises(ProviderDataError):
         canonical_symbol_from_sina_code(value)
+
+
+@pytest.mark.parametrize(
+    ("symbol", "sina_symbol"),
+    [("600519.SH", "sh600519"), ("000001.SZ", "sz000001"), ("300750.SZ", "sz300750")],
+)
+def test_canonical_symbols_map_to_sina_daily_symbols(symbol: str, sina_symbol: str) -> None:
+    """Sina historical symbols are explicit rather than guessed from bare codes."""
+    assert sina_symbol_from_canonical(symbol) == sina_symbol
+
+
+def test_sina_daily_symbol_rejects_bse() -> None:
+    """Sina daily fallback does not claim unsupported Beijing history capability."""
+    with pytest.raises(ProviderDataError):
+        sina_symbol_from_canonical("430047.BJ")
 
 
 @pytest.mark.parametrize("value", [None, float("nan"), pd.NA, "", "-", "--"])
@@ -155,6 +172,26 @@ def test_sina_realtime_mapping_rejects_invalid_values_and_skips_invalid_prices()
     quotes, skipped = map_sina_realtime_quotes(invalid_price, ingested_at)
     assert skipped == 1
     assert [quote.symbol for quote in quotes] == ["000001.SZ"]
+
+
+def test_sina_daily_mapping_preserves_share_volume_and_raw_adjustment() -> None:
+    """Sina daily volume is already shares and still carries an explicit RAW basis."""
+    frame = pd.DataFrame(
+        {
+            "date": ["2026-08-04", "2026-08-03"],
+            "open": [10.0, 9.0],
+            "high": [12.0, 11.0],
+            "low": [9.0, 8.0],
+            "close": [11.0, 10.0],
+            "volume": [123_400, 456_700],
+            "amount": [1_234_000, 4_567_000],
+        }
+    )
+    bars = map_sina_daily_bars(frame, "600519.SH")
+    assert [bar.trade_date.day for bar in bars] == [3, 4]
+    assert bars[0].volume == 456_700
+    assert bars[0].adjustment is AdjustmentType.RAW
+    assert bars[0].source == "akshare:stock_zh_a_daily"
 
 
 def test_mapping_datetime_is_not_used_as_source_timestamp() -> None:

@@ -6,12 +6,13 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from stock_selector.models import Board, Exchange
+from stock_selector.models import AdjustmentType, Board, Exchange
 from stock_selector.providers import (
     AKShareProvider,
     DailyBarsRequest,
     ProviderConnectionError,
     ProviderDataError,
+    ProviderNotSupportedError,
     RealtimeQuotesRequest,
 )
 from stock_selector.providers import akshare_provider as provider_module
@@ -62,6 +63,21 @@ def _daily_frame() -> pd.DataFrame:
             "收盘": [11.0, 10.0],
             "成交量": [100, 200],
             "成交额": [110_000.0, 200_000.0],
+        }
+    )
+
+
+def _sina_daily_frame() -> pd.DataFrame:
+    """Return deliberately unsorted Sina daily data in its share-volume unit."""
+    return pd.DataFrame(
+        {
+            "date": ["2026-08-04", "2026-08-03"],
+            "open": [10.0, 9.0],
+            "high": [12.0, 11.0],
+            "low": [9.0, 8.0],
+            "close": [11.0, 10.0],
+            "volume": [123_400, 456_700],
+            "amount": [1_234_000.0, 4_567_000.0],
         }
     )
 
@@ -158,6 +174,11 @@ def test_get_daily_bars_maps_and_normalizes_volume(monkeypatch: pytest.MonkeyPat
         return _daily_frame()
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", fake_history)
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_daily",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("fallback must not be called")),
+    )
     bars = AKShareProvider().get_daily_bars(
         DailyBarsRequest(
             symbol="600519.SH", start_date=date(2026, 8, 3), end_date=date(2026, 8, 7)
@@ -174,6 +195,7 @@ def test_get_daily_bars_maps_and_normalizes_volume(monkeypatch: pytest.MonkeyPat
     assert bars[0].volume == 20_000
     assert bars[0].amount == 200_000
     assert bars[0].source == "akshare:stock_zh_a_hist"
+    assert bars[0].adjustment is AdjustmentType.RAW
 
 
 def test_get_daily_bars_handles_empty_and_invalid_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,17 +213,93 @@ def test_get_daily_bars_handles_empty_and_invalid_data(monkeypatch: pytest.Monke
 
 
 def test_get_daily_bars_translates_third_party_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only the AKShare call boundary translates connection failures."""
+    """Connection failure in both daily sources becomes one provider connection error."""
     def raise_connection(**kwargs: str) -> pd.DataFrame:
         raise RuntimeError("offline")
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", raise_connection)
-    with pytest.raises(ProviderConnectionError):
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_daily", raise_connection)
+    with pytest.raises(ProviderConnectionError, match="primary and fallback unavailable"):
         AKShareProvider().get_daily_bars(
             DailyBarsRequest(
                 symbol="600519.SH",
                 start_date=date(2026, 8, 3),
                 end_date=date(2026, 8, 7),
+            )
+        )
+
+
+def test_get_daily_bars_falls_back_to_sina_on_connection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sina is used only when the Eastmoney daily request boundary is unavailable."""
+    def raise_connection(**kwargs: str) -> pd.DataFrame:
+        raise RuntimeError("Eastmoney offline")
+
+    captured: dict[str, str] = {}
+
+    def fake_sina_history(**kwargs: str) -> pd.DataFrame:
+        captured.update(kwargs)
+        return _sina_daily_frame()
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", raise_connection)
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_daily", fake_sina_history)
+    bars = AKShareProvider().get_daily_bars(
+        DailyBarsRequest(
+            symbol="600519.SH", start_date=date(2026, 8, 3), end_date=date(2026, 8, 7)
+        )
+    )
+    assert captured == {
+        "symbol": "sh600519",
+        "start_date": "20260803",
+        "end_date": "20260807",
+        "adjust": "",
+    }
+    assert [bar.trade_date for bar in bars] == [date(2026, 8, 3), date(2026, 8, 4)]
+    assert bars[0].volume == 456_700
+    assert bars[0].amount == 4_567_000
+    assert bars[0].source == "akshare:stock_zh_a_daily"
+    assert bars[0].adjustment is AdjustmentType.RAW
+
+
+def test_get_daily_bars_does_not_fallback_for_primary_data_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A primary schema problem must remain visible instead of activating fallback."""
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_hist",
+        lambda **kwargs: _daily_frame().drop(columns=["成交额"]),
+    )
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_daily",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("fallback must not be called")),
+    )
+    with pytest.raises(ProviderDataError):
+        AKShareProvider().get_daily_bars(
+            DailyBarsRequest(
+                symbol="600519.SH",
+                start_date=date(2026, 8, 3),
+                end_date=date(2026, 8, 7),
+            )
+        )
+
+
+def test_get_daily_bars_rejects_nonraw_adjustment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Current provider capability is explicit: RAW only, never silently substituted."""
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_hist",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("provider must not fetch")),
+    )
+    with pytest.raises(ProviderNotSupportedError):
+        AKShareProvider().get_daily_bars(
+            DailyBarsRequest(
+                symbol="600519.SH",
+                start_date=date(2026, 8, 3),
+                end_date=date(2026, 8, 7),
+                adjustment=AdjustmentType.QFQ,
             )
         )
 

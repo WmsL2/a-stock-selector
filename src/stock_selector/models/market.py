@@ -1,6 +1,7 @@
 """Canonical daily, minute, and real-time market data records."""
 
 from datetime import date, datetime
+from enum import Enum
 
 from pydantic import ValidationInfo, field_validator, model_validator
 
@@ -23,11 +24,20 @@ def _validate_ohlc(
         raise ValueError("low must not exceed open, close, or high")
 
 
+class AdjustmentType(str, Enum):
+    """Explicit price-adjustment basis for persisted historical market data."""
+
+    RAW = "raw"
+    QFQ = "qfq"
+    HFQ = "hfq"
+
+
 class DailyBar(DomainModel):
     """One end-of-day OHLCV record; volume uses shares and amount uses RMB."""
 
     symbol: str
     trade_date: date
+    adjustment: AdjustmentType
     open: float
     high: float
     low: float

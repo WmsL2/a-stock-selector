@@ -6,7 +6,14 @@ from zoneinfo import ZoneInfo
 import pyarrow as pa
 import pytest
 
-from stock_selector.models import Board, DailyBar, Exchange, Instrument, RealtimeQuote
+from stock_selector.models import (
+    AdjustmentType,
+    Board,
+    DailyBar,
+    Exchange,
+    Instrument,
+    RealtimeQuote,
+)
 from stock_selector.storage.codec import (
     daily_bars_to_table,
     instruments_to_table,
@@ -33,6 +40,7 @@ def _daily_bar(day: int = 3, close: float = 10.0) -> DailyBar:
     return DailyBar(
         symbol="600519.SH",
         trade_date=date(2026, 8, day),
+        adjustment=AdjustmentType.RAW,
         open=9.0,
         high=11.0,
         low=8.0,
@@ -72,6 +80,7 @@ def test_daily_bar_round_trip_preserves_domain_values() -> None:
     """Daily rows retain date32 data and validated OHLCV values."""
     bar = _daily_bar()
     assert table_to_daily_bars(daily_bars_to_table((bar,))) == (bar,)
+    assert table_to_daily_bars(daily_bars_to_table((bar,)))[0].adjustment is AdjustmentType.RAW
 
 
 def test_realtime_round_trip_preserves_utc_instant_and_nulls() -> None:

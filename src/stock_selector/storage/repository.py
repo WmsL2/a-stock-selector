@@ -80,6 +80,8 @@ class LocalMarketRepository:
         symbols = {bar.symbol for bar in bars}
         if len(symbols) != 1:
             raise StorageDataError("daily-bar upsert requires exactly one symbol")
+        if len({bar.adjustment for bar in bars}) != 1:
+            raise StorageDataError("daily-bar upsert requires one adjustment basis")
         dates = [bar.trade_date for bar in bars]
         if len(set(dates)) != len(dates):
             raise StorageDataError("daily-bar input contains duplicate trade dates")
@@ -87,6 +89,8 @@ class LocalMarketRepository:
         existing = self._parquet.read_daily_bars(symbol)
         if any(bar.symbol != symbol for bar in existing):
             raise StorageDataError("persisted daily-bar file contains mixed symbols")
+        if existing and existing[0].adjustment != bars[0].adjustment:
+            raise StorageDataError("daily-bar adjustment must match existing persisted data")
         merged = {bar.trade_date: bar for bar in existing}
         merged.update({bar.trade_date: bar for bar in bars})
         ordered = tuple(merged[day] for day in sorted(merged))
@@ -107,6 +111,8 @@ class LocalMarketRepository:
         bars = self._parquet.read_daily_bars(symbol)
         if any(bar.symbol != symbol for bar in bars):
             raise StorageDataError("persisted daily-bar file contains mixed symbols")
+        if len({bar.adjustment for bar in bars}) > 1:
+            raise StorageDataError("persisted daily-bar file contains mixed adjustments")
         return tuple(
             bar
             for bar in sorted(bars, key=lambda item: item.trade_date)

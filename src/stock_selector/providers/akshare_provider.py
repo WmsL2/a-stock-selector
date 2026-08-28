@@ -9,14 +9,22 @@ from zoneinfo import ZoneInfo
 import akshare as ak
 import pandas as pd
 
-from stock_selector.models import Board, DailyBar, Instrument, RealtimeQuote
+from stock_selector.models import (
+    AdjustmentType,
+    Board,
+    DailyBar,
+    Instrument,
+    RealtimeQuote,
+)
 from stock_selector.providers.akshare_mapping import (
     map_bj_instruments,
     map_daily_bars,
     map_realtime_quotes,
     map_sh_instruments,
+    map_sina_daily_bars,
     map_sina_realtime_quotes,
     map_sz_instruments,
+    sina_symbol_from_canonical,
 )
 from stock_selector.providers.base import (
     DailyMarketDataProvider,
@@ -24,7 +32,11 @@ from stock_selector.providers.base import (
     ProviderInfo,
     RealtimeMarketDataProvider,
 )
-from stock_selector.providers.errors import ProviderConnectionError, ProviderDataError
+from stock_selector.providers.errors import (
+    ProviderConnectionError,
+    ProviderDataError,
+    ProviderNotSupportedError,
+)
 from stock_selector.providers.requests import (
     DailyBarsRequest,
     RealtimeQuotesRequest,
@@ -70,21 +82,65 @@ class AKShareProvider(
         return tuple(sorted(instruments, key=lambda instrument: instrument.symbol))
 
     def get_daily_bars(self, request: DailyBarsRequest) -> tuple[DailyBar, ...]:
-        """Fetch original, unadjusted daily bars and normalize lot volume to shares."""
+        """Fetch RAW daily bars, falling back to Sina only after primary connectivity loss."""
+        if request.adjustment is not AdjustmentType.RAW:
+            raise ProviderNotSupportedError(
+                "akshare", "get_daily_bars", "only raw daily adjustment is supported"
+            )
+        try:
+            frame = self._fetch_daily_em(request)
+        except ProviderConnectionError:
+            _LOGGER.warning("Eastmoney daily history unavailable; falling back to Sina")
+            try:
+                sina_symbol = sina_symbol_from_canonical(request.symbol)
+            except ProviderDataError as exc:
+                raise ProviderNotSupportedError(
+                    "akshare", "stock_zh_a_daily", "Sina daily fallback supports SH and SZ only"
+                ) from exc
+            try:
+                frame = self._fetch_daily_sina(request, sina_symbol)
+            except ProviderConnectionError as fallback_error:
+                raise ProviderConnectionError(
+                    "akshare", "get_daily_bars", "primary and fallback unavailable"
+                ) from fallback_error
+            return map_sina_daily_bars(frame, request.symbol)
+        return map_daily_bars(frame, request.symbol)
+
+    def _fetch_daily_em(self, request: DailyBarsRequest) -> pd.DataFrame:
+        """Call the primary Eastmoney daily endpoint at the third-party boundary."""
         raw_code = request.symbol.split(".", maxsplit=1)[0]
         try:
-            frame = ak.stock_zh_a_hist(
-                symbol=raw_code,
-                period="daily",
-                start_date=request.start_date.strftime("%Y%m%d"),
-                end_date=request.end_date.strftime("%Y%m%d"),
-                adjust="",
+            return cast(
+                pd.DataFrame,
+                ak.stock_zh_a_hist(
+                    symbol=raw_code,
+                    period="daily",
+                    start_date=request.start_date.strftime("%Y%m%d"),
+                    end_date=request.end_date.strftime("%Y%m%d"),
+                    adjust="",
+                ),
             )
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_zh_a_hist", "daily history request failed"
             ) from exc
-        return map_daily_bars(frame, request.symbol)
+
+    def _fetch_daily_sina(self, request: DailyBarsRequest, symbol: str) -> pd.DataFrame:
+        """Call the Sina RAW daily endpoint only after primary connection failure."""
+        try:
+            return cast(
+                pd.DataFrame,
+                ak.stock_zh_a_daily(
+                    symbol=symbol,
+                    start_date=request.start_date.strftime("%Y%m%d"),
+                    end_date=request.end_date.strftime("%Y%m%d"),
+                    adjust="",
+                ),
+            )
+        except Exception as exc:
+            raise ProviderConnectionError(
+                "akshare", "stock_zh_a_daily", "Sina daily history request failed"
+            ) from exc
 
     def get_realtime_quotes(
         self, request: RealtimeQuotesRequest

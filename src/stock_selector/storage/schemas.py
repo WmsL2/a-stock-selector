@@ -18,6 +18,7 @@ DAILY_BAR_SCHEMA = pa.schema(
     [
         pa.field("symbol", pa.string(), nullable=False),
         pa.field("trade_date", pa.date32(), nullable=False),
+        pa.field("adjustment", pa.string(), nullable=False),
         pa.field("open", pa.float64(), nullable=False),
         pa.field("high", pa.float64(), nullable=False),
         pa.field("low", pa.float64(), nullable=False),

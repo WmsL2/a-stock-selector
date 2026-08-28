@@ -9,6 +9,7 @@ import pandas as pd
 from pydantic import ValidationError
 
 from stock_selector.models import (
+    AdjustmentType,
     Board,
     DailyBar,
     Exchange,
@@ -16,6 +17,7 @@ from stock_selector.models import (
     RealtimeQuote,
     SecurityStatus,
 )
+from stock_selector.models.common import validate_symbol
 from stock_selector.providers.errors import ProviderDataError
 
 _MISSING_TEXT: Final[frozenset[str]] = frozenset({"", "-", "--"})
@@ -27,6 +29,15 @@ _DAILY_COLUMNS: Final[tuple[str, ...]] = (
     "收盘",
     "成交量",
     "成交额",
+)
+_SINA_DAILY_COLUMNS: Final[tuple[str, ...]] = (
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
 )
 _REALTIME_COLUMNS: Final[tuple[str, ...]] = (
     "代码",
@@ -95,6 +106,20 @@ def canonical_symbol_from_sina_code(value: object) -> str:
     if not code.startswith(valid_prefixes[market]):
         raise _data_error("canonical_sina_symbol", "exchange prefix does not match stock code")
     return f"{code}.{market.upper()}"
+
+
+def sina_symbol_from_canonical(symbol: str) -> str:
+    """Translate an SH or SZ canonical symbol into Sina's historical symbol form."""
+    try:
+        validate_symbol(symbol)
+    except ValueError as exc:
+        raise _data_error("sina_daily_symbol", "invalid canonical symbol") from exc
+    code, exchange = symbol.rsplit(".", maxsplit=1)
+    prefixes = {"SH": "sh", "SZ": "sz"}
+    try:
+        return f"{prefixes[exchange]}{code}"
+    except KeyError as exc:
+        raise _data_error("sina_daily_symbol", "Sina daily history supports SH and SZ only") from exc
 
 
 def to_optional_float(value: object) -> float | None:
@@ -195,6 +220,7 @@ def map_daily_bars(frame: pd.DataFrame, symbol: str) -> tuple[DailyBar, ...]:
                 DailyBar(
                     symbol=symbol,
                     trade_date=_to_date(row["日期"], "trade_date"),
+                    adjustment=AdjustmentType.RAW,
                     open=_required_float(row["开盘"], "open"),
                     high=_required_float(row["最高"], "high"),
                     low=_required_float(row["最低"], "low"),
@@ -206,6 +232,33 @@ def map_daily_bars(frame: pd.DataFrame, symbol: str) -> tuple[DailyBar, ...]:
             )
         except (ValidationError, ProviderDataError) as exc:
             raise _data_error("daily_bars", "invalid daily-bar row") from exc
+    return tuple(sorted(bars, key=lambda bar: bar.trade_date))
+
+
+def map_sina_daily_bars(frame: pd.DataFrame, symbol: str) -> tuple[DailyBar, ...]:
+    """Map Sina historical daily bars, whose volume column is already shares."""
+    if frame.empty:
+        return ()
+    _require_columns(frame, _SINA_DAILY_COLUMNS, "sina_daily_bars")
+    bars: list[DailyBar] = []
+    for _, row in frame.iterrows():
+        try:
+            bars.append(
+                DailyBar(
+                    symbol=symbol,
+                    trade_date=_to_date(row["date"], "trade_date"),
+                    adjustment=AdjustmentType.RAW,
+                    open=_required_float(row["open"], "open"),
+                    high=_required_float(row["high"], "high"),
+                    low=_required_float(row["low"], "low"),
+                    close=_required_float(row["close"], "close"),
+                    volume=_required_float(row["volume"], "volume"),
+                    amount=_required_float(row["amount"], "amount"),
+                    source="akshare:stock_zh_a_daily",
+                )
+            )
+        except (ValidationError, ProviderDataError) as exc:
+            raise _data_error("sina_daily_bars", "invalid Sina daily-bar row") from exc
     return tuple(sorted(bars, key=lambda bar: bar.trade_date))
 
 

@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 from stock_selector.config.paths import AppPaths
-from stock_selector.models import Board, DailyBar, Exchange, Instrument
+from stock_selector.models import AdjustmentType, Board, DailyBar, Exchange, Instrument
 from stock_selector.storage import (
     LocalMarketRepository,
     StorageDataError,
@@ -36,6 +36,7 @@ def _bar(day: int, close: float = 10.0) -> DailyBar:
     return DailyBar(
         symbol="600519.SH",
         trade_date=date(2026, 8, day),
+        adjustment=AdjustmentType.RAW,
         open=9.0,
         high=max(11.0, close),
         low=8.0,
@@ -100,6 +101,17 @@ def test_daily_persistence_rejects_invalid_batches_and_noops_empty(tmp_path) -> 
         repository.load_daily_bars("600519.SH", date(2026, 8, 5), date(2026, 8, 4))
     with pytest.raises(StorageDataError):
         repository.load_daily_bars("invalid")
+
+
+def test_daily_persistence_rejects_mixed_adjustment_bases(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """One per-symbol daily file cannot silently mix RAW and QFQ prices."""
+    repository = _repository(tmp_path)
+    qfq = _bar(4).model_copy(update={"adjustment": AdjustmentType.QFQ})
+    with pytest.raises(StorageDataError):
+        repository.upsert_daily_bars((_bar(3), qfq))
+    repository.upsert_daily_bars((_bar(3),))
+    with pytest.raises(StorageDataError):
+        repository.upsert_daily_bars((qfq,))
 
 
 def test_storage_access_requires_explicit_initialization(tmp_path) -> None:  # type: ignore[no-untyped-def]

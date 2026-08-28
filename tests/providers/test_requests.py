@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
+from stock_selector.models import AdjustmentType
 from stock_selector.providers import (
     DailyBarsRequest,
     FinancialRecordsRequest,
@@ -32,6 +33,7 @@ def test_daily_bars_request_validates_symbol_and_date_range() -> None:
         symbol="600519.SH", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2)
     )
     assert request.symbol == "600519.SH"
+    assert request.adjustment is AdjustmentType.RAW
     with pytest.raises(ValidationError):
         DailyBarsRequest(
             symbol="600519", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2)

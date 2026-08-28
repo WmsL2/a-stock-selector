@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from stock_selector.models import DailyBar, MinuteBar, RealtimeQuote
+from stock_selector.models import AdjustmentType, DailyBar, MinuteBar, RealtimeQuote
 
 
 def _aware_time() -> datetime:
@@ -14,11 +14,12 @@ def _aware_time() -> datetime:
     return datetime(2026, 1, 2, 9, 31, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
-def _daily_bar(**changes: float) -> DailyBar:
+def _daily_bar(**changes: object) -> DailyBar:
     """Build a valid daily bar with selective numeric overrides."""
     values = {
         "symbol": "600519.SH",
         "trade_date": date(2026, 1, 2),
+        "adjustment": AdjustmentType.RAW,
         "open": 10.0,
         "high": 12.0,
         "low": 9.0,
@@ -44,6 +45,15 @@ def test_daily_bar_validates_ohlcv_ranges() -> None:
     ):
         with pytest.raises(ValidationError):
             _daily_bar(**changes)
+
+
+def test_daily_bar_requires_and_serializes_explicit_adjustment() -> None:
+    """Persistent daily prices always carry a non-default adjustment basis."""
+    values = _daily_bar().model_dump()
+    values.pop("adjustment")
+    with pytest.raises(ValidationError):
+        DailyBar(**values)
+    assert _daily_bar().model_dump(mode="json")["adjustment"] == "raw"
 
 
 def test_minute_bar_requires_aware_time_and_valid_vwap() -> None:

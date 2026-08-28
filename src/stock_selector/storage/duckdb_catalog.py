@@ -80,7 +80,7 @@ class DuckDBCatalog:
             "daily_bars",
             any((self._processed_data_dir / "daily_bars").glob("*.parquet")),
             _duckdb_path(daily_glob),
-            "symbol VARCHAR, trade_date DATE, open DOUBLE, high DOUBLE, low DOUBLE, "
+            "symbol VARCHAR, trade_date DATE, adjustment VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, "
             "close DOUBLE, volume DOUBLE, amount DOUBLE, source VARCHAR",
         )
         self._replace_view(

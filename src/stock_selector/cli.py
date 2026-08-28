@@ -271,6 +271,8 @@ def _run_storage_smoke(repository, arguments: argparse.Namespace) -> None:  # ty
     stored_quotes = repository.load_latest_realtime_snapshot()
     if (
         len(stored_instruments) != len(instruments)
+        or not stored_daily
+        or not stored_quotes
         or stored_daily != daily_bars
         or stored_quotes != quotes
     ):
@@ -279,6 +281,8 @@ def _run_storage_smoke(repository, arguments: argparse.Namespace) -> None:  # ty
     print(f"Instrument universe rows: {stats.instrument_rows}")
     print(f"Daily stored symbol: {daily_request.symbol}")
     print(f"Daily rows: {len(stored_daily)}")
+    print(f"Daily source: {stored_daily[0].source}")
+    print(f"Daily adjustment: {stored_daily[0].adjustment.value}")
     print(f"Realtime stored symbol: {stored_quotes[0].symbol}")
     print(f"Realtime rows: {len(stored_quotes)}")
     print(f"Realtime source: {stored_quotes[0].source}")
