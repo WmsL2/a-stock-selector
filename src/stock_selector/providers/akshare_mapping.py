@@ -41,6 +41,17 @@ _REALTIME_COLUMNS: Final[tuple[str, ...]] = (
     "换手率",
     "量比",
 )
+_SINA_REALTIME_COLUMNS: Final[tuple[str, ...]] = (
+    "代码",
+    "最新价",
+    "今开",
+    "最高",
+    "最低",
+    "昨收",
+    "成交量",
+    "成交额",
+    "涨跌幅",
+)
 
 
 def normalize_akshare_code(value: object) -> str:
@@ -69,6 +80,21 @@ def canonical_symbol_from_akshare_code(value: object) -> str:
     else:
         raise _data_error("canonical_symbol", f"unsupported code prefix: {code}")
     return f"{code}.{suffix}"
+
+
+def canonical_symbol_from_sina_code(value: object) -> str:
+    """Convert one strict lowercase Sina exchange-prefixed code to a symbol."""
+    if not isinstance(value, str) or len(value) != 8:
+        raise _data_error("canonical_sina_symbol", "code must be an eight-character string")
+    market, code = value[:2], value[2:]
+    if market not in {"sh", "sz", "bj"}:
+        raise _data_error("canonical_sina_symbol", "code must use a lowercase exchange prefix")
+    if not code.isascii() or not code.isdigit():
+        raise _data_error("canonical_sina_symbol", "code must end in six ASCII digits")
+    valid_prefixes = {"sh": ("6",), "sz": ("0", "3"), "bj": ("4", "8", "9")}
+    if not code.startswith(valid_prefixes[market]):
+        raise _data_error("canonical_sina_symbol", "exchange prefix does not match stock code")
+    return f"{code}.{market.upper()}"
 
 
 def to_optional_float(value: object) -> float | None:
@@ -217,6 +243,43 @@ def map_realtime_quotes(
             )
         except (ValidationError, ProviderDataError) as exc:
             raise _data_error("realtime_quotes", "invalid realtime quote row") from exc
+    return tuple(sorted(quotes, key=lambda quote: quote.symbol)), skipped_without_price
+
+
+def map_sina_realtime_quotes(
+    frame: pd.DataFrame, ingested_at: datetime
+) -> tuple[tuple[RealtimeQuote, ...], int]:
+    """Map a Sina snapshot, whose volume column is already expressed in shares."""
+    _require_nonempty_columns(frame, _SINA_REALTIME_COLUMNS, "sina_realtime_quotes")
+    quotes: list[RealtimeQuote] = []
+    skipped_without_price = 0
+    for _, row in frame.iterrows():
+        symbol = canonical_symbol_from_sina_code(row["代码"])
+        price = to_optional_float(row["最新价"])
+        if price is None or price <= 0:
+            skipped_without_price += 1
+            continue
+        try:
+            quotes.append(
+                RealtimeQuote(
+                    symbol=symbol,
+                    price=price,
+                    open=to_optional_float(row["今开"]),
+                    high=to_optional_float(row["最高"]),
+                    low=to_optional_float(row["最低"]),
+                    prev_close=to_optional_float(row["昨收"]),
+                    volume=to_optional_float(row["成交量"]),
+                    amount=to_optional_float(row["成交额"]),
+                    change_pct=to_optional_float(row["涨跌幅"]),
+                    turnover_rate=None,
+                    volume_ratio=None,
+                    source_timestamp=None,
+                    ingested_at=ingested_at,
+                    source="akshare:stock_zh_a_spot",
+                )
+            )
+        except (ValidationError, ProviderDataError) as exc:
+            raise _data_error("sina_realtime_quotes", "invalid realtime quote row") from exc
     return tuple(sorted(quotes, key=lambda quote: quote.symbol)), skipped_without_price
 
 

@@ -167,6 +167,9 @@ def _print_realtime_summary(
     print(f"Rows: {len(quotes)}")
     if quotes:
         print(f"Ingested at: {quotes[0].ingested_at.isoformat()}")
+        print(f"Market source: {quotes[0].source}")
+    else:
+        print("Market source: unavailable")
     print("Source timestamp: unavailable")
     for quote in quotes[:3]:
         print(f"{quote.symbol} price={quote.price} change_pct={quote.change_pct}")

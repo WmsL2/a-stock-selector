@@ -6,7 +6,7 @@ Task 04 - AKShare Provider
 
 ## Status
 
-Pending external realtime smoke validation
+Completed
 
 ## Completed
 
@@ -49,6 +49,7 @@ Pending external realtime smoke validation
 - exchange instrument mapping
 - canonical AKShare symbol mapping
 - realtime snapshot mapping
+- Eastmoney realtime primary with Sina connection-failure fallback
 - daily bar mapping
 - lot-to-share volume normalization
 - provider error translation
@@ -59,17 +60,18 @@ Pending external realtime smoke validation
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (114 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (114 passed, 87% coverage)
+- `python -m pytest` — PASS (128 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (128 passed, 87% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
 
 ## Live Smoke
 
-- `data instruments-once` — PASS after one retry; 5,551 instruments
+- `data instruments-once` — PASS; 5,551 instruments
   (SH Main 1,699; STAR 616; SZ Main 1,494; ChiNext 1,403; BSE 339).
-- `data realtime-once` — FAIL after one retry; AKShare realtime snapshot request failed.
+- `data realtime-once` — PASS via Sina fallback after Eastmoney connection failure;
+  5,546 valid rows (4 rows skipped for invalid prices).
 - `data daily-once 600519.SH --start 2026-08-03 --end 2026-08-07` — PASS;
   5 rows from 2026-08-03 through 2026-08-07.
 

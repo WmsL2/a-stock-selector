@@ -15,6 +15,7 @@ from stock_selector.providers.akshare_mapping import (
     map_daily_bars,
     map_realtime_quotes,
     map_sh_instruments,
+    map_sina_realtime_quotes,
     map_sz_instruments,
 )
 from stock_selector.providers.base import (
@@ -90,13 +91,25 @@ class AKShareProvider(
     ) -> tuple[RealtimeQuote, ...]:
         """Fetch one full-market snapshot and optionally filter to requested symbols."""
         try:
-            frame = ak.stock_zh_a_spot_em()
-        except Exception as exc:
-            raise ProviderConnectionError(
-                "akshare", "stock_zh_a_spot_em", "realtime snapshot request failed"
-            ) from exc
-        ingested_at = datetime.now(tz=_SHANGHAI)
-        quotes, skipped_without_price = map_realtime_quotes(frame, ingested_at)
+            frame = self._fetch_realtime_em()
+        except ProviderConnectionError:
+            _LOGGER.warning(
+                "Eastmoney realtime snapshot unavailable; falling back to Sina"
+            )
+            try:
+                frame = self._fetch_realtime_sina()
+            except ProviderConnectionError as fallback_error:
+                raise ProviderConnectionError(
+                    "akshare",
+                    "get_realtime_quotes",
+                    "primary and fallback unavailable",
+                ) from fallback_error
+            ingested_at = datetime.now(tz=_SHANGHAI)
+            quotes, skipped_without_price = map_sina_realtime_quotes(frame, ingested_at)
+            _LOGGER.info("Using Sina realtime snapshot fallback")
+        else:
+            ingested_at = datetime.now(tz=_SHANGHAI)
+            quotes, skipped_without_price = map_realtime_quotes(frame, ingested_at)
         if request.symbols is None:
             if skipped_without_price:
                 _LOGGER.warning(
@@ -113,6 +126,24 @@ class AKShareProvider(
                 f"requested symbols unavailable or invalid: {', '.join(missing)}",
             )
         return tuple(quotes_by_symbol[symbol] for symbol in request.symbols)
+
+    def _fetch_realtime_em(self) -> pd.DataFrame:
+        """Call the primary Eastmoney realtime endpoint at the provider boundary."""
+        try:
+            return cast(pd.DataFrame, ak.stock_zh_a_spot_em())
+        except Exception as exc:
+            raise ProviderConnectionError(
+                "akshare", "stock_zh_a_spot_em", "realtime snapshot request failed"
+            ) from exc
+
+    def _fetch_realtime_sina(self) -> pd.DataFrame:
+        """Call the Sina realtime endpoint only after primary connectivity failure."""
+        try:
+            return cast(pd.DataFrame, ak.stock_zh_a_spot())
+        except Exception as exc:
+            raise ProviderConnectionError(
+                "akshare", "stock_zh_a_spot", "Sina realtime snapshot request failed"
+            ) from exc
 
     def _fetch_sh_list(self, board: str) -> pd.DataFrame:
         """Call one concrete Shanghai listing endpoint at the third-party boundary."""

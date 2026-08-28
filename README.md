@@ -50,6 +50,8 @@ python -m stock_selector config paths
 
 目前已完成工程骨架、配置与日志、核心领域数据模型、Provider 抽象和 AKShare 基础 Provider。
 当前仅接入 Instrument、DailyBar 与 RealtimeQuote；尚未完成存储、股票池、因子、实时评分、前端和回测。
+实时行情优先使用 Eastmoney；仅当其连接不可用时回退到 Sina。两者均为免费上游，
+可能受到网络波动、限流或服务端变更影响。
 
 ```powershell
 python -m stock_selector data instruments-once

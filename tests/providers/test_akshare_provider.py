@@ -1,5 +1,6 @@
 """Offline contract tests for the concrete AKShare provider."""
 
+import logging
 from datetime import date
 
 import pandas as pd
@@ -80,6 +81,28 @@ def _realtime_frame() -> pd.DataFrame:
             "涨跌幅": [3.25, 2.56],
             "换手率": [1.2, 0.8],
             "量比": [1.1, 0.9],
+        }
+    )
+
+
+def _sina_realtime_frame() -> pd.DataFrame:
+    """Return a Sina-style snapshot, whose volume is already in shares."""
+    return pd.DataFrame(
+        {
+            "代码": ["sh600519", "sz000001"],
+            "名称": ["贵州茅台", "平安银行"],
+            "最新价": [10.0, 20.0],
+            "涨跌额": [0.5, 0.2],
+            "涨跌幅": [5.0, 1.01],
+            "买入": [9.9, 19.9],
+            "卖出": [10.1, 20.1],
+            "昨收": [9.5, 19.8],
+            "今开": [9.7, 19.7],
+            "最高": [10.2, 20.3],
+            "最低": [9.6, 19.5],
+            "成交量": [123_400, 456_700],
+            "成交额": [1_234_000, 9_134_000],
+            "时间戳": ["10:00:00", "10:00:00"],
         }
     )
 
@@ -186,6 +209,11 @@ def test_get_daily_bars_translates_third_party_errors(monkeypatch: pytest.Monkey
 def test_get_realtime_quotes_maps_snapshot_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     """One full-market fetch maps shares, percentages, and consistent ingestion time."""
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot_em", _realtime_frame)
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot",
+        lambda: (_ for _ in ()).throw(AssertionError("fallback must not be called")),
+    )
     provider = AKShareProvider()
     quotes = provider.get_realtime_quotes(RealtimeQuotesRequest())
     assert len(quotes) == 2
@@ -193,6 +221,7 @@ def test_get_realtime_quotes_maps_snapshot_and_filters(monkeypatch: pytest.Monke
     assert quotes[0].change_pct == 2.56
     assert {quote.ingested_at for quote in quotes}.__len__() == 1
     assert all(quote.source_timestamp is None for quote in quotes)
+    assert all(quote.source == "akshare:stock_zh_a_spot_em" for quote in quotes)
     requested = provider.get_realtime_quotes(RealtimeQuotesRequest(symbols=("600519.SH",)))
     assert requested[0].symbol == "600519.SH"
 
@@ -222,10 +251,55 @@ def test_get_realtime_quotes_handles_skips_and_data_errors(
 def test_get_realtime_quotes_translates_third_party_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Realtime third-party call failures become provider connection errors."""
+    """A failure in both realtime sources becomes one provider connection error."""
     def raise_connection() -> pd.DataFrame:
         raise RuntimeError("offline")
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot_em", raise_connection)
-    with pytest.raises(ProviderConnectionError):
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot", raise_connection)
+    with pytest.raises(ProviderConnectionError, match="primary and fallback unavailable"):
+        AKShareProvider().get_realtime_quotes(RealtimeQuotesRequest())
+
+
+def test_get_realtime_quotes_falls_back_to_sina_on_connection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Sina is used only after the Eastmoney request boundary fails."""
+    def raise_connection() -> pd.DataFrame:
+        raise RuntimeError("Eastmoney offline")
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot_em", raise_connection)
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot", _sina_realtime_frame)
+    caplog.set_level(logging.WARNING, logger="stock_selector.providers.akshare")
+    quotes = AKShareProvider().get_realtime_quotes(RealtimeQuotesRequest())
+    assert [quote.symbol for quote in quotes] == ["000001.SZ", "600519.SH"]
+    maotai = next(quote for quote in quotes if quote.symbol == "600519.SH")
+    assert maotai.source == "akshare:stock_zh_a_spot"
+    assert maotai.volume == 123_400
+    assert maotai.change_pct == 5.0
+    assert maotai.turnover_rate is None
+    assert maotai.volume_ratio is None
+    assert maotai.source_timestamp is None
+    assert {quote.ingested_at for quote in quotes}.__len__() == 1
+    assert [record.message for record in caplog.records] == [
+        "Eastmoney realtime snapshot unavailable; falling back to Sina"
+    ]
+
+
+def test_get_realtime_quotes_does_not_fallback_for_primary_data_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful primary response with a bad schema must not be masked by fallback."""
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot_em",
+        lambda: _realtime_frame().drop(columns=["量比"]),
+    )
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot",
+        lambda: (_ for _ in ()).throw(AssertionError("fallback must not be called")),
+    )
+    with pytest.raises(ProviderDataError):
         AKShareProvider().get_realtime_quotes(RealtimeQuotesRequest())
