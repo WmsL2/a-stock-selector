@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 01 - Application Configuration and Logging
+Task 02 - Core Data Models
 
 ## Status
 
@@ -31,21 +31,27 @@ Completed
 - configuration tests
 - logging tests
 - hardened configuration error handling
+- canonical security identifiers
+- instrument domain model
+- market data models
+- financial data models
+- industry history model
+- factor data models
+- selection and explanation models
+- timezone-aware validation
+- finite-number validation
 
 ## Tests
 
 - `python -m pip install -e ".[dev]"` — PASS
-- `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (35 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (35 passed)
+- `python -m pytest` — PASS (66 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (66 passed, 92% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
 
 ## Not Implemented Yet
 
-- Application configuration
-- Logging infrastructure
 - Market data
 - AKShare provider
 - Storage
@@ -72,4 +78,4 @@ Completed
 
 ## Next Task
 
-Task 02 - Core Data Models
+Task 03 - Data Provider Abstractions
