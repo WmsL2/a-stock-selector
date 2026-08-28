@@ -64,3 +64,16 @@ def test_domain_model_serializes_json_values() -> None:
     dumped = instrument.model_dump(mode="json")
     assert dumped["exchange"] == "SH"
     assert dumped["listing_date"] == "2001-08-27"
+
+
+def test_timezone_aware_domain_model_serializes_iso_datetime() -> None:
+    """Timezone-aware timestamps use Pydantic's JSON-friendly ISO output."""
+    from stock_selector.models import RealtimeQuote
+
+    quote = RealtimeQuote(
+        symbol="600519.SH",
+        price=10,
+        ingested_at=datetime(2026, 1, 2, 9, tzinfo=ZoneInfo("Asia/Shanghai")),
+        source="test",
+    )
+    assert quote.model_dump(mode="json")["ingested_at"] == "2026-01-02T09:00:00+08:00"

@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 02 - Core Data Models
+Task 03 - Data Provider Abstractions
 
 ## Status
 
@@ -40,12 +40,17 @@ Completed
 - selection and explanation models
 - timezone-aware validation
 - finite-number validation
+- provider capability interfaces
+- typed provider request models
+- provider error hierarchy
+- offline provider contract tests
+- provider/domain separation
 
 ## Tests
 
 - `python -m pip install -e ".[dev]"` — PASS
-- `python -m pytest` — PASS (66 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (66 passed, 92% coverage)
+- `python -m pytest` — PASS (78 passed)
+- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS (78 passed, 93% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
@@ -78,4 +83,4 @@ Completed
 
 ## Next Task
 
-Task 03 - Data Provider Abstractions
+Task 04 - AKShare Provider
