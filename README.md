@@ -54,6 +54,27 @@ python -m stock_selector config paths
 实时行情优先使用 Eastmoney；仅当其连接不可用时回退到 Sina。两者均为免费上游，
 可能受到网络波动、限流或服务端变更影响。
 
+## Local API
+
+当前 FastAPI 服务是只读、仅限 localhost、由本地存储支持的 HTTP/JSON 边界。它不会自动联网、
+不会自动刷新 AKShare，也不会修改本地市场数据。推荐仅绑定到 `127.0.0.1`：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn stock_selector.api.app:app --host 127.0.0.1 --port 8000
+```
+
+启动后可在 <http://127.0.0.1:8000/docs> 查看 OpenAPI 文档。当前主要端点包括：
+
+- `GET /api/health`
+- `GET /api/storage/status`
+- `GET /api/instruments` 与 `GET /api/instruments/{symbol}`
+- `GET /api/instruments/{symbol}/daily`
+- `GET /api/instruments/{symbol}/realtime`
+- `GET /api/config/public`
+
+前端路线为 FastAPI + Vue 3 + TypeScript + Vite；Vue 实现属于后续 Task 05B，当前仓库尚未创建
+前端项目。旧的 Streamlit Task 05A 已取消。
+
 ## Storage strategy
 
 采用“全市场轻量元数据 + 选择性详细持久化”：Instrument master 可保存全市场；DailyBar

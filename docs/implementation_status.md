@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 05 - Lightweight Tiered Parquet and DuckDB Storage
+Task 05A - FastAPI Read-only API Foundation
 
 ## Status
 
@@ -65,6 +65,18 @@ Completed
 - storage coverage statistics
 - disk usage reporting
 - AKShare-to-storage selective live smoke
+- FastAPI application factory
+- local repository dependency injection
+- health endpoint
+- storage status API
+- instrument listing/detail APIs
+- daily local-data API
+- realtime local-data API
+- public safe-config API
+- explicit response DTO contracts
+- read-only HTTP boundary
+- API/storage/provider separation
+- OpenAPI development docs
 
 ## Tests
 
@@ -72,9 +84,9 @@ Completed
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (153 passed)
+- `python -m pytest` — PASS (165 passed)
 - `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
-  (153 passed, 87% coverage)
+  (165 passed, 88% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
@@ -92,6 +104,9 @@ Completed
   latest realtime 2026-08-28T17:26:59.333499+08:00; disk usage 909.4 KB.
   The additional snapshots are prior bounded retry attempts for the same
   single symbol, not all-market realtime persistence.
+- FastAPI Uvicorn/API smoke — PASS on `127.0.0.1:8000`: `/api/health`,
+  `/api/storage/status`, `/api/instruments/600519.SH`, and `/docs` returned 200.
+  The server was stopped after the local smoke check.
 
 ## Not Implemented Yet
 
@@ -110,7 +125,7 @@ Completed
 - Intraday factors
 - IntradayScore
 - RealTimeScore
-- Streamlit UI
+- Vue 3 frontend
 - Replay engine
 - Backtest
 - Factor research
@@ -118,4 +133,4 @@ Completed
 
 ## Next Task
 
-Task 05A - Streamlit UI Skeleton
+Task 05B - Vue 3 Frontend Skeleton
