@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 05B - Vue 3 Frontend Skeleton
+Task 06 - A-share Universe
 
 ## Status
 
@@ -94,6 +94,15 @@ Completed
 - truthful API status initialization
 - route-aware navigation state
 - independent stock-detail error states
+- point-in-time structural A-share universe
+- deterministic board inclusion
+- listing/delisting lifecycle filtering
+- zero-day default new-listing policy
+- auditable structural exclusion reasons
+- survivorship-bias safety disclosure
+- universe status API
+- offline universe CLI
+- Vue structural universe status integration
 
 ## Tests
 
@@ -101,16 +110,16 @@ Completed
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (165 passed)
+- `python -m pytest` — PASS (177 passed)
 - `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
-  (165 passed, 88% coverage)
+  (177 passed, 87% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
 - `cd frontend && npm install` — PASS
 - `cd frontend && npm run type-check` — PASS
 - `cd frontend && npm run lint` — PASS
-- `cd frontend && npm run test` — PASS (21 passed)
+- `cd frontend && npm run test` — PASS (23 passed)
 - `cd frontend && npm run build` — PASS
 
 ## Live Smoke
@@ -132,11 +141,14 @@ Completed
 - Vue/FastAPI integration — PASS on localhost: Vite `/` returned 200; Vite proxy
   requests to `/api/health` and `/api/storage/status` returned 200. Both local
   development processes were stopped after verification.
+- Universe API/CLI/Vue integration — PASS: local CLI reported 5,551 input and
+  5,551 structural members on 2026-08-29; FastAPI `/api/universe/status` and
+  the Vite proxy both returned 200. The local processes were stopped after smoke.
 
 ## Not Implemented Yet
 
-- A-share universe
 - Data quality pipeline
+- Dated risk states for ST, suspension, and delisting periods
 - Daily price data
 - Fundamentals
 - Valuation
@@ -157,4 +169,4 @@ Completed
 
 ## Next Task
 
-Task 06 - A-share Universe
+Task 07 - Data Quality and Dated Risk States

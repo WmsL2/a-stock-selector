@@ -74,6 +74,23 @@ python -m stock_selector config paths
 
 前端路线为 FastAPI + Vue 3 + TypeScript + Vite。旧的 Streamlit 路线已取消。
 
+## A-share Universe
+
+Task 06 提供的是 point-in-time 的结构股票池：根据板块开关、上市/退市生命周期和可选的
+`min_listing_days` 计算某个明确日期的结构性研究范围。默认 `min_listing_days=0`，因此新上市股票
+不会仅因上市时间短而被排除。可离线查看当前本地状态：
+
+```powershell
+python -m stock_selector universe status
+```
+
+ST、停牌、退市期和流动性过滤不属于当前结构股票池；它们需要带日期的风险状态数据，并留待 Task 07
+实现。当前本地 Instrument Master 是轻量的当前证券基础资料，不能保证构成无生存者偏差的历史证券
+主表；因此结构 builder 支持历史 `as_of`，但不会据此声称历史股票池已经无生存者偏差。
+
+`GET /api/universe/status` 同时显式报告 `data_scope=current_instrument_master`、未应用风险过滤，以及
+历史生存者偏差安全性为 false。结构性排除原因可重叠，原因计数不一定等于被排除股票数。
+
 ## Frontend
 
 前端使用 Vue 3、TypeScript、Vite、Element Plus、Pinia、Axios 和 ECharts。先在一个终端启动本地

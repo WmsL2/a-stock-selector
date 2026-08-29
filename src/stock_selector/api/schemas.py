@@ -31,6 +31,33 @@ class StorageStatusResponse(APIResponseModel):
     duckdb_path: str
 
 
+class UniverseBoardCountsResponse(APIResponseModel):
+    sh_main: int
+    sz_main: int
+    chinext: int
+    star: int
+    bse: int
+
+
+class UniverseExclusionCountsResponse(APIResponseModel):
+    board_disabled: int
+    not_yet_listed: int
+    delisted: int
+    min_listing_days: int
+
+
+class UniverseStatusResponse(APIResponseModel):
+    as_of: date
+    data_scope: str
+    input_instruments: int
+    included_instruments: int
+    excluded_instruments: int
+    boards: UniverseBoardCountsResponse
+    exclusions: UniverseExclusionCountsResponse
+    risk_filters_applied: bool
+    historical_survivorship_safe: bool
+
+
 class InstrumentResponse(APIResponseModel):
     symbol: str
     name: str

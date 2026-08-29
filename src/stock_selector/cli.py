@@ -59,6 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--start", required=True, help="Inclusive start date: YYYY-MM-DD."
     )
     storage_smoke.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    universe_parser = subparsers.add_parser(
+        "universe", help="Inspect the offline point-in-time structural universe."
+    )
+    universe_subparsers = universe_parser.add_subparsers(dest="universe_command")
+    universe_subparsers.add_parser(
+        "status", help="Show current structural membership and deferred risk filters."
+    )
     return parser
 
 
@@ -74,6 +81,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_data_command(arguments)
     elif arguments.command == "storage":
         return _run_storage_command(arguments)
+    elif arguments.command == "universe":
+        return _run_universe_command(arguments.universe_command)
     else:
         parser.print_help()
     return 0
@@ -172,6 +181,28 @@ def _run_storage_command(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _run_universe_command(command: str | None) -> int:
+    """Print an offline structural universe without provider or risk-filter access."""
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    if command != "status":
+        print("A universe subcommand is required: status.", file=sys.stderr)
+        return 2
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        snapshot = CurrentUniverseService(repository, settings).build_current()
+        instruments = repository.load_instruments()
+    except (ConfigurationError, StorageError, UniverseError) as exc:
+        print(f"Universe error: {exc}", file=sys.stderr)
+        return 1
+    _print_universe_status(snapshot, instruments)
+    return 0
+
+
 def _provider_label(provider: AKShareProvider) -> str:
     """Return a concise provider identity without implementation details."""
     return f"{provider.info.name} {provider.info.version or 'unknown'}"
@@ -242,6 +273,45 @@ def _print_storage_status(repository) -> None:  # type: ignore[no-untyped-def]
         f"{stats.latest_realtime_at.isoformat() if stats.latest_realtime_at else 'unavailable'}"
     )
     print(f"Disk usage: {_format_bytes(stats.disk_usage_bytes)}")
+
+
+def _print_universe_status(snapshot, instruments) -> None:  # type: ignore[no-untyped-def]
+    """Print one current structural snapshot without claiming risk filtering."""
+    from stock_selector.models import Board
+    from stock_selector.universe import UniverseExclusionReason
+
+    included = set(snapshot.members)
+    boards = Counter(
+        instrument.board for instrument in instruments if instrument.symbol in included
+    )
+    exclusions = Counter(
+        reason for decision in snapshot.decisions for reason in decision.reasons
+    )
+    print(f"As of: {snapshot.as_of.isoformat()}")
+    print("Data scope: current_instrument_master")
+    print(f"Input instruments: {snapshot.input_count}")
+    print(f"Structural universe: {len(snapshot.members)}")
+    print(f"Excluded: {snapshot.input_count - len(snapshot.members)}")
+    print("By board:")
+    for board, label in (
+        (Board.SH_MAIN, "SH Main"),
+        (Board.SZ_MAIN, "SZ Main"),
+        (Board.CHINEXT, "ChiNext"),
+        (Board.STAR, "STAR"),
+        (Board.BSE, "BSE"),
+    ):
+        print(f"{label}: {boards[board]}")
+    print("Structural exclusions:")
+    for reason, label in (
+        (UniverseExclusionReason.BOARD_DISABLED, "Board disabled"),
+        (UniverseExclusionReason.NOT_YET_LISTED, "Not yet listed"),
+        (UniverseExclusionReason.DELISTED, "Delisted"),
+        (UniverseExclusionReason.MIN_LISTING_DAYS, "Min listing days"),
+    ):
+        print(f"{label}: {exclusions[reason]}")
+    print("Risk filters applied: NO")
+    print("Historical survivorship safe: NO")
+    print("ST / suspension / delisting-period filters are not yet applied.")
 
 
 def _run_storage_smoke(repository, arguments: argparse.Namespace) -> None:  # type: ignore[no-untyped-def]

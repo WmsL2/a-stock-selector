@@ -11,9 +11,14 @@ from stock_selector.api.schemas import (
     RealtimeLookupResponse,
     RealtimeQuoteResponse,
     StorageStatusResponse,
+    UniverseBoardCountsResponse,
+    UniverseExclusionCountsResponse,
+    UniverseStatusResponse,
 )
-from stock_selector.models import DailyBar, Instrument, RealtimeQuote
+from stock_selector.config.models import Settings
+from stock_selector.models import Board, DailyBar, Instrument, RealtimeQuote
 from stock_selector.storage import LocalMarketRepository
+from stock_selector.universe import CurrentUniverseService, UniverseExclusionReason
 
 
 class ReadOnlyMarketService:
@@ -36,6 +41,44 @@ class ReadOnlyMarketService:
             disk_usage_bytes=stats.disk_usage_bytes,
             storage_root=str(self._repository.paths.processed_data_dir),
             duckdb_path=str(self._repository.catalog_path),
+        )
+
+    def universe_status(self, settings: Settings) -> UniverseStatusResponse:
+        """Return current structural coverage without claiming historical completeness."""
+        snapshot = CurrentUniverseService(self._repository, settings).build_current()
+        instruments = self._repository.load_instruments()
+        included_symbols = set(snapshot.members)
+        board_counts = {
+            "sh_main": 0,
+            "sz_main": 0,
+            "chinext": 0,
+            "star": 0,
+            "bse": 0,
+        }
+        board_keys = {
+            Board.SH_MAIN: "sh_main",
+            Board.SZ_MAIN: "sz_main",
+            Board.CHINEXT: "chinext",
+            Board.STAR: "star",
+            Board.BSE: "bse",
+        }
+        for instrument in instruments:
+            if instrument.symbol in included_symbols:
+                board_counts[board_keys[instrument.board]] += 1
+        exclusion_counts = {reason.value: 0 for reason in UniverseExclusionReason}
+        for decision in snapshot.decisions:
+            for reason in decision.reasons:
+                exclusion_counts[reason.value] += 1
+        return UniverseStatusResponse(
+            as_of=snapshot.as_of,
+            data_scope="current_instrument_master",
+            input_instruments=snapshot.input_count,
+            included_instruments=len(snapshot.members),
+            excluded_instruments=snapshot.input_count - len(snapshot.members),
+            boards=UniverseBoardCountsResponse(**board_counts),
+            exclusions=UniverseExclusionCountsResponse(**exclusion_counts),
+            risk_filters_applied=False,
+            historical_survivorship_safe=False,
         )
 
     def list_instruments(

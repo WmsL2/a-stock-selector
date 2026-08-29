@@ -18,6 +18,33 @@ export interface StorageStatusResponse {
   duckdb_path: string
 }
 
+export interface UniverseBoardCounts {
+  sh_main: number
+  sz_main: number
+  chinext: number
+  star: number
+  bse: number
+}
+
+export interface UniverseExclusionCounts {
+  board_disabled: number
+  not_yet_listed: number
+  delisted: number
+  min_listing_days: number
+}
+
+export interface UniverseStatusResponse {
+  as_of: string
+  data_scope: string
+  input_instruments: number
+  included_instruments: number
+  excluded_instruments: number
+  boards: UniverseBoardCounts
+  exclusions: UniverseExclusionCounts
+  risk_filters_applied: boolean
+  historical_survivorship_safe: boolean
+}
+
 export interface InstrumentResponse {
   symbol: string
   name: string

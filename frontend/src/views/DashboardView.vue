@@ -1,18 +1,31 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import MetricCard from '@/components/MetricCard.vue'
 import { useAppStore } from '@/stores/app'
+import { getUniverseStatus } from '@/api/universe'
+import type { UniverseStatusResponse } from '@/api/types'
 import { formatBytes, formatLocalTime } from '@/utils/format'
 
 const appStore = useAppStore()
 const { error, health, loading, storage } = storeToRefs(appStore)
+const universe = ref<UniverseStatusResponse | null>(null)
+const universeError = ref(false)
+
+async function loadUniverseStatus(): Promise<void> {
+  universeError.value = false
+  try {
+    universe.value = await getUniverseStatus()
+  } catch {
+    universe.value = null
+    universeError.value = true
+  }
+}
 
 onMounted(() => {
-  if (!health.value && !loading.value) {
-    void appStore.refreshStatus()
-  }
+  appStore.ensureStatus()
+  void loadUniverseStatus()
 })
 </script>
 
@@ -31,6 +44,7 @@ onMounted(() => {
   <template v-else-if="storage">
     <section class="metrics-grid">
       <MetricCard label="全市场股票" :value="storage.instrument_rows" description="本地基础信息" />
+      <MetricCard label="当前结构股票池" :value="universe?.included_instruments ?? '—'" :description="universeError ? '股票池状态暂不可用' : '本地结构性范围'" />
       <MetricCard label="详细日线股票" :value="storage.daily_symbols" description="选择性持久化" />
       <MetricCard label="日线记录" :value="storage.daily_rows" description="本地 DailyBar" />
       <MetricCard label="实时跟踪股票" :value="storage.realtime_symbols" description="最新本地快照覆盖" />

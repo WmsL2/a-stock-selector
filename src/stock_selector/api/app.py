@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from stock_selector import __version__
 from stock_selector.api.errors import APIResourceNotFound
-from stock_selector.api.routers import config, health, instruments, storage
+from stock_selector.api.routers import config, health, instruments, storage, universe
 from stock_selector.config.paths import AppPaths
 from stock_selector.storage import LocalMarketRepository, StorageError
 
@@ -39,6 +39,7 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
     application.include_router(storage.router, prefix="/api")
     application.include_router(instruments.router, prefix="/api")
     application.include_router(config.router, prefix="/api")
+    application.include_router(universe.router, prefix="/api")
     return application
 
 

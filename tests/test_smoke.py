@@ -66,6 +66,12 @@ def test_storage_cli_parser_accepts_bounded_smoke_arguments() -> None:
     assert arguments.symbol == "600519.SH"
 
 
+def test_universe_cli_parser_accepts_offline_status_command() -> None:
+    """Universe status remains an explicit read-only command."""
+    arguments = build_parser().parse_args(["universe", "status"])
+    assert arguments.universe_command == "status"
+
+
 def test_config_check() -> None:
     """The CLI validates the default project configuration."""
     result = run_module("config", "check")
