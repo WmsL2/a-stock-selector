@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 08 - Daily Price Collector
+Task 08A - Monorepo Project Structure Refactor
 
 ## Status
 
@@ -125,6 +125,27 @@ Completed
 - daily CLI collection and status
 - Vue daily-storage status integration
 - explicit RAW and corporate-action semantics
+- backend/src and backend/tests monorepo relocation
+- backend-local Python packaging and tool caches
+- workspace-root AppPaths with backend config and runtime state roots
+- preserved local Parquet, DuckDB, log and snapshot runtime migration
+- root PowerShell start and complete-validation scripts
+- repository-layout architecture documentation
+
+## Task 08A Verification
+
+- `python -m pip install -e ".\\backend[dev]"` — PASS; the editable package remains
+  `stock_selector` from `backend/src`.
+- `python -m stock_selector config paths` — PASS from the workspace root; configuration
+  resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
+- `python -m stock_selector storage status` — PASS offline after the migration: 5,551
+  instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
+- `scripts/test-all.ps1` — PASS: 207 backend tests, 86% coverage, Ruff, mypy, frontend
+  type check, lint, Vitest and production build all completed successfully.
+- Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
+  returned 200.
+- Frontend script and Vite proxy smoke — PASS: localhost `/`, `/api/health` and
+  `/api/storage/status` returned 200. Temporary local processes were stopped afterwards.
 
 ## Tests
 
@@ -204,3 +225,14 @@ Completed
 ## Next Task
 
 Task 09 - Fundamentals / Valuation / Industry
+
+Task 09 NOT STARTED.
+
+## Roadmap
+
+- Tasks 00–05: project foundation, configuration, domain models, provider boundary,
+  storage and local API/frontend foundation.
+- Tasks 06–08: structural universe, dated risk/quality semantics and bounded RAW daily
+  price collection.
+- Task 08A: monorepo project-structure refactor (complete).
+- Task 09: Fundamentals / Valuation / Industry (not started).

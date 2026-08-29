@@ -1,55 +1,39 @@
-# Python environments
+# Local environments and Python artifacts
 .venv/
 venv/
-
-# Python cache
 __pycache__/
 *.py[cod]
-
-# Packaging
-*.egg-info/
-build/
-dist/
-
-# Test / tooling cache
+.coverage
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+backend/.cache/
+backend/**/*.egg-info/
+backend/build/
+backend/dist/
 
-# Coverage
-.coverage
-coverage.xml
-htmlcov/
-
-# Logs
-*.log
-
-# Secrets
-.env
-.env.*
-!.env.example
-
-# IDE
-.idea/
-.vscode/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Local market data
-data/**/*.parquet
-data/**/*.csv
-data/**/*.json
-data/**/*.duckdb
+# Frontend artifacts
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
-data/**/*.db
 
-# Runtime output
-logs/**
-!logs/.gitkeep
+# Runtime application state
+runtime/data/**
+!runtime/data/.gitkeep
+!runtime/data/raw/.gitkeep
+!runtime/data/processed/.gitkeep
+!runtime/data/metadata/.gitkeep
+runtime/logs/**
+!runtime/logs/.gitkeep
+runtime/snapshots/**
+!runtime/snapshots/.gitkeep
 
-snapshots/**
-!snapshots/.gitkeep
+# Secrets, logs, IDE, and operating-system files
+.env
+.env.*
+!.env.example
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

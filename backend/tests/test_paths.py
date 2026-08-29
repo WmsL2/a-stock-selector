@@ -9,13 +9,15 @@ def test_paths_are_built_from_explicit_root(tmp_path: Path) -> None:
     """All application paths are derived from the provided project root."""
     paths = AppPaths.from_project_root(tmp_path)
     assert paths.project_root == tmp_path.resolve()
-    assert paths.config_dir == tmp_path / "config"
-    assert paths.data_dir == tmp_path / "data"
-    assert paths.raw_data_dir == tmp_path / "data" / "raw"
-    assert paths.processed_data_dir == tmp_path / "data" / "processed"
-    assert paths.metadata_dir == tmp_path / "data" / "metadata"
-    assert paths.snapshots_dir == tmp_path / "snapshots"
-    assert paths.logs_dir == tmp_path / "logs"
+    assert paths.backend_dir == tmp_path / "backend"
+    assert paths.runtime_dir == tmp_path / "runtime"
+    assert paths.config_dir == tmp_path / "backend" / "config"
+    assert paths.data_dir == tmp_path / "runtime" / "data"
+    assert paths.raw_data_dir == tmp_path / "runtime" / "data" / "raw"
+    assert paths.processed_data_dir == tmp_path / "runtime" / "data" / "processed"
+    assert paths.metadata_dir == tmp_path / "runtime" / "data" / "metadata"
+    assert paths.snapshots_dir == tmp_path / "runtime" / "snapshots"
+    assert paths.logs_dir == tmp_path / "runtime" / "logs"
 
 
 def test_path_construction_does_not_create_directories(tmp_path: Path) -> None:
@@ -45,3 +47,15 @@ def test_paths_do_not_change_current_working_directory(tmp_path: Path) -> None:
     paths = AppPaths.from_project_root(tmp_path)
     paths.ensure_runtime_directories()
     assert Path.cwd() == original_cwd
+
+
+def test_default_workspace_root_is_package_derived_and_cwd_independent(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Default paths resolve the workspace rather than whichever directory invoked Python."""
+    initial = AppPaths.from_project_root()
+    monkeypatch.chdir(tmp_path)
+    changed = AppPaths.from_project_root()
+    assert initial.project_root == changed.project_root
+    assert initial.backend_dir == initial.project_root / "backend"
+    assert initial.runtime_dir == initial.project_root / "runtime"

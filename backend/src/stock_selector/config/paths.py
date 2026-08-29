@@ -6,9 +6,11 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class AppPaths:
-    """Paths rooted at a project directory without changing process state."""
+    """Workspace-aware paths without changing process state or relying on CWD."""
 
     project_root: Path
+    backend_dir: Path
+    runtime_dir: Path
     config_dir: Path
     data_dir: Path
     raw_data_dir: Path
@@ -21,22 +23,26 @@ class AppPaths:
     def from_project_root(cls, project_root: Path | None = None) -> "AppPaths":
         """Construct application paths from an explicit or package-derived root."""
         root = project_root.resolve() if project_root is not None else cls._default_root()
-        data_dir = root / "data"
+        backend_dir = root / "backend"
+        runtime_dir = root / "runtime"
+        data_dir = runtime_dir / "data"
         return cls(
             project_root=root,
-            config_dir=root / "config",
+            backend_dir=backend_dir,
+            runtime_dir=runtime_dir,
+            config_dir=backend_dir / "config",
             data_dir=data_dir,
             raw_data_dir=data_dir / "raw",
             processed_data_dir=data_dir / "processed",
             metadata_dir=data_dir / "metadata",
-            snapshots_dir=root / "snapshots",
-            logs_dir=root / "logs",
+            snapshots_dir=runtime_dir / "snapshots",
+            logs_dir=runtime_dir / "logs",
         )
 
     @staticmethod
     def _default_root() -> Path:
         """Derive the editable-install project root from this module's location."""
-        return Path(__file__).resolve().parents[3]
+        return Path(__file__).resolve().parents[4]
 
     def ensure_runtime_directories(self) -> None:
         """Create only directories intended for local runtime output."""

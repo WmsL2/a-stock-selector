@@ -84,7 +84,9 @@ def test_daily_persistence_is_single_symbol_upsert_with_filters(tmp_path) -> Non
     assert repository.load_daily_bars(
         "600519.SH", date(2026, 8, 4), date(2026, 8, 4)
     ) == (_bar(4, 11.0),)
-    daily_files = list((tmp_path / "data" / "processed" / "daily_bars").glob("*.parquet"))
+    daily_files = list(
+        (tmp_path / "runtime" / "data" / "processed" / "daily_bars").glob("*.parquet")
+    )
     assert [path.name for path in daily_files] == ["600519.SH.parquet"]
 
 

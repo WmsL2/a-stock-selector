@@ -38,18 +38,22 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+cache_dir = ".cache/pytest"
 
 [tool.coverage.run]
 source = ["stock_selector"]
+data_file = ".cache/.coverage"
 
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+cache-dir = ".cache/ruff"
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 files = ["src"]
+cache_dir = ".cache/mypy"
 
 [[tool.mypy.overrides]]
 module = ["yaml"]
