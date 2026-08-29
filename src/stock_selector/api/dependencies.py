@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Request, status
 
+from stock_selector.config import Settings
 from stock_selector.models.common import validate_symbol
 from stock_selector.storage import LocalMarketRepository
 
@@ -15,6 +16,17 @@ def get_repository(request: Request) -> LocalMarketRepository:
             detail="local storage unavailable",
         )
     return repository
+
+
+def get_settings(request: Request) -> Settings:
+    """Return the single lifespan-loaded settings object for this app instance."""
+    settings = getattr(request.app.state, "settings", None)
+    if not isinstance(settings, Settings):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="application settings unavailable",
+        )
+    return settings
 
 
 def canonical_symbol(symbol: str) -> str:

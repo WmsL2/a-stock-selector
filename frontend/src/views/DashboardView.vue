@@ -5,13 +5,16 @@ import { storeToRefs } from 'pinia'
 import MetricCard from '@/components/MetricCard.vue'
 import { useAppStore } from '@/stores/app'
 import { getUniverseStatus } from '@/api/universe'
-import type { UniverseStatusResponse } from '@/api/types'
+import { getQualityStatus } from '@/api/quality'
+import type { QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
 import { formatBytes, formatLocalTime } from '@/utils/format'
 
 const appStore = useAppStore()
 const { error, health, loading, storage } = storeToRefs(appStore)
 const universe = ref<UniverseStatusResponse | null>(null)
 const universeError = ref(false)
+const quality = ref<QualityStatusResponse | null>(null)
+const qualityError = ref(false)
 
 async function loadUniverseStatus(): Promise<void> {
   universeError.value = false
@@ -23,9 +26,29 @@ async function loadUniverseStatus(): Promise<void> {
   }
 }
 
+async function loadQualityStatus(): Promise<void> {
+  qualityError.value = false
+  try {
+    quality.value = await getQualityStatus()
+  } catch {
+    quality.value = null
+    qualityError.value = true
+  }
+}
+
+function freshnessLabel(value: QualityStatusResponse['realtime_freshness']): string {
+  return {
+    fresh: '正常',
+    warning: '警告',
+    stale: '过期',
+    unavailable: '暂无数据',
+  }[value]
+}
+
 onMounted(() => {
   appStore.ensureStatus()
   void loadUniverseStatus()
+  void loadQualityStatus()
 })
 </script>
 
@@ -45,6 +68,8 @@ onMounted(() => {
     <section class="metrics-grid">
       <MetricCard label="全市场股票" :value="storage.instrument_rows" description="本地基础信息" />
       <MetricCard label="当前结构股票池" :value="universe?.included_instruments ?? '—'" :description="universeError ? '股票池状态暂不可用' : '本地结构性范围'" />
+      <MetricCard label="风险数据覆盖" :value="quality ? `${Math.round(quality.risk_coverage_ratio * 100)}%` : '—'" :description="qualityError ? '质量状态暂不可用' : quality?.risk_filter_ready ? '风险过滤已就绪' : '风险过滤尚未就绪'" />
+      <MetricCard label="实时数据状态" :value="quality ? freshnessLabel(quality.realtime_freshness) : '—'" description="本地抓取时间状态" />
       <MetricCard label="详细日线股票" :value="storage.daily_symbols" description="选择性持久化" />
       <MetricCard label="日线记录" :value="storage.daily_rows" description="本地 DailyBar" />
       <MetricCard label="实时跟踪股票" :value="storage.realtime_symbols" description="最新本地快照覆盖" />

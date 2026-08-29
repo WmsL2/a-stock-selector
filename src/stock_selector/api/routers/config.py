@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from stock_selector.api.dependencies import get_repository
+from stock_selector.api.dependencies import get_settings
 from stock_selector.api.schemas import (
     PublicAppConfigResponse,
     PublicConfigResponse,
@@ -14,18 +14,16 @@ from stock_selector.api.schemas import (
     PublicSelectionConfigResponse,
     PublicUniverseConfigResponse,
 )
-from stock_selector.config import load_settings
-from stock_selector.storage import LocalMarketRepository
+from stock_selector.config import Settings
 
 router = APIRouter(prefix="/config", tags=["config"])
 
 
 @router.get("/public", response_model=PublicConfigResponse)
 def get_public_config(
-    _repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> PublicConfigResponse:
     """Expose only a deliberate, non-sensitive configuration allowlist."""
-    settings = load_settings()
     return PublicConfigResponse(
         app=PublicAppConfigResponse(timezone=settings.app.timezone),
         universe=PublicUniverseConfigResponse(
@@ -60,6 +58,8 @@ def get_public_config(
         realtime=PublicRealtimeConfigResponse(
             enabled=settings.realtime.enabled,
             snapshot_interval_seconds=settings.realtime.snapshot_interval_seconds,
+            freshness_normal_max_seconds=settings.realtime.freshness_normal_max_seconds,
+            freshness_warning_max_seconds=settings.realtime.freshness_warning_max_seconds,
         ),
     )
 

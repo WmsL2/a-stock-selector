@@ -7,6 +7,7 @@ from pathlib import Path
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import DailyBar, Instrument, RealtimeQuote
 from stock_selector.models.common import validate_symbol
+from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage.duckdb_catalog import DuckDBCatalog
 from stock_selector.storage.errors import StorageDataError, StorageIOError
 from stock_selector.storage.parquet_store import ParquetStore
@@ -23,6 +24,9 @@ class StorageStats:
     realtime_symbols: int
     realtime_snapshots: int
     latest_realtime_at: datetime | None
+    risk_state_rows: int
+    risk_state_dates: int
+    latest_risk_state_date: date | None
     disk_usage_bytes: int
 
 
@@ -48,6 +52,7 @@ class LocalMarketRepository:
                 self._parquet.instruments_dir,
                 self._parquet.daily_bars_dir,
                 self._parquet.realtime_quotes_dir,
+                self._parquet.risk_states_dir,
                 self.paths.metadata_dir,
             ):
                 directory.mkdir(parents=True, exist_ok=True)
@@ -139,18 +144,63 @@ class LocalMarketRepository:
     def load_latest_realtime_snapshot(self) -> tuple[RealtimeQuote, ...]:
         """Load the snapshot with the greatest stored ingested_at value, not newest mtime."""
         self._require_initialized()
-        *_, latest_at = self._catalog.counts()
+        *_, latest_at, _risk_rows, _risk_dates, _latest_risk_date = self._catalog.counts()
         if latest_at is None:
             return ()
         quotes = self._parquet.read_realtime_snapshot(latest_at)
         return tuple(sorted(quotes, key=lambda item: item.symbol))
 
+    def upsert_risk_states(self, states: tuple[DatedRiskState, ...]) -> None:
+        """Merge one exact-date risk batch, with incoming records explicitly winning."""
+        self._require_initialized()
+        if not states:
+            return
+        as_of_values = {state.as_of for state in states}
+        if len(as_of_values) != 1:
+            raise StorageDataError("risk-state upsert requires exactly one as_of date")
+        _require_unique_risk_symbols(states, "risk-state upsert")
+        as_of = states[0].as_of
+        existing = self._parquet.read_risk_states(as_of)
+        if any(state.as_of != as_of for state in existing):
+            raise StorageDataError("persisted risk-state file contains mixed as_of dates")
+        _require_unique_risk_symbols(existing, "persisted risk states")
+        merged = {state.symbol: state for state in existing}
+        merged.update({state.symbol: state for state in states})
+        self._parquet.write_risk_states(tuple(merged[symbol] for symbol in sorted(merged)))
+        self._catalog.refresh_views()
+
+    def load_risk_states(
+        self, as_of: date, symbols: tuple[str, ...] | None = None
+    ) -> tuple[DatedRiskState, ...]:
+        """Load only one exact-date dated-risk dataset, optionally by canonical symbols."""
+        self._require_initialized()
+        states = self._parquet.read_risk_states(as_of)
+        if any(state.as_of != as_of for state in states):
+            raise StorageDataError("persisted risk-state file contains mixed as_of dates")
+        _require_unique_risk_symbols(states, "persisted risk states")
+        if symbols is not None:
+            for symbol in symbols:
+                _validate_storage_symbol(symbol)
+            if len(set(symbols)) != len(symbols):
+                raise StorageDataError("risk-state symbol filter contains duplicates")
+            wanted = set(symbols)
+            states = tuple(state for state in states if state.symbol in wanted)
+        return tuple(sorted(states, key=lambda item: item.symbol))
+
     def get_stats(self) -> StorageStats:
         """Report actual selected coverage and storage bytes without scanning project caches."""
         self._require_initialized()
-        daily_rows, daily_symbols, realtime_rows, realtime_symbols, snapshots, latest_at = (
-            self._catalog.counts()
-        )
+        (
+            daily_rows,
+            daily_symbols,
+            realtime_rows,
+            realtime_symbols,
+            snapshots,
+            latest_at,
+            risk_rows,
+            risk_dates,
+            latest_risk_date,
+        ) = self._catalog.counts()
         return StorageStats(
             instrument_rows=len(self.load_instruments()),
             daily_bar_rows=daily_rows,
@@ -159,6 +209,9 @@ class LocalMarketRepository:
             realtime_symbols=realtime_symbols,
             realtime_snapshots=snapshots,
             latest_realtime_at=latest_at,
+            risk_state_rows=risk_rows,
+            risk_state_dates=risk_dates,
+            latest_risk_state_date=latest_risk_date,
             disk_usage_bytes=self._disk_usage_bytes(),
         )
 
@@ -195,4 +248,11 @@ def _require_unique_symbols(
     """Reject duplicate primary keys before a snapshot becomes durable."""
     symbols = [record.symbol for record in records]
     if len(set(symbols)) != len(symbols):
+        raise StorageDataError(f"{operation} contains duplicate symbols")
+
+
+def _require_unique_risk_symbols(
+    records: tuple[DatedRiskState, ...], operation: str
+) -> None:
+    if len({record.symbol for record in records}) != len(records):
         raise StorageDataError(f"{operation} contains duplicate symbols")

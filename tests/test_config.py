@@ -23,6 +23,8 @@ def test_default_project_config_loads() -> None:
     assert settings.app.timezone == "Asia/Shanghai"
     assert settings.universe.min_listing_days == 0
     assert settings.universe.include_bse is True
+    assert settings.realtime.freshness_normal_max_seconds == 60
+    assert settings.realtime.freshness_warning_max_seconds == 120
     assert settings.factors.quality.weight == 0.30
     assert settings.factors.value.weight == 0.25
     assert settings.factors.growth.weight == 0.20
@@ -76,6 +78,8 @@ def test_constraints_reject_invalid_values() -> None:
         UniverseConfig(min_avg_turnover_20d=-0.1)
     with pytest.raises(ValidationError):
         RealtimeConfig(snapshot_interval_seconds=4)
+    with pytest.raises(ValidationError):
+        RealtimeConfig(freshness_normal_max_seconds=120, freshness_warning_max_seconds=120)
 
 
 def test_invalid_timezone_and_unknown_fields_are_rejected() -> None:

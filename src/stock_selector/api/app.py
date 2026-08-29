@@ -9,14 +9,22 @@ from fastapi.responses import JSONResponse
 
 from stock_selector import __version__
 from stock_selector.api.errors import APIResourceNotFound
-from stock_selector.api.routers import config, health, instruments, storage, universe
+from stock_selector.api.routers import (
+    config,
+    health,
+    instruments,
+    quality,
+    storage,
+    universe,
+)
+from stock_selector.config import Settings, load_settings
 from stock_selector.config.paths import AppPaths
 from stock_selector.storage import LocalMarketRepository, StorageError
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(paths: AppPaths | None = None) -> FastAPI:
+def create_app(paths: AppPaths | None = None, settings: Settings | None = None) -> FastAPI:
     """Create an application whose repository is initialized during lifespan."""
     resolved_paths = paths or AppPaths.from_project_root()
 
@@ -25,6 +33,7 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
         repository = LocalMarketRepository(resolved_paths)
         repository.initialize()
         app_instance.state.repository = repository
+        app_instance.state.settings = settings or load_settings(resolved_paths.config_dir)
         yield
 
     application = FastAPI(
@@ -40,6 +49,7 @@ def create_app(paths: AppPaths | None = None) -> FastAPI:
     application.include_router(instruments.router, prefix="/api")
     application.include_router(config.router, prefix="/api")
     application.include_router(universe.router, prefix="/api")
+    application.include_router(quality.router, prefix="/api")
     return application
 
 

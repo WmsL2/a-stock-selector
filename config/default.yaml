@@ -9,6 +9,8 @@ selection:
 realtime:
   enabled: true
   snapshot_interval_seconds: 30
+  freshness_normal_max_seconds: 60
+  freshness_warning_max_seconds: 120
 
 logging:
   level: "INFO"

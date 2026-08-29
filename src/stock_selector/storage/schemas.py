@@ -48,3 +48,15 @@ REALTIME_QUOTE_SCHEMA = pa.schema(
         pa.field("source", pa.string(), nullable=False),
     ]
 )
+
+RISK_STATE_SCHEMA = pa.schema(
+    [
+        pa.field("symbol", pa.string(), nullable=False),
+        pa.field("as_of", pa.date32(), nullable=False),
+        pa.field("is_st", pa.bool_(), nullable=True),
+        pa.field("is_suspended", pa.bool_(), nullable=True),
+        pa.field("is_delisting_period", pa.bool_(), nullable=True),
+        pa.field("observed_at", _UTC_TIMESTAMP, nullable=False),
+        pa.field("source", pa.string(), nullable=False),
+    ]
+)

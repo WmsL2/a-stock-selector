@@ -7,11 +7,13 @@ import pyarrow as pa
 from pydantic import ValidationError
 
 from stock_selector.models import DailyBar, Instrument, RealtimeQuote
+from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage.errors import StorageDataError
 from stock_selector.storage.schemas import (
     DAILY_BAR_SCHEMA,
     INSTRUMENT_SCHEMA,
     REALTIME_QUOTE_SCHEMA,
+    RISK_STATE_SCHEMA,
 )
 
 
@@ -110,6 +112,35 @@ def table_to_realtime_quotes(table: pa.Table) -> tuple[RealtimeQuote, ...]:
         return tuple(RealtimeQuote(**row) for row in table.to_pylist())
     except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
         raise StorageDataError("realtime-quote domain reconstruction failed") from exc
+
+
+def risk_states_to_table(states: tuple[DatedRiskState, ...]) -> pa.Table:
+    """Encode dated tri-state risk records, retaining unknown fields as null."""
+    return _table_from_rows(
+        [
+            {
+                "symbol": item.symbol,
+                "as_of": item.as_of,
+                "is_st": item.is_st,
+                "is_suspended": item.is_suspended,
+                "is_delisting_period": item.is_delisting_period,
+                "observed_at": _to_utc(item.observed_at),
+                "source": item.source,
+            }
+            for item in states
+        ],
+        RISK_STATE_SCHEMA,
+        "risk-state encoding",
+    )
+
+
+def table_to_risk_states(table: pa.Table) -> tuple[DatedRiskState, ...]:
+    """Decode dated risk records through strict domain validation."""
+    _require_schema(table, RISK_STATE_SCHEMA, "risk-state decoding")
+    try:
+        return tuple(DatedRiskState(**row) for row in table.to_pylist())
+    except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
+        raise StorageDataError("risk-state domain reconstruction failed") from exc
 
 
 def _table_from_rows(rows: list[dict[str, Any]], schema: pa.Schema, operation: str) -> pa.Table:

@@ -25,6 +25,7 @@ def test_app_factory_exposes_expected_metadata_and_openapi(client: TestClient) -
         "RealtimeLookupResponse",
         "PublicConfigResponse",
         "UniverseStatusResponse",
+        "QualityStatusResponse",
     ):
         assert name in schemas
 

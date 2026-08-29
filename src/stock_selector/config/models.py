@@ -94,6 +94,15 @@ class RealtimeConfig(StrictConfigModel):
 
     enabled: bool = True
     snapshot_interval_seconds: int = Field(default=30, ge=5)
+    freshness_normal_max_seconds: int = Field(default=60, gt=0)
+    freshness_warning_max_seconds: int = Field(default=120, gt=0)
+
+    @model_validator(mode="after")
+    def validate_freshness_thresholds(self) -> Self:
+        """Require an unambiguous normal, warning, then stale policy."""
+        if self.freshness_warning_max_seconds <= self.freshness_normal_max_seconds:
+            raise ValueError("freshness warning threshold must exceed normal threshold")
+        return self
 
 
 class LoggingConfig(StrictConfigModel):

@@ -1,7 +1,7 @@
 """DuckDB catalog that exposes Parquet source-of-truth files as external views."""
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -33,7 +33,9 @@ class DuckDBCatalog:
         """Point views at current Parquet files only after successful writes."""
         self._run(self._refresh_connection)
 
-    def counts(self) -> tuple[int, int, int, int, int, datetime | None]:
+    def counts(
+        self,
+    ) -> tuple[int, int, int, int, int, datetime | None, int, int, date | None]:
         """Return row, symbol, snapshot, and latest-time aggregates from the views."""
         return self._run(self._count_connection)
 
@@ -67,6 +69,7 @@ class DuckDBCatalog:
         instrument_path = self._processed_data_dir / "instruments" / "instruments.parquet"
         daily_glob = self._processed_data_dir / "daily_bars" / "*.parquet"
         realtime_glob = self._processed_data_dir / "realtime_quotes" / "**" / "*.parquet"
+        risk_glob = self._processed_data_dir / "risk_states" / "**" / "*.parquet"
         self._replace_view(
             connection,
             "instruments",
@@ -93,6 +96,14 @@ class DuckDBCatalog:
             "turnover_rate DOUBLE, volume_ratio DOUBLE, source_timestamp TIMESTAMPTZ, "
             "ingested_at TIMESTAMPTZ, source VARCHAR",
         )
+        self._replace_view(
+            connection,
+            "risk_states",
+            any((self._processed_data_dir / "risk_states").rglob("*.parquet")),
+            _duckdb_path(risk_glob),
+            "symbol VARCHAR, as_of DATE, is_st BOOLEAN, is_suspended BOOLEAN, "
+            "is_delisting_period BOOLEAN, observed_at TIMESTAMPTZ, source VARCHAR",
+        )
 
     @staticmethod
     def _replace_view(
@@ -111,7 +122,9 @@ class DuckDBCatalog:
             )
 
     @staticmethod
-    def _count_connection(connection: Any) -> tuple[int, int, int, int, int, datetime | None]:
+    def _count_connection(
+        connection: Any,
+    ) -> tuple[int, int, int, int, int, datetime | None, int, int, date | None]:
         """Query aggregate coverage, never inferring it from filenames or mtimes."""
         daily_rows, daily_symbols = connection.execute(
             "SELECT COUNT(*), COUNT(DISTINCT symbol) FROM daily_bars"
@@ -120,6 +133,9 @@ class DuckDBCatalog:
             "SELECT COUNT(*), COUNT(DISTINCT symbol), COUNT(DISTINCT ingested_at), "
             "CAST(MAX(ingested_at) AS VARCHAR) FROM realtime_quotes"
         ).fetchone()
+        risk_rows, risk_dates, latest_risk_date = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT as_of), CAST(MAX(as_of) AS VARCHAR) FROM risk_states"
+        ).fetchone()
         return (
             int(daily_rows),
             int(daily_symbols),
@@ -127,6 +143,9 @@ class DuckDBCatalog:
             int(realtime_symbols),
             int(snapshots),
             datetime.fromisoformat(latest_at) if latest_at is not None else None,
+            int(risk_rows),
+            int(risk_dates),
+            date.fromisoformat(latest_risk_date) if latest_risk_date is not None else None,
         )
 
     @staticmethod

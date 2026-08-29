@@ -72,6 +72,12 @@ def test_universe_cli_parser_accepts_offline_status_command() -> None:
     assert arguments.universe_command == "status"
 
 
+def test_quality_cli_parser_accepts_offline_status_command() -> None:
+    """Quality status remains an explicit offline command."""
+    arguments = build_parser().parse_args(["quality", "status"])
+    assert arguments.quality_command == "status"
+
+
 def test_config_check() -> None:
     """The CLI validates the default project configuration."""
     result = run_module("config", "check")

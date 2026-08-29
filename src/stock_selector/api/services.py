@@ -8,6 +8,7 @@ from stock_selector.api.schemas import (
     DailyBarsResponse,
     InstrumentListResponse,
     InstrumentResponse,
+    QualityStatusResponse,
     RealtimeLookupResponse,
     RealtimeQuoteResponse,
     StorageStatusResponse,
@@ -17,6 +18,7 @@ from stock_selector.api.schemas import (
 )
 from stock_selector.config.models import Settings
 from stock_selector.models import Board, DailyBar, Instrument, RealtimeQuote
+from stock_selector.quality import CurrentQualityService
 from stock_selector.storage import LocalMarketRepository
 from stock_selector.universe import CurrentUniverseService, UniverseExclusionReason
 
@@ -38,9 +40,28 @@ class ReadOnlyMarketService:
             realtime_symbols=stats.realtime_symbols,
             realtime_snapshots=stats.realtime_snapshots,
             latest_realtime_at=stats.latest_realtime_at,
+            risk_state_rows=stats.risk_state_rows,
+            risk_state_dates=stats.risk_state_dates,
+            latest_risk_state_date=stats.latest_risk_state_date,
             disk_usage_bytes=stats.disk_usage_bytes,
             storage_root=str(self._repository.paths.processed_data_dir),
             duckdb_path=str(self._repository.catalog_path),
+        )
+
+    def quality_status(self, settings: Settings) -> QualityStatusResponse:
+        """Return conservative current quality status using only local data."""
+        status = CurrentQualityService(self._repository, settings).build_current()
+        return QualityStatusResponse(
+            as_of=status.as_of,
+            structural_instruments=status.structural_instruments,
+            risk_state_records=status.risk_state_records,
+            risk_complete_instruments=status.risk_complete_instruments,
+            risk_coverage_ratio=status.risk_coverage_ratio,
+            risk_filter_ready=status.risk_filter_ready,
+            risk_eligible_instruments=status.risk_eligible_instruments,
+            latest_realtime_at=status.latest_realtime_at,
+            realtime_age_seconds=status.realtime_age_seconds,
+            realtime_freshness=status.realtime_freshness.value,
         )
 
     def universe_status(self, settings: Settings) -> UniverseStatusResponse:

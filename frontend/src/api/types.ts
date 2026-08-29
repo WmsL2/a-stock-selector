@@ -13,6 +13,9 @@ export interface StorageStatusResponse {
   realtime_symbols: number
   realtime_snapshots: number
   latest_realtime_at: string | null
+  risk_state_rows: number
+  risk_state_dates: number
+  latest_risk_state_date: string | null
   disk_usage_bytes: number
   storage_root: string
   duckdb_path: string
@@ -145,6 +148,8 @@ export interface PublicSelectionConfigResponse {
 export interface PublicRealtimeConfigResponse {
   enabled: boolean
   snapshot_interval_seconds: number
+  freshness_normal_max_seconds: number
+  freshness_warning_max_seconds: number
 }
 
 export interface PublicConfigResponse {
@@ -153,4 +158,19 @@ export interface PublicConfigResponse {
   factors: PublicFactorsConfigResponse
   selection: PublicSelectionConfigResponse
   realtime: PublicRealtimeConfigResponse
+}
+
+export type RealtimeFreshness = 'fresh' | 'warning' | 'stale' | 'unavailable'
+
+export interface QualityStatusResponse {
+  as_of: string
+  structural_instruments: number
+  risk_state_records: number
+  risk_complete_instruments: number
+  risk_coverage_ratio: number
+  risk_filter_ready: boolean
+  risk_eligible_instruments: number | null
+  latest_realtime_at: string | null
+  realtime_age_seconds: number | null
+  realtime_freshness: RealtimeFreshness
 }

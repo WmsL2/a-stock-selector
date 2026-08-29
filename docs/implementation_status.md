@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 06 - A-share Universe
+Task 07 - Data Quality and Dated Risk States
 
 ## Status
 
@@ -103,6 +103,17 @@ Completed
 - universe status API
 - offline universe CLI
 - Vue structural universe status integration
+- dated tri-state risk records
+- exact-date risk eligibility evaluation
+- missing-risk conservative semantics
+- risk-state Parquet persistence
+- DuckDB risk-state view
+- risk coverage quality reporting
+- configurable realtime freshness thresholds
+- realtime freshness evaluation
+- quality status API and CLI
+- Vue quality and risk coverage status
+- app-scoped API settings dependency
 
 ## Tests
 
@@ -110,9 +121,9 @@ Completed
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (177 passed)
+- `python -m pytest` — PASS (198 passed)
 - `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
-  (177 passed, 87% coverage)
+  (198 passed, 87% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
@@ -144,11 +155,16 @@ Completed
 - Universe API/CLI/Vue integration — PASS: local CLI reported 5,551 input and
   5,551 structural members on 2026-08-29; FastAPI `/api/universe/status` and
   the Vite proxy both returned 200. The local processes were stopped after smoke.
+- Quality API/CLI/Vue integration — PASS: local risk-state storage remains intentionally
+  empty (0 rows / 0 dates); `/api/quality/status` and the Vite proxy returned 200 with
+  `risk_filter_ready=false`, `risk_eligible_instruments=null`, and stale local realtime
+  freshness. Both local processes were stopped after smoke.
 
 ## Not Implemented Yet
 
-- Data quality pipeline
-- Dated risk states for ST, suspension, and delisting periods
+- Full historical risk-state collector
+- Full-market daily data quality
+- Long-no-trade detection
 - Daily price data
 - Fundamentals
 - Valuation
@@ -169,4 +185,4 @@ Completed
 
 ## Next Task
 
-Task 07 - Data Quality and Dated Risk States
+Task 08 - Daily Price Collector

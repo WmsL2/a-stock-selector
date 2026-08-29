@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from stock_selector.api.app import create_app
+from stock_selector.config import Settings
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import Board, Exchange, Instrument, RealtimeQuote
 from stock_selector.storage import LocalMarketRepository
@@ -15,7 +16,7 @@ from stock_selector.storage import LocalMarketRepository
 @pytest.fixture
 def client(tmp_path) -> TestClient:  # type: ignore[no-untyped-def]
     """Create one isolated app with its lifespan-managed local repository."""
-    application = create_app(AppPaths.from_project_root(tmp_path))
+    application = create_app(AppPaths.from_project_root(tmp_path), settings=Settings())
     with TestClient(application) as test_client:
         yield test_client
 

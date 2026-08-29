@@ -26,6 +26,9 @@ class StorageStatusResponse(APIResponseModel):
     realtime_symbols: int
     realtime_snapshots: int
     latest_realtime_at: datetime | None
+    risk_state_rows: int
+    risk_state_dates: int
+    latest_risk_state_date: date | None
     disk_usage_bytes: int
     storage_root: str
     duckdb_path: str
@@ -158,6 +161,8 @@ class PublicSelectionConfigResponse(APIResponseModel):
 class PublicRealtimeConfigResponse(APIResponseModel):
     enabled: bool
     snapshot_interval_seconds: int
+    freshness_normal_max_seconds: int
+    freshness_warning_max_seconds: int
 
 
 class PublicConfigResponse(APIResponseModel):
@@ -166,3 +171,16 @@ class PublicConfigResponse(APIResponseModel):
     factors: PublicFactorsConfigResponse
     selection: PublicSelectionConfigResponse
     realtime: PublicRealtimeConfigResponse
+
+
+class QualityStatusResponse(APIResponseModel):
+    as_of: date
+    structural_instruments: int
+    risk_state_records: int
+    risk_complete_instruments: int
+    risk_coverage_ratio: float
+    risk_filter_ready: bool
+    risk_eligible_instruments: int | None
+    latest_realtime_at: datetime | None
+    realtime_age_seconds: float | None
+    realtime_freshness: str

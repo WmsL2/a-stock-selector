@@ -21,8 +21,11 @@ def test_storage_status_is_empty_for_fresh_local_repository(client: TestClient) 
         "daily_symbols": 0,
         "realtime_rows": 0,
         "realtime_symbols": 0,
+        "risk_state_rows": 0,
     }
     assert body["realtime_snapshots"] == 0
+    assert body["risk_state_dates"] == 0
+    assert body["latest_risk_state_date"] is None
     assert body["latest_realtime_at"] is None
     assert body["disk_usage_bytes"] >= 0
 
@@ -62,6 +65,9 @@ def test_storage_status_reports_persisted_local_coverage(
         "realtime_symbols": 2,
         "realtime_snapshots": 1,
         "latest_realtime_at": "2026-08-28T16:00:00+08:00",
+        "risk_state_rows": 0,
+        "risk_state_dates": 0,
+        "latest_risk_state_date": None,
         "disk_usage_bytes": response.json()["disk_usage_bytes"],
         "storage_root": "",
         "duckdb_path": "",

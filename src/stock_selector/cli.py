@@ -66,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     universe_subparsers.add_parser(
         "status", help="Show current structural membership and deferred risk filters."
     )
+    quality_parser = subparsers.add_parser(
+        "quality", help="Inspect offline dated-risk coverage and realtime freshness."
+    )
+    quality_subparsers = quality_parser.add_subparsers(dest="quality_command")
+    quality_subparsers.add_parser("status", help="Show conservative local quality status.")
     return parser
 
 
@@ -83,6 +88,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_storage_command(arguments)
     elif arguments.command == "universe":
         return _run_universe_command(arguments.universe_command)
+    elif arguments.command == "quality":
+        return _run_quality_command(arguments.quality_command)
     else:
         parser.print_help()
     return 0
@@ -203,6 +210,35 @@ def _run_universe_command(command: str | None) -> int:
     return 0
 
 
+def _run_quality_command(command: str | None) -> int:
+    """Print offline quality status without provider calls or fake risk data."""
+    from stock_selector.quality import CurrentQualityService, DataQualityError
+    from stock_selector.risk import RiskError
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import UniverseError
+
+    if command != "status":
+        print("A quality subcommand is required: status.", file=sys.stderr)
+        return 2
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        status = CurrentQualityService(repository, settings).build_current()
+    except (
+        ConfigurationError,
+        DataQualityError,
+        RiskError,
+        StorageError,
+        UniverseError,
+    ) as exc:
+        print(f"Quality error: {exc}", file=sys.stderr)
+        return 1
+    _print_quality_status(status)
+    return 0
+
+
 def _provider_label(provider: AKShareProvider) -> str:
     """Return a concise provider identity without implementation details."""
     return f"{provider.info.name} {provider.info.version or 'unknown'}"
@@ -272,6 +308,12 @@ def _print_storage_status(repository) -> None:  # type: ignore[no-untyped-def]
         "Latest realtime: "
         f"{stats.latest_realtime_at.isoformat() if stats.latest_realtime_at else 'unavailable'}"
     )
+    print(f"Risk state rows: {stats.risk_state_rows}")
+    print(f"Risk state dates: {stats.risk_state_dates}")
+    print(
+        "Latest risk state date: "
+        f"{stats.latest_risk_state_date.isoformat() if stats.latest_risk_state_date else 'unavailable'}"
+    )
     print(f"Disk usage: {_format_bytes(stats.disk_usage_bytes)}")
 
 
@@ -312,6 +354,32 @@ def _print_universe_status(snapshot, instruments) -> None:  # type: ignore[no-un
     print("Risk filters applied: NO")
     print("Historical survivorship safe: NO")
     print("ST / suspension / delisting-period filters are not yet applied.")
+
+
+def _print_quality_status(status) -> None:  # type: ignore[no-untyped-def]
+    """Print uncertainty-preserving risk coverage and local ingestion freshness."""
+    print(f"As of: {status.as_of.isoformat()}")
+    print(f"Structural instruments: {status.structural_instruments}")
+    print(f"Risk state records: {status.risk_state_records}")
+    print(f"Risk complete instruments: {status.risk_complete_instruments}")
+    print(f"Risk coverage: {status.risk_coverage_ratio:.1%}")
+    print(f"Risk filter ready: {'YES' if status.risk_filter_ready else 'NO'}")
+    print(
+        "Risk eligible instruments: "
+        f"{status.risk_eligible_instruments if status.risk_eligible_instruments is not None else 'unavailable'}"
+    )
+    print(
+        "Latest realtime: "
+        f"{status.latest_realtime_at.isoformat() if status.latest_realtime_at else 'unavailable'}"
+    )
+    print(
+        "Realtime age: "
+        f"{status.realtime_age_seconds:.1f}s"
+        if status.realtime_age_seconds is not None
+        else "Realtime age: unavailable"
+    )
+    print(f"Realtime freshness: {status.realtime_freshness.value}")
+    print("Unknown risk fields are not treated as safe.")
 
 
 def _run_storage_smoke(repository, arguments: argparse.Namespace) -> None:  # type: ignore[no-untyped-def]

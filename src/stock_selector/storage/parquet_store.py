@@ -1,7 +1,7 @@
 """Atomic, schema-bound Parquet persistence without provider knowledge."""
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -11,6 +11,7 @@ import pyarrow.parquet as pq
 
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import DailyBar, Instrument, RealtimeQuote
+from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage import codec
 from stock_selector.storage.errors import StorageIOError
 
@@ -40,6 +41,11 @@ class ParquetStore:
         return self._paths.processed_data_dir / "realtime_quotes"
 
     @property
+    def risk_states_dir(self) -> Path:
+        """Return the business-date-partitioned dated-risk state directory."""
+        return self._paths.processed_data_dir / "risk_states"
+
+    @property
     def instruments_path(self) -> Path:
         """Return the sole full-market lightweight instrument snapshot path."""
         return self.instruments_dir / "instruments.parquet"
@@ -53,6 +59,10 @@ class ParquetStore:
         local_date = ingested_at.astimezone(_SHANGHAI).date().isoformat()
         utc_stamp = ingested_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         return self.realtime_quotes_dir / f"date={local_date}" / f"snapshot_{utc_stamp}.parquet"
+
+    def risk_states_path(self, as_of: date) -> Path:
+        """Return one deterministic source-of-truth path for an exact business date."""
+        return self.risk_states_dir / f"date={as_of.isoformat()}" / "risk_states.parquet"
 
     def write_instruments(self, instruments: tuple[Instrument, ...]) -> None:
         """Atomically replace the complete instrument master snapshot."""
@@ -87,6 +97,17 @@ class ParquetStore:
         if not path.exists():
             return ()
         return codec.table_to_realtime_quotes(self._read_table(path))
+
+    def write_risk_states(self, states: tuple[DatedRiskState, ...]) -> None:
+        """Atomically replace one exact-date risk dataset."""
+        self._write_table(codec.risk_states_to_table(states), self.risk_states_path(states[0].as_of))
+
+    def read_risk_states(self, as_of: date) -> tuple[DatedRiskState, ...]:
+        """Read only the requested business-date dataset; never fall back in time."""
+        path = self.risk_states_path(as_of)
+        if not path.exists():
+            return ()
+        return codec.table_to_risk_states(self._read_table(path))
 
     def _read_table(self, path: Path) -> pa.Table:
         """Read Parquet bytes while preserving data-decoding errors for the codec."""

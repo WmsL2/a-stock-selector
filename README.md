@@ -71,6 +71,7 @@ python -m stock_selector config paths
 - `GET /api/instruments/{symbol}/daily`
 - `GET /api/instruments/{symbol}/realtime`
 - `GET /api/config/public`
+- `GET /api/quality/status`
 
 前端路线为 FastAPI + Vue 3 + TypeScript + Vite。旧的 Streamlit 路线已取消。
 
@@ -90,6 +91,25 @@ ST、停牌、退市期和流动性过滤不属于当前结构股票池；它们
 
 `GET /api/universe/status` 同时显式报告 `data_scope=current_instrument_master`、未应用风险过滤，以及
 历史生存者偏差安全性为 false。结构性排除原因可重叠，原因计数不一定等于被排除股票数。
+
+## Data Quality and Dated Risk States
+
+Task 07 建立了带业务日期的风险状态记录：ST、停牌与退市整理期均使用 `True`、`False` 或 `None`。
+其中 `None` 表示未知，绝不等同于安全或 `False`；风险资格只接受与股票池 `as_of` 完全相同日期的记录，
+不会自动前向填充或根据当前 Instrument 状态、名称或缺失行情伪造风险历史。因此当前本地风险状态存储
+可以合理地为 0 行，此时风险过滤不会声称已就绪，合格股票数量会显示为 unavailable。
+
+风险状态采用按日期分区的 Parquet（`data/processed/risk_states/date=YYYY-MM-DD/`）作为数据源，DuckDB
+仅提供外部 view。可离线查看风险覆盖与本地 realtime 抓取新鲜度：
+
+```powershell
+python -m stock_selector quality status
+```
+
+Realtime freshness 依据本地 `ingested_at`，不使用可能缺失的 provider source timestamp：不超过配置的
+normal 阈值为 fresh，超过 normal 且不超过 warning 阈值为 warning，超过 warning 为 stale；没有本地快照为
+unavailable。它只描述本地保存数据的年龄，不代表交易所、AKShare 或股票交易状态正常。Task 07 不检查
+全市场日线缺口、长时间无交易、财务/因子完整性；这些依赖后续数据任务。
 
 ## Frontend
 

@@ -67,6 +67,7 @@ def test_catalog_initializes_versioned_database_and_empty_views(tmp_path) -> Non
         assert connection.execute("SELECT COUNT(*) FROM instruments").fetchone() == (0,)
         assert connection.execute("SELECT COUNT(*) FROM daily_bars").fetchone() == (0,)
         assert connection.execute("SELECT COUNT(*) FROM realtime_quotes").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM risk_states").fetchone() == (0,)
     finally:
         connection.close()
 
