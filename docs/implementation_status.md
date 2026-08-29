@@ -91,6 +91,9 @@ Completed
 - safe public settings page
 - truthful unimplemented states
 - Vite-to-FastAPI proxy integration
+- truthful API status initialization
+- route-aware navigation state
+- independent stock-detail error states
 
 ## Tests
 
@@ -107,7 +110,7 @@ Completed
 - `cd frontend && npm install` — PASS
 - `cd frontend && npm run type-check` — PASS
 - `cd frontend && npm run lint` — PASS
-- `cd frontend && npm run test` — PASS (12 passed)
+- `cd frontend && npm run test` — PASS (21 passed)
 - `cd frontend && npm run build` — PASS
 
 ## Live Smoke
@@ -147,7 +150,6 @@ Completed
 - Intraday factors
 - IntradayScore
 - RealTimeScore
-- Vue 3 frontend
 - Replay engine
 - Backtest
 - Factor research

@@ -10,8 +10,14 @@ export const useAppStore = defineStore('app', () => {
   const health = ref<HealthResponse | null>(null)
   const storage = ref<StorageStatusResponse | null>(null)
   const loading = ref(false)
+  const hasChecked = ref(false)
   const error = ref<string | null>(null)
   const apiOnline = computed(() => health.value?.status === 'ok')
+  const apiStatus = computed<'idle' | 'checking' | 'online' | 'offline'>(() => {
+    if (loading.value) return 'checking'
+    if (apiOnline.value) return 'online'
+    return hasChecked.value ? 'offline' : 'idle'
+  })
 
   async function refreshStatus(): Promise<void> {
     loading.value = true
@@ -29,6 +35,13 @@ export const useAppStore = defineStore('app', () => {
       error.value = '无法连接本地 API，请确认 FastAPI 服务已在 127.0.0.1:8000 启动。'
     } finally {
       loading.value = false
+      hasChecked.value = true
+    }
+  }
+
+  function ensureStatus(): void {
+    if (!hasChecked.value && !loading.value) {
+      void refreshStatus()
     }
   }
 
@@ -37,8 +50,11 @@ export const useAppStore = defineStore('app', () => {
     health,
     storage,
     loading,
+    hasChecked,
     error,
     apiOnline,
+    apiStatus,
     refreshStatus,
+    ensureStatus,
   }
 })
