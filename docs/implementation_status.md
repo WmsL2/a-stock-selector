@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 09 - Fundamentals / Valuation / Industry
+Task 10 - Factor Preprocessing
 
 ## Status
 
@@ -131,8 +131,20 @@ Completed
 - preserved local Parquet, DuckDB, log and snapshot runtime migration
 - root PowerShell start and complete-validation scripts
 - repository-layout architecture documentation
+- immutable raw/preprocessed factor observations
+- explicit missing-value policies
+- market-median imputation
+- industry-median imputation
+- scaled-MAD winsorization
+- percentile normalization
+- higher/lower-is-better direction
+- optional industry percentile neutralization
+- transparent imputation/winsorization metadata
+- deterministic cross-sectional processing
+- preprocessing diagnostics
+- pure offline preprocessing architecture
 
-## Task 09 Verification
+## Task 10 Verification
 
 - `python -m pip install -e ".\\backend[dev]"` — PASS; the editable package remains
   `stock_selector` from `backend/src`.
@@ -140,7 +152,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 234 backend tests, 85% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 250 backend tests, 86% coverage, Ruff, mypy,
   frontend type check, lint, 23 Vitest tests and production build all completed.
 - Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
   returned 200.
@@ -153,10 +165,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (234 passed; one third-party TestClient deprecation warning).
+  (250 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (234 passed, 85% coverage).
+  — PASS (250 passed, 86% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -211,6 +223,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   2025-01-01 through 2026-12-31: 6 logical financial rows remained idempotent. For report
   period 2025-12-31 (announcement 2026-04-17), source `ZZCJLL`, mapped ROA and persisted ROA
   were all `28.3056525971`; `TOTAL_ROI` was null and was not used as a fallback.
+- Task 10 preprocessing — PASS entirely offline: generic raw observations are transformed
+  through explicit missing-value policy, scaled-MAD winsorization and market or explicit
+  industry percentile ranking. No market data, repository, provider, API, persistence or UI
+  dependency is involved.
 
 ## Not Implemented Yet
 
@@ -221,7 +237,6 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Factor preprocessing
 - Factor engine
 - BaseScore
 - Explanation engine
@@ -237,9 +252,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 ## Next Task
 
-Task 10 - Factor Preprocessing
+Task 11 - Five Factor Families
 
-Task 10 NOT STARTED.
+Task 11 NOT STARTED.
 
 ## Roadmap
 
@@ -249,4 +264,5 @@ Task 10 NOT STARTED.
   price collection.
 - Task 08A: monorepo project-structure refactor (complete).
 - Task 09: Fundamentals / Valuation / Industry (complete).
-- Task 10: Factor Preprocessing (not started).
+- Task 10: Factor Preprocessing (complete).
+- Task 11: Five Factor Families (not started).

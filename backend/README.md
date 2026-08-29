@@ -24,3 +24,14 @@ From this directory, run tests and tooling with `..\.venv\Scripts\python.exe -m 
 - Industry history uses CNInfo change events and constructs inclusive effective intervals
   independently per classification. No pre-first-event history is invented. Collection is
   always explicit-symbol and is not an all-market bootstrap command.
+
+## Factor Preprocessing
+
+Task 10 provides generic, pure cross-sectional preprocessing; it does not calculate any
+actual factor. Missing values are explicitly kept missing, imputed with the market median, or
+imputed with the matching caller-provided industry median (with no implicit market fallback).
+Prepared values are winsorized across the entire cross-section using
+`median ± 3 × 1.4826 × MAD` by default; zero MAD and disabled winsorization preserve values.
+Scores use average-rank percentiles on a 0–100 scale, retain ties, and assign 50 to a
+single-observation group. Optional industry percentile mode ranks only within the explicit
+`industry_key`; it does not look up any industry data or run regression neutralization.
