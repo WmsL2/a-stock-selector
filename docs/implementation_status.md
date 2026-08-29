@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 10 - Factor Preprocessing
+Task 11 - Five Factor Families
 
 ## Status
 
@@ -143,8 +143,20 @@ Completed
 - deterministic cross-sectional processing
 - preprocessing diagnostics
 - pure offline preprocessing architecture
+- Quality factor family
+- Value factor family
+- Growth factor family
+- Momentum factor family
+- Low Volatility factor family
+- positive-multiple valuation semantics
+- conservative YoY base policy
+- adjusted-price-only momentum/volatility contract
+- Task10 preprocessing integration
+- family component coverage
+- deterministic family aggregation
+- point-in-time factor-input validation
 
-## Task 10 Verification
+## Task 11 Verification
 
 - `python -m pip install -e ".\\backend[dev]"` — PASS; the editable package remains
   `stock_selector` from `backend/src`.
@@ -227,6 +239,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   through explicit missing-value policy, scaled-MAD winsorization and market or explicit
   industry percentile ranking. No market data, repository, provider, API, persistence or UI
   dependency is involved.
+- Task 11 five-family computation — PASS offline with explicit point-in-time inputs only.
+  Operational RAW daily data remains ineligible for Momentum and Low Volatility until an
+  explicitly corporate-action-adjusted price series is supplied.
 
 ## Not Implemented Yet
 
@@ -252,9 +267,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 ## Next Task
 
-Task 11 - Five Factor Families
+Task 12 - BaseScore
 
-Task 11 NOT STARTED.
+Task 12 NOT STARTED.
 
 ## Roadmap
 
@@ -265,4 +280,5 @@ Task 11 NOT STARTED.
 - Task 08A: monorepo project-structure refactor (complete).
 - Task 09: Fundamentals / Valuation / Industry (complete).
 - Task 10: Factor Preprocessing (complete).
-- Task 11: Five Factor Families (not started).
+- Task 11: Five Factor Families (complete).
+- Task 12: BaseScore (not started).

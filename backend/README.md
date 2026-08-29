@@ -35,3 +35,13 @@ Prepared values are winsorized across the entire cross-section using
 Scores use average-rank percentiles on a 0–100 scale, retain ties, and assign 50 to a
 single-observation group. Optional industry percentile mode ranks only within the explicit
 `industry_key`; it does not look up any industry data or run regression neutralization.
+
+## Five Factor Families
+
+Quality uses ROE, ROA and gross/net margins. Value ranks positive-only `1/PE`, `1/PB` and
+`1/PCF`; nonpositive multiples are unavailable. Growth is same-report-period YoY with a
+strictly positive prior base. Quality, Value and Growth use industry percentiles; Momentum
+(20/60 observation returns) and Low Volatility (20/60 `pstdev(returns) × sqrt(252) × 100`)
+use market percentiles. Current operational RAW daily bars are never consumed: price factors
+require a caller-provided `corporate_action_adjusted=True` series, which this task does not
+manufacture or fetch.
