@@ -140,7 +140,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 207 backend tests, 86% coverage, Ruff, mypy, frontend
+- `scripts/test-all.ps1` — PASS: 208 backend tests, 86% coverage, Ruff, mypy, frontend
   type check, lint, Vitest and production build all completed successfully.
 - Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
   returned 200.
@@ -149,21 +149,19 @@ Completed
 
 ## Tests
 
-- `python -m pip install -e ".[dev]"` — PASS
-- `python -m stock_selector --help` — PASS
-- `python -m stock_selector version` — PASS
-- `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (206 passed)
-- `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
-  (206 passed, 86% coverage)
-- `ruff check .` — PASS
-- `mypy src` — PASS
-- `git diff --check` — PASS
-- `cd frontend && npm install` — PASS
-- `cd frontend && npm run type-check` — PASS
-- `cd frontend && npm run lint` — PASS
-- `cd frontend && npm run test` — PASS (23 passed)
-- `cd frontend && npm run build` — PASS
+The canonical full validation entry point is `./scripts/test-all.ps1`.
+
+- `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
+- Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
+  (208 passed).
+- Backend coverage (from `backend/`):
+  `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
+  — PASS (208 passed, 86% coverage).
+- Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
+  `..\\.venv\\Scripts\\mypy.exe src` — PASS.
+- Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
+  `npm run test` — PASS (23 passed), and `npm run build` — PASS.
+- `git diff --check` — PASS.
 
 ## Live Smoke
 

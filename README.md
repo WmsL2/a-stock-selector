@@ -50,4 +50,4 @@ Operational daily prices are currently RAW source-of-truth prices. They are not 
 
 ## Project Status
 
-Tasks 00–08 are complete. Task 08A establishes the monorepo structure. The next planned task is Task 09 — Fundamentals / Valuation / Industry; it has not started. The broader roadmap is documented in [implementation status](docs/implementation_status.md).
+Tasks 00–08 and Task 08A are complete. The next planned task is Task 09 — Fundamentals / Valuation / Industry; it has not started. The broader roadmap is documented in [implementation status](docs/implementation_status.md).

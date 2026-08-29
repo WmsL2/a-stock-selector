@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+from pathlib import Path
 
 import stock_selector
 from stock_selector.cli import build_parser
@@ -108,3 +109,18 @@ def test_config_paths() -> None:
     result = run_module("config", "paths")
     assert result.returncode == 0
     assert "Project root" in result.stdout
+
+
+def test_localhost_development_scripts_are_explicit() -> None:
+    """Development scripts must retain localhost-only bindings."""
+    workspace_root = Path(__file__).resolve().parents[2]
+    backend_script = (workspace_root / "scripts" / "start-backend.ps1").read_text(
+        encoding="utf-8"
+    )
+    frontend_script = (workspace_root / "scripts" / "start-frontend.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--host 127.0.0.1" in backend_script
+    assert "--host 127.0.0.1" in frontend_script
+    assert (workspace_root / "scripts" / "test-all.ps1").is_file()
