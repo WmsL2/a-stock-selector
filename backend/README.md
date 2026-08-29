@@ -15,7 +15,9 @@ From this directory, run tests and tooling with `..\.venv\Scripts\python.exe -m 
 - Financial records retain both `report_period` and the source notice date. The queryable
   `available_at` is a conservative Asia/Shanghai 15:30 timestamp on that notice date, so
   point-in-time reads never use a filing that was not yet public. Restatements are retained
-  as separate `(symbol, report_period, available_at)` revisions.
+  as separate `(symbol, report_period, available_at)` revisions. ROA maps specifically from
+  AKShare `stock_financial_analysis_indicator_em.ZZCJLL` (总资产收益率(加权)(%)) and remains
+  in percentage units (`3.25` means 3.25%).
 - Valuation observations are dated daily series only. The current AKShare adapter supplies
   PE (TTM), PB, PCF, and total market cap; PE can remain negative, total market cap is
   converted from 亿元 to CNY, and unavailable PS/dividend/float-cap fields stay null.

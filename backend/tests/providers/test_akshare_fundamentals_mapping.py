@@ -23,6 +23,8 @@ def test_financial_mapping_uses_notice_date_after_close() -> None:
                     "REPORT_DATE": "2025-12-31",
                     "NOTICE_DATE": "2026-03-25",
                     "ROEJQ": 15.0,
+                    "ZZCJLL": 3.25,
+                    "TOTAL_ROI": 99.99,
                     "TOTALOPERATEREVE": 100.0,
                 }
             ]
@@ -32,13 +34,48 @@ def test_financial_mapping_uses_notice_date_after_close() -> None:
     assert records[0].available_at.hour == 15
     assert records[0].available_at.minute == 30
     assert records[0].revenue == 100.0
+    assert records[0].roa == 3.25
 
 
 def test_financial_mapping_rejects_missing_notice_date() -> None:
     with pytest.raises(ProviderDataError):
         map_financial_records(
-            pd.DataFrame([{"REPORT_DATE": "2025-12-31"}]), "600519.SH"
+            pd.DataFrame([{"SECUCODE": "600519.SH", "REPORT_DATE": "2025-12-31"}]),
+            "600519.SH",
         )
+
+
+def test_financial_mapping_requires_and_checks_provider_symbol() -> None:
+    base = {
+        "REPORT_DATE": "2025-12-31",
+        "NOTICE_DATE": "2026-03-25",
+        "ZZCJLL": 3.25,
+    }
+    with pytest.raises(ProviderDataError):
+        map_financial_records(pd.DataFrame([base]), "600519.SH")
+    with pytest.raises(ProviderDataError):
+        map_financial_records(
+            pd.DataFrame([{**base, "SECUCODE": "000001.SZ"}]), "600519.SH"
+        )
+
+
+def test_financial_mapping_does_not_fallback_to_total_roi() -> None:
+    records = map_financial_records(
+        pd.DataFrame(
+            [
+                {
+                    "SECUCODE": "600519.SH",
+                    "REPORT_DATE": "2025-12-31",
+                    "NOTICE_DATE": "2026-03-25",
+                    "ZZCJLL": None,
+                    "TOTAL_ROI": 99.99,
+                    "ROEJQ": 15.0,
+                }
+            ]
+        ),
+        "600519.SH",
+    )
+    assert records[0].roa is None
 
 
 def test_valuation_mapping_normalizes_hundred_million_cny() -> None:
@@ -89,3 +126,18 @@ def test_industry_mapping_builds_intervals_per_classification() -> None:
         next(item for item in records if item.classification == "B").effective_to
         is None
     )
+
+
+def test_industry_mapping_requires_and_checks_provider_symbol() -> None:
+    base = {
+        "变更日期": "2020-01-01",
+        "分类标准": "A",
+        "行业编码": "A1",
+        "行业大类": "Alpha",
+    }
+    with pytest.raises(ProviderDataError):
+        map_industry_records(pd.DataFrame([base]), "600519.SH")
+    with pytest.raises(ProviderDataError):
+        map_industry_records(
+            pd.DataFrame([{**base, "证券代码": "000001"}]), "600519.SH"
+        )

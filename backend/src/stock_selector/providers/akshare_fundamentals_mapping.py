@@ -20,7 +20,7 @@ def map_financial_records(
     frame: pd.DataFrame, symbol: str
 ) -> tuple[FinancialRecord, ...]:
     """Map Eastmoney records only when their reported notice date is trustworthy."""
-    _require_columns(frame, {"REPORT_DATE", "NOTICE_DATE"}, "financial")
+    _require_columns(frame, {"SECUCODE", "REPORT_DATE", "NOTICE_DATE"}, "financial")
     records: list[FinancialRecord] = []
     for raw_row in frame.to_dict(orient="records"):
         row = cast(dict[str, Any], raw_row)
@@ -29,7 +29,7 @@ def map_financial_records(
         announcement_date = _parse_date(row.get("NOTICE_DATE"), "NOTICE_DATE")
         values = {
             "roe": _number(row.get("ROEJQ")),
-            "roa": _number(row.get("TOTAL_ROI")),
+            "roa": _number(row.get("ZZCJLL")),
             "gross_margin": _number(row.get("XSMLL")),
             "net_margin": _number(row.get("XSJLL")),
             "revenue": _amount_cny(row.get("TOTALOPERATEREVE"), "CNY"),
@@ -102,7 +102,9 @@ def map_industry_records(
 ) -> tuple[IndustryRecord, ...]:
     """Map CNInfo change events to inclusive intervals without inventing a prehistory."""
     _require_columns(
-        frame, {"变更日期", "分类标准", "行业编码", "行业大类"}, "industry"
+        frame,
+        {"证券代码", "变更日期", "分类标准", "行业编码", "行业大类"},
+        "industry",
     )
     events = []
     for raw_row in frame.to_dict(orient="records"):
@@ -178,10 +180,12 @@ def _require_matching_symbol(
 ) -> None:
     returned = row.get(column)
     if returned is None:
-        return
+        raise ProviderDataError(
+            provider="akshare", operation=operation, message=f"missing {column}"
+        )
     value = str(returned).strip().upper()
     expected = symbol if column == "SECUCODE" else symbol.split(".", maxsplit=1)[0]
-    if value and value != expected:
+    if not value or value != expected:
         raise ProviderDataError(
             "akshare", operation, "provider returned a different symbol"
         )
