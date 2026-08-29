@@ -11,6 +11,7 @@ from stock_selector import __version__
 from stock_selector.api.errors import APIResourceNotFound
 from stock_selector.api.routers import (
     config,
+    daily,
     health,
     instruments,
     quality,
@@ -46,6 +47,7 @@ def create_app(paths: AppPaths | None = None, settings: Settings | None = None) 
     application.add_exception_handler(StorageError, _storage_error_handler)
     application.include_router(health.router, prefix="/api")
     application.include_router(storage.router, prefix="/api")
+    application.include_router(daily.router, prefix="/api")
     application.include_router(instruments.router, prefix="/api")
     application.include_router(config.router, prefix="/api")
     application.include_router(universe.router, prefix="/api")

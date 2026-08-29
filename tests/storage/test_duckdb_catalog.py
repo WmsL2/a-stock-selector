@@ -89,6 +89,8 @@ def test_catalog_views_query_selective_parquet_and_stats(tmp_path) -> None:  # t
     stats = repository.get_stats()
     assert stats.daily_bar_rows == 1
     assert stats.daily_symbols == 1
+    assert stats.earliest_daily_trade_date == date(2026, 8, 3)
+    assert stats.latest_daily_trade_date == date(2026, 8, 3)
     assert stats.realtime_quote_rows == 1
     assert stats.realtime_snapshots == 1
     assert stats.latest_realtime_at == _quote().ingested_at

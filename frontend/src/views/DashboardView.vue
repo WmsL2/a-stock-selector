@@ -6,7 +6,8 @@ import MetricCard from '@/components/MetricCard.vue'
 import { useAppStore } from '@/stores/app'
 import { getUniverseStatus } from '@/api/universe'
 import { getQualityStatus } from '@/api/quality'
-import type { QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
+import { getDailyStatus } from '@/api/daily'
+import type { DailyStatusResponse, QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
 import { formatBytes, formatLocalTime } from '@/utils/format'
 
 const appStore = useAppStore()
@@ -15,6 +16,8 @@ const universe = ref<UniverseStatusResponse | null>(null)
 const universeError = ref(false)
 const quality = ref<QualityStatusResponse | null>(null)
 const qualityError = ref(false)
+const daily = ref<DailyStatusResponse | null>(null)
+const dailyError = ref(false)
 
 async function loadUniverseStatus(): Promise<void> {
   universeError.value = false
@@ -36,6 +39,16 @@ async function loadQualityStatus(): Promise<void> {
   }
 }
 
+async function loadDailyStatus(): Promise<void> {
+  dailyError.value = false
+  try {
+    daily.value = await getDailyStatus()
+  } catch {
+    daily.value = null
+    dailyError.value = true
+  }
+}
+
 function freshnessLabel(value: QualityStatusResponse['realtime_freshness']): string {
   return {
     fresh: '正常',
@@ -49,6 +62,7 @@ onMounted(() => {
   appStore.ensureStatus()
   void loadUniverseStatus()
   void loadQualityStatus()
+  void loadDailyStatus()
 })
 </script>
 
@@ -72,6 +86,7 @@ onMounted(() => {
       <MetricCard label="实时数据状态" :value="quality ? freshnessLabel(quality.realtime_freshness) : '—'" description="本地抓取时间状态" />
       <MetricCard label="详细日线股票" :value="storage.daily_symbols" description="选择性持久化" />
       <MetricCard label="日线记录" :value="storage.daily_rows" description="本地 DailyBar" />
+      <MetricCard label="最新日线日期" :value="daily?.latest_trade_date ?? '暂无数据'" :description="dailyError ? '日线状态暂不可用' : '未验证交易日历完整性'" />
       <MetricCard label="实时跟踪股票" :value="storage.realtime_symbols" description="最新本地快照覆盖" />
       <MetricCard label="实时快照" :value="storage.realtime_snapshots" description="已保存批次" />
       <MetricCard label="磁盘占用" :value="formatBytes(storage.disk_usage_bytes)" description="本地数据文件" />

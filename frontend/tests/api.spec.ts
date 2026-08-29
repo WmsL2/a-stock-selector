@@ -4,6 +4,7 @@ import client from '@/api/client'
 import { getDailyBars, getInstrument, getLatestRealtime, listInstruments } from '@/api/instruments'
 import { getUniverseStatus } from '@/api/universe'
 import { getQualityStatus } from '@/api/quality'
+import { getDailyStatus } from '@/api/daily'
 
 describe('local API client', () => {
   it('uses the relative API base URL', () => {
@@ -11,7 +12,7 @@ describe('local API client', () => {
     expect(client.defaults.timeout).toBe(10_000)
   })
 
-  it('sends list, encoded detail, daily, realtime, universe, and quality requests through the client', async () => {
+  it('sends list, detail, market bars, universe, quality, and daily-status requests through the client', async () => {
     const get = vi.spyOn(client, 'get').mockResolvedValue({ data: {} } as never)
     await listInstruments({ q: '茅台', limit: 50, offset: 0 })
     await getInstrument('600519.SH/test')
@@ -19,6 +20,7 @@ describe('local API client', () => {
     await getLatestRealtime('600519.SH')
     await getUniverseStatus()
     await getQualityStatus()
+    await getDailyStatus()
     expect(get).toHaveBeenNthCalledWith(1, '/instruments', {
       params: { q: '茅台', limit: 50, offset: 0 },
     })
@@ -29,5 +31,6 @@ describe('local API client', () => {
     expect(get).toHaveBeenNthCalledWith(4, '/instruments/600519.SH/realtime')
     expect(get).toHaveBeenNthCalledWith(5, '/universe/status')
     expect(get).toHaveBeenNthCalledWith(6, '/quality/status')
+    expect(get).toHaveBeenNthCalledWith(7, '/daily/status')
   })
 })

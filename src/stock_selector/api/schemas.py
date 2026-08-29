@@ -22,6 +22,8 @@ class StorageStatusResponse(APIResponseModel):
     instrument_rows: int
     daily_rows: int
     daily_symbols: int
+    earliest_daily_trade_date: date | None
+    latest_daily_trade_date: date | None
     realtime_rows: int
     realtime_symbols: int
     realtime_snapshots: int
@@ -184,3 +186,14 @@ class QualityStatusResponse(APIResponseModel):
     latest_realtime_at: datetime | None
     realtime_age_seconds: float | None
     realtime_freshness: str
+
+
+class DailyStatusResponse(APIResponseModel):
+    stored_symbols: int
+    stored_rows: int
+    earliest_trade_date: date | None
+    latest_trade_date: date | None
+    adjustment_basis: str
+    corporate_action_adjusted: bool
+    full_market_completeness_verified: bool
+    trading_calendar_gap_check_applied: bool

@@ -72,6 +72,7 @@ python -m stock_selector config paths
 - `GET /api/instruments/{symbol}/realtime`
 - `GET /api/config/public`
 - `GET /api/quality/status`
+- `GET /api/daily/status`
 
 前端路线为 FastAPI + Vue 3 + TypeScript + Vite。旧的 Streamlit 路线已取消。
 
@@ -110,6 +111,22 @@ Realtime freshness 依据本地 `ingested_at`，不使用可能缺失的 provide
 normal 阈值为 fresh，超过 normal 且不超过 warning 阈值为 warning，超过 warning 为 stale；没有本地快照为
 unavailable。它只描述本地保存数据的年龄，不代表交易所、AKShare 或股票交易状态正常。Task 07 不检查
 全市场日线缺口、长时间无交易、财务/因子完整性；这些依赖后续数据任务。
+
+## Daily Price Collection
+
+Task 08 提供显式、有界的日线采集：调用者必须给出 canonical symbols 与包含起止日期的范围；Collector
+顺序执行、逐 symbol 隔离 Provider 失败，并只保存通过边界校验的 RAW 数据。它不会自动扩展到 Instrument
+Master 或 Structural Universe，不会自动全市场 bootstrap，也不会下载无限历史：
+
+```powershell
+python -m stock_selector daily collect --symbols 600519.SH 000001.SZ --start 2026-08-03 --end 2026-08-07
+python -m stock_selector daily status
+```
+
+Operational daily store 当前只使用 RAW 价格，`corporate_action_adjusted=false`，并以每只股票一个 Parquet
+文件作为数据源。RAW 市场价格不能被静默视为适用于 Momentum、LowVol 或其他价格收益因子的公司行为调整后
+总收益序列；相关复权与公司行为必须在实现这些因子前显式解决。日线状态只报告已存储范围，不代表全市场
+完整性，也尚未执行正式交易日历缺口验证。
 
 ## Frontend
 

@@ -20,6 +20,8 @@ class StorageStats:
     instrument_rows: int
     daily_bar_rows: int
     daily_symbols: int
+    earliest_daily_trade_date: date | None
+    latest_daily_trade_date: date | None
     realtime_quote_rows: int
     realtime_symbols: int
     realtime_snapshots: int
@@ -144,7 +146,19 @@ class LocalMarketRepository:
     def load_latest_realtime_snapshot(self) -> tuple[RealtimeQuote, ...]:
         """Load the snapshot with the greatest stored ingested_at value, not newest mtime."""
         self._require_initialized()
-        *_, latest_at, _risk_rows, _risk_dates, _latest_risk_date = self._catalog.counts()
+        (
+            _daily_rows,
+            _daily_symbols,
+            _earliest_daily,
+            _latest_daily,
+            _realtime_rows,
+            _realtime_symbols,
+            _snapshots,
+            latest_at,
+            _risk_rows,
+            _risk_dates,
+            _latest_risk_date,
+        ) = self._catalog.counts()
         if latest_at is None:
             return ()
         quotes = self._parquet.read_realtime_snapshot(latest_at)
@@ -193,6 +207,8 @@ class LocalMarketRepository:
         (
             daily_rows,
             daily_symbols,
+            earliest_daily,
+            latest_daily,
             realtime_rows,
             realtime_symbols,
             snapshots,
@@ -205,6 +221,8 @@ class LocalMarketRepository:
             instrument_rows=len(self.load_instruments()),
             daily_bar_rows=daily_rows,
             daily_symbols=daily_symbols,
+            earliest_daily_trade_date=earliest_daily,
+            latest_daily_trade_date=latest_daily,
             realtime_quote_rows=realtime_rows,
             realtime_symbols=realtime_symbols,
             realtime_snapshots=snapshots,

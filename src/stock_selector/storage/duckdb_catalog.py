@@ -35,7 +35,19 @@ class DuckDBCatalog:
 
     def counts(
         self,
-    ) -> tuple[int, int, int, int, int, datetime | None, int, int, date | None]:
+    ) -> tuple[
+        int,
+        int,
+        date | None,
+        date | None,
+        int,
+        int,
+        int,
+        datetime | None,
+        int,
+        int,
+        date | None,
+    ]:
         """Return row, symbol, snapshot, and latest-time aggregates from the views."""
         return self._run(self._count_connection)
 
@@ -124,10 +136,23 @@ class DuckDBCatalog:
     @staticmethod
     def _count_connection(
         connection: Any,
-    ) -> tuple[int, int, int, int, int, datetime | None, int, int, date | None]:
+    ) -> tuple[
+        int,
+        int,
+        date | None,
+        date | None,
+        int,
+        int,
+        int,
+        datetime | None,
+        int,
+        int,
+        date | None,
+    ]:
         """Query aggregate coverage, never inferring it from filenames or mtimes."""
-        daily_rows, daily_symbols = connection.execute(
-            "SELECT COUNT(*), COUNT(DISTINCT symbol) FROM daily_bars"
+        daily_rows, daily_symbols, earliest_daily, latest_daily = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT symbol), CAST(MIN(trade_date) AS VARCHAR), "
+            "CAST(MAX(trade_date) AS VARCHAR) FROM daily_bars"
         ).fetchone()
         realtime_rows, realtime_symbols, snapshots, latest_at = connection.execute(
             "SELECT COUNT(*), COUNT(DISTINCT symbol), COUNT(DISTINCT ingested_at), "
@@ -139,6 +164,8 @@ class DuckDBCatalog:
         return (
             int(daily_rows),
             int(daily_symbols),
+            date.fromisoformat(earliest_daily) if earliest_daily is not None else None,
+            date.fromisoformat(latest_daily) if latest_daily is not None else None,
             int(realtime_rows),
             int(realtime_symbols),
             int(snapshots),

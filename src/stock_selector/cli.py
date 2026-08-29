@@ -66,6 +66,17 @@ def build_parser() -> argparse.ArgumentParser:
     universe_subparsers.add_parser(
         "status", help="Show current structural membership and deferred risk filters."
     )
+    daily_parser = subparsers.add_parser(
+        "daily", help="Inspect or explicitly collect bounded RAW daily prices."
+    )
+    daily_subparsers = daily_parser.add_subparsers(dest="daily_command")
+    daily_subparsers.add_parser("status", help="Show offline RAW daily storage status.")
+    daily_collect = daily_subparsers.add_parser(
+        "collect", help="Collect explicitly named symbols over an inclusive finite date range."
+    )
+    daily_collect.add_argument("--symbols", nargs="+", required=True, help="Canonical symbols.")
+    daily_collect.add_argument("--start", required=True, help="Inclusive start date: YYYY-MM-DD.")
+    daily_collect.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
@@ -88,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_storage_command(arguments)
     elif arguments.command == "universe":
         return _run_universe_command(arguments.universe_command)
+    elif arguments.command == "daily":
+        return _run_daily_command(arguments)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
     else:
@@ -239,6 +252,41 @@ def _run_quality_command(command: str | None) -> int:
     return 0
 
 
+def _run_daily_command(arguments: argparse.Namespace) -> int:
+    """Run explicit local status or bounded provider-to-storage daily collection."""
+    from stock_selector.collection import (
+        CollectionError,
+        DailyCollectionRequest,
+        DailyPriceCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+
+    try:
+        repository = LocalMarketRepository(AppPaths.from_project_root())
+        repository.initialize()
+        if arguments.daily_command == "status":
+            _print_daily_status(repository)
+            return 0
+        if arguments.daily_command == "collect":
+            request = DailyCollectionRequest(
+                symbols=tuple(arguments.symbols),
+                start_date=date.fromisoformat(arguments.start),
+                end_date=date.fromisoformat(arguments.end),
+            )
+            report = DailyPriceCollector(AKShareProvider(), repository).collect(request)
+            _print_daily_collection_report(report)
+            return 1 if report.failed_symbols else 0
+    except (CollectionError, StorageError) as exc:
+        print(f"Daily collection error: {exc}", file=sys.stderr)
+        return 1
+    except (ValidationError, ValueError) as exc:
+        print(f"Daily collection usage error: {exc}", file=sys.stderr)
+        return 2
+    print("A daily subcommand is required: status or collect.", file=sys.stderr)
+    return 2
+
+
 def _provider_label(provider: AKShareProvider) -> str:
     """Return a concise provider identity without implementation details."""
     return f"{provider.info.name} {provider.info.version or 'unknown'}"
@@ -301,6 +349,14 @@ def _print_storage_status(repository) -> None:  # type: ignore[no-untyped-def]
     print(f"Instrument universe: {stats.instrument_rows}")
     print(f"Daily stored symbols: {stats.daily_symbols}")
     print(f"Daily rows: {stats.daily_bar_rows}")
+    print(
+        "Earliest daily trade date: "
+        f"{stats.earliest_daily_trade_date.isoformat() if stats.earliest_daily_trade_date else 'unavailable'}"
+    )
+    print(
+        "Latest daily trade date: "
+        f"{stats.latest_daily_trade_date.isoformat() if stats.latest_daily_trade_date else 'unavailable'}"
+    )
     print(f"Realtime stored symbols: {stats.realtime_symbols}")
     print(f"Realtime snapshots: {stats.realtime_snapshots}")
     print(f"Realtime rows: {stats.realtime_quote_rows}")
@@ -315,6 +371,43 @@ def _print_storage_status(repository) -> None:  # type: ignore[no-untyped-def]
         f"{stats.latest_risk_state_date.isoformat() if stats.latest_risk_state_date else 'unavailable'}"
     )
     print(f"Disk usage: {_format_bytes(stats.disk_usage_bytes)}")
+
+
+def _print_daily_status(repository) -> None:  # type: ignore[no-untyped-def]
+    """Print honest offline coverage for selective RAW daily persistence."""
+    stats = repository.get_stats()
+    print(f"Stored symbols: {stats.daily_symbols}")
+    print(f"Stored rows: {stats.daily_bar_rows}")
+    print(
+        "Earliest trade date: "
+        f"{stats.earliest_daily_trade_date.isoformat() if stats.earliest_daily_trade_date else 'unavailable'}"
+    )
+    print(
+        "Latest trade date: "
+        f"{stats.latest_daily_trade_date.isoformat() if stats.latest_daily_trade_date else 'unavailable'}"
+    )
+    print("Adjustment basis: raw")
+    print("Corporate-action adjusted: NO")
+    print("Full-market completeness verified: NO")
+    print("Trading-calendar gap check applied: NO")
+
+
+def _print_daily_collection_report(report) -> None:  # type: ignore[no-untyped-def]
+    """Print compact per-symbol outcomes without exposing every stored bar."""
+    print(f"Requested symbols: {len(report.requested_symbols)}")
+    print(f"Date range: {report.start_date.isoformat()} to {report.end_date.isoformat()}")
+    print(f"Adjustment: {report.adjustment.value}")
+    print(f"Succeeded: {report.succeeded_symbols}")
+    print(f"Empty: {report.empty_symbols}")
+    print(f"Failed: {report.failed_symbols}")
+    print(f"Rows received: {report.total_rows_received}")
+    for result in report.results:
+        if result.status.value == "success":
+            print(f"{result.symbol} success rows={result.rows_persisted} source={result.source}")
+        elif result.status.value == "empty":
+            print(f"{result.symbol} empty")
+        else:
+            print(f"{result.symbol} failed {result.error_type}: {result.error_message}")
 
 
 def _print_universe_status(snapshot, instruments) -> None:  # type: ignore[no-untyped-def]

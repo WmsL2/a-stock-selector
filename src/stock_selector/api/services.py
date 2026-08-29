@@ -6,6 +6,7 @@ from stock_selector.api.errors import APIResourceNotFound
 from stock_selector.api.schemas import (
     DailyBarResponse,
     DailyBarsResponse,
+    DailyStatusResponse,
     InstrumentListResponse,
     InstrumentResponse,
     QualityStatusResponse,
@@ -36,6 +37,8 @@ class ReadOnlyMarketService:
             instrument_rows=stats.instrument_rows,
             daily_rows=stats.daily_bar_rows,
             daily_symbols=stats.daily_symbols,
+            earliest_daily_trade_date=stats.earliest_daily_trade_date,
+            latest_daily_trade_date=stats.latest_daily_trade_date,
             realtime_rows=stats.realtime_quote_rows,
             realtime_symbols=stats.realtime_symbols,
             realtime_snapshots=stats.realtime_snapshots,
@@ -46,6 +49,20 @@ class ReadOnlyMarketService:
             disk_usage_bytes=stats.disk_usage_bytes,
             storage_root=str(self._repository.paths.processed_data_dir),
             duckdb_path=str(self._repository.catalog_path),
+        )
+
+    def daily_status(self) -> DailyStatusResponse:
+        """Report actual RAW daily storage coverage without completeness claims."""
+        stats = self._repository.get_stats()
+        return DailyStatusResponse(
+            stored_symbols=stats.daily_symbols,
+            stored_rows=stats.daily_bar_rows,
+            earliest_trade_date=stats.earliest_daily_trade_date,
+            latest_trade_date=stats.latest_daily_trade_date,
+            adjustment_basis="raw",
+            corporate_action_adjusted=False,
+            full_market_completeness_verified=False,
+            trading_calendar_gap_check_applied=False,
         )
 
     def quality_status(self, settings: Settings) -> QualityStatusResponse:

@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 07 - Data Quality and Dated Risk States
+Task 08 - Daily Price Collector
 
 ## Status
 
@@ -114,6 +114,17 @@ Completed
 - quality status API and CLI
 - Vue quality and risk coverage status
 - app-scoped API settings dependency
+- bounded daily-price collection pipeline
+- provider-abstraction collector
+- per-symbol failure isolation
+- provider-result boundary validation
+- selective RAW daily persistence
+- idempotent daily upsert workflow
+- daily storage range statistics
+- read-only daily status API
+- daily CLI collection and status
+- Vue daily-storage status integration
+- explicit RAW and corporate-action semantics
 
 ## Tests
 
@@ -121,9 +132,9 @@ Completed
 - `python -m stock_selector --help` — PASS
 - `python -m stock_selector version` — PASS
 - `python -m stock_selector config check` — PASS
-- `python -m pytest` — PASS (198 passed)
+- `python -m pytest` — PASS (206 passed)
 - `python -m pytest --cov=stock_selector --cov-report=term-missing` — PASS
-  (198 passed, 87% coverage)
+  (206 passed, 86% coverage)
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
@@ -159,13 +170,20 @@ Completed
   empty (0 rows / 0 dates); `/api/quality/status` and the Vite proxy returned 200 with
   `risk_filter_ready=false`, `risk_eligible_instruments=null`, and stale local realtime
   freshness. Both local processes were stopped after smoke.
+- Daily collection/API/Vue integration — PASS: two identical explicit RAW collections for
+  `600519.SH` from 2026-08-03 through 2026-08-07 each returned 5 rows through the Sina
+  fallback (`akshare:stock_zh_a_daily`); local storage remained 1 symbol / 5 rows with no
+  duplicate dates. FastAPI and Vite `/api/daily/status` both returned 200, then stopped.
 
 ## Not Implemented Yet
 
 - Full historical risk-state collector
 - Full-market daily data quality
 - Long-no-trade detection
-- Daily price data
+- Full-market scheduled daily refresh
+- Trading-calendar gap detection
+- Corporate-action-adjusted return series
+- Full historical research dataset
 - Fundamentals
 - Valuation
 - Industry classification
@@ -185,4 +203,4 @@ Completed
 
 ## Next Task
 
-Task 08 - Daily Price Collector
+Task 09 - Fundamentals / Valuation / Industry

@@ -24,6 +24,8 @@ def test_storage_status_is_empty_for_fresh_local_repository(client: TestClient) 
         "risk_state_rows": 0,
     }
     assert body["realtime_snapshots"] == 0
+    assert body["earliest_daily_trade_date"] is None
+    assert body["latest_daily_trade_date"] is None
     assert body["risk_state_dates"] == 0
     assert body["latest_risk_state_date"] is None
     assert body["latest_realtime_at"] is None
@@ -61,6 +63,8 @@ def test_storage_status_reports_persisted_local_coverage(
         "instrument_rows": 2,
         "daily_rows": 3,
         "daily_symbols": 1,
+        "earliest_daily_trade_date": "2026-08-03",
+        "latest_daily_trade_date": "2026-08-05",
         "realtime_rows": 2,
         "realtime_symbols": 2,
         "realtime_snapshots": 1,

@@ -5,7 +5,8 @@ import { storeToRefs } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getUniverseStatus } from '@/api/universe'
 import { getQualityStatus } from '@/api/quality'
-import type { QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
+import { getDailyStatus } from '@/api/daily'
+import type { DailyStatusResponse, QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
 import { formatBytes, formatLocalTime } from '@/utils/format'
 
 const appStore = useAppStore()
@@ -14,6 +15,8 @@ const universe = ref<UniverseStatusResponse | null>(null)
 const universeError = ref(false)
 const quality = ref<QualityStatusResponse | null>(null)
 const qualityError = ref(false)
+const daily = ref<DailyStatusResponse | null>(null)
+const dailyError = ref(false)
 
 async function loadUniverseStatus(): Promise<void> {
   universeError.value = false
@@ -35,6 +38,16 @@ async function loadQualityStatus(): Promise<void> {
   }
 }
 
+async function loadDailyStatus(): Promise<void> {
+  dailyError.value = false
+  try {
+    daily.value = await getDailyStatus()
+  } catch {
+    daily.value = null
+    dailyError.value = true
+  }
+}
+
 function freshnessLabel(value: QualityStatusResponse['realtime_freshness']): string {
   return {
     fresh: '正常',
@@ -48,6 +61,7 @@ onMounted(() => {
   appStore.ensureStatus()
   void loadUniverseStatus()
   void loadQualityStatus()
+  void loadDailyStatus()
 })
 </script>
 
@@ -87,6 +101,21 @@ onMounted(() => {
     <el-alert v-if="!universe.historical_survivorship_safe" title="当前股票池基于当前本地 Instrument Master，不能直接作为历史回测的无生存者偏差证券样本。" type="warning" :closable="false" />
     <el-alert v-if="!universe.risk_filters_applied" title="ST、停牌、退市期等日期化风险过滤将在后续风险状态模块接入。" type="info" :closable="false" />
   </section>
+  <section v-if="daily" class="panel">
+    <h2>Daily Price Storage</h2>
+    <el-descriptions :column="2" border>
+      <el-descriptions-item label="Stored symbols">{{ daily.stored_symbols }}</el-descriptions-item>
+      <el-descriptions-item label="Stored rows">{{ daily.stored_rows }}</el-descriptions-item>
+      <el-descriptions-item label="Earliest date">{{ daily.earliest_trade_date ?? 'unavailable' }}</el-descriptions-item>
+      <el-descriptions-item label="Latest date">{{ daily.latest_trade_date ?? 'unavailable' }}</el-descriptions-item>
+      <el-descriptions-item label="Price basis">{{ daily.adjustment_basis }}</el-descriptions-item>
+      <el-descriptions-item label="公司行为调整">{{ daily.corporate_action_adjusted ? '已调整' : '未做公司行为调整' }}</el-descriptions-item>
+      <el-descriptions-item label="完整性验证">{{ daily.full_market_completeness_verified ? '已验证' : '未验证完整性' }}</el-descriptions-item>
+      <el-descriptions-item label="交易日历缺口检查">{{ daily.trading_calendar_gap_check_applied ? '已应用' : '未做交易日历缺口检查' }}</el-descriptions-item>
+    </el-descriptions>
+    <el-alert title="当前日线采用选择性持久化，状态页不代表全市场历史完整无缺口。" type="warning" :closable="false" />
+  </section>
+  <el-alert v-else-if="dailyError && storage" title="日线存储状态暂不可用。" type="warning" :closable="false" />
   <section v-if="quality" class="panel">
     <h2>Data Quality / Risk State</h2>
     <el-descriptions :column="2" border>

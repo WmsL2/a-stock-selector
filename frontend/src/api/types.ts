@@ -9,6 +9,8 @@ export interface StorageStatusResponse {
   instrument_rows: number
   daily_rows: number
   daily_symbols: number
+  earliest_daily_trade_date: string | null
+  latest_daily_trade_date: string | null
   realtime_rows: number
   realtime_symbols: number
   realtime_snapshots: number
@@ -173,4 +175,15 @@ export interface QualityStatusResponse {
   latest_realtime_at: string | null
   realtime_age_seconds: number | null
   realtime_freshness: RealtimeFreshness
+}
+
+export interface DailyStatusResponse {
+  stored_symbols: number
+  stored_rows: number
+  earliest_trade_date: string | null
+  latest_trade_date: string | null
+  adjustment_basis: string
+  corporate_action_adjusted: boolean
+  full_market_completeness_verified: boolean
+  trading_calendar_gap_check_applied: boolean
 }

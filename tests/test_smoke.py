@@ -78,6 +78,24 @@ def test_quality_cli_parser_accepts_offline_status_command() -> None:
     assert arguments.quality_command == "status"
 
 
+def test_daily_cli_parser_requires_explicit_symbols_and_range() -> None:
+    """Daily collection has no implicit market-wide scope or range."""
+    arguments = build_parser().parse_args(
+        [
+            "daily",
+            "collect",
+            "--symbols",
+            "600519.SH",
+            "--start",
+            "2026-08-03",
+            "--end",
+            "2026-08-07",
+        ]
+    )
+    assert arguments.daily_command == "collect"
+    assert arguments.symbols == ["600519.SH"]
+
+
 def test_config_check() -> None:
     """The CLI validates the default project configuration."""
     result = run_module("config", "check")
