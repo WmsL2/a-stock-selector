@@ -6,7 +6,8 @@ import { useAppStore } from '@/stores/app'
 import { getUniverseStatus } from '@/api/universe'
 import { getQualityStatus } from '@/api/quality'
 import { getDailyStatus } from '@/api/daily'
-import type { DailyStatusResponse, QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
+import { getFundamentalsStatus } from '@/api/fundamentals'
+import type { DailyStatusResponse, FundamentalsStatusResponse, QualityStatusResponse, UniverseStatusResponse } from '@/api/types'
 import { formatBytes, formatLocalTime } from '@/utils/format'
 
 const appStore = useAppStore()
@@ -17,6 +18,8 @@ const quality = ref<QualityStatusResponse | null>(null)
 const qualityError = ref(false)
 const daily = ref<DailyStatusResponse | null>(null)
 const dailyError = ref(false)
+const fundamentals = ref<FundamentalsStatusResponse | null>(null)
+const fundamentalsError = ref(false)
 
 async function loadUniverseStatus(): Promise<void> {
   universeError.value = false
@@ -48,6 +51,16 @@ async function loadDailyStatus(): Promise<void> {
   }
 }
 
+async function loadFundamentalsStatus(): Promise<void> {
+  fundamentalsError.value = false
+  try {
+    fundamentals.value = await getFundamentalsStatus()
+  } catch {
+    fundamentals.value = null
+    fundamentalsError.value = true
+  }
+}
+
 function freshnessLabel(value: QualityStatusResponse['realtime_freshness']): string {
   return {
     fresh: '正常',
@@ -62,6 +75,7 @@ onMounted(() => {
   void loadUniverseStatus()
   void loadQualityStatus()
   void loadDailyStatus()
+  void loadFundamentalsStatus()
 })
 </script>
 
@@ -116,6 +130,19 @@ onMounted(() => {
     <el-alert title="当前日线采用选择性持久化，状态页不代表全市场历史完整无缺口。" type="warning" :closable="false" />
   </section>
   <el-alert v-else-if="dailyError && storage" title="日线存储状态暂不可用。" type="warning" :closable="false" />
+  <section v-if="fundamentals" class="panel">
+    <h2>Fundamentals / Valuation / Industry</h2>
+    <el-descriptions :column="2" border>
+      <el-descriptions-item label="Financial symbols / rows">{{ fundamentals.financial_symbols }} / {{ fundamentals.financial_rows }}</el-descriptions-item>
+      <el-descriptions-item label="Latest financial availability">{{ formatLocalTime(fundamentals.latest_financial_available_at) }}</el-descriptions-item>
+      <el-descriptions-item label="Valuation symbols / rows">{{ fundamentals.valuation_symbols }} / {{ fundamentals.valuation_rows }}</el-descriptions-item>
+      <el-descriptions-item label="Latest valuation">{{ formatLocalTime(fundamentals.latest_valuation_at) }}</el-descriptions-item>
+      <el-descriptions-item label="Industry symbols / rows">{{ fundamentals.industry_symbols }} / {{ fundamentals.industry_rows }}</el-descriptions-item>
+      <el-descriptions-item label="PIT capability">Financial {{ fundamentals.financial_point_in_time_safe ? 'YES' : 'NO' }} · Valuation {{ fundamentals.valuation_history_supported ? 'YES' : 'NO' }} · Industry {{ fundamentals.industry_history_supported ? 'YES' : 'NO' }}</el-descriptions-item>
+    </el-descriptions>
+    <el-alert title="财务按公告日 15:30 后可用；估值与行业只显示本地已保存且不晚于请求时点的数据。" type="info" :closable="false" />
+  </section>
+  <el-alert v-else-if="fundamentalsError && storage" title="财务、估值或行业存储状态暂不可用。" type="warning" :closable="false" />
   <section v-if="quality" class="panel">
     <h2>Data Quality / Risk State</h2>
     <el-descriptions :column="2" border>

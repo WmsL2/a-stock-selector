@@ -10,7 +10,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from stock_selector.config.paths import AppPaths
-from stock_selector.models import DailyBar, Instrument, RealtimeQuote
+from stock_selector.models import (
+    DailyBar,
+    FinancialRecord,
+    IndustryRecord,
+    Instrument,
+    RealtimeQuote,
+    ValuationRecord,
+)
 from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage import codec
 from stock_selector.storage.errors import StorageIOError
@@ -46,6 +53,21 @@ class ParquetStore:
         return self._paths.processed_data_dir / "risk_states"
 
     @property
+    def financials_dir(self) -> Path:
+        """Return point-in-time financial history directory."""
+        return self._paths.processed_data_dir / "fundamentals"
+
+    @property
+    def valuations_dir(self) -> Path:
+        """Return per-symbol daily valuation history directory."""
+        return self._paths.processed_data_dir / "valuations"
+
+    @property
+    def industries_dir(self) -> Path:
+        """Return per-symbol industry effective-interval directory."""
+        return self._paths.processed_data_dir / "industries"
+
+    @property
     def instruments_path(self) -> Path:
         """Return the sole full-market lightweight instrument snapshot path."""
         return self.instruments_dir / "instruments.parquet"
@@ -63,6 +85,15 @@ class ParquetStore:
     def risk_states_path(self, as_of: date) -> Path:
         """Return one deterministic source-of-truth path for an exact business date."""
         return self.risk_states_dir / f"date={as_of.isoformat()}" / "risk_states.parquet"
+
+    def financials_path(self, symbol: str) -> Path:
+        return self.financials_dir / f"{symbol}.parquet"
+
+    def valuations_path(self, symbol: str) -> Path:
+        return self.valuations_dir / f"{symbol}.parquet"
+
+    def industries_path(self, symbol: str) -> Path:
+        return self.industries_dir / f"{symbol}.parquet"
 
     def write_instruments(self, instruments: tuple[Instrument, ...]) -> None:
         """Atomically replace the complete instrument master snapshot."""
@@ -108,6 +139,27 @@ class ParquetStore:
         if not path.exists():
             return ()
         return codec.table_to_risk_states(self._read_table(path))
+
+    def write_financial_records(self, symbol: str, records: tuple[FinancialRecord, ...]) -> None:
+        self._write_table(codec.financial_records_to_table(records), self.financials_path(symbol))
+
+    def read_financial_records(self, symbol: str) -> tuple[FinancialRecord, ...]:
+        path = self.financials_path(symbol)
+        return () if not path.exists() else codec.table_to_financial_records(self._read_table(path))
+
+    def write_valuation_records(self, symbol: str, records: tuple[ValuationRecord, ...]) -> None:
+        self._write_table(codec.valuation_records_to_table(records), self.valuations_path(symbol))
+
+    def read_valuation_records(self, symbol: str) -> tuple[ValuationRecord, ...]:
+        path = self.valuations_path(symbol)
+        return () if not path.exists() else codec.table_to_valuation_records(self._read_table(path))
+
+    def write_industry_records(self, symbol: str, records: tuple[IndustryRecord, ...]) -> None:
+        self._write_table(codec.industry_records_to_table(records), self.industries_path(symbol))
+
+    def read_industry_records(self, symbol: str) -> tuple[IndustryRecord, ...]:
+        path = self.industries_path(symbol)
+        return () if not path.exists() else codec.table_to_industry_records(self._read_table(path))
 
     def _read_table(self, path: Path) -> pa.Table:
         """Read Parquet bytes while preserving data-decoding errors for the codec."""

@@ -1,9 +1,11 @@
 """FastAPI dependencies backed by the application lifecycle."""
 
+from datetime import datetime
+
 from fastapi import HTTPException, Request, status
 
 from stock_selector.config import Settings
-from stock_selector.models.common import validate_symbol
+from stock_selector.models.common import ensure_aware_datetime, validate_symbol
 from stock_selector.storage import LocalMarketRepository
 
 
@@ -33,6 +35,19 @@ def canonical_symbol(symbol: str) -> str:
     """Validate a path symbol using the shared domain representation."""
     try:
         return validate_symbol(symbol)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+def aware_timestamp(value: datetime | None) -> datetime | None:
+    """Reject naive timestamps before they can invalidate point-in-time reads."""
+    if value is None:
+        return None
+    try:
+        return ensure_aware_datetime(value, "as_of")
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

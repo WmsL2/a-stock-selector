@@ -55,6 +55,12 @@ class DuckDBCatalog:
         """Read the small catalog schema version marker."""
         return self._run(self._schema_version_connection)
 
+    def fundamental_counts(
+        self,
+    ) -> tuple[int, int, datetime | None, int, int, datetime | None, int, int]:
+        """Return independent coverage aggregates for the Task 09 data domains."""
+        return self._run(self._fundamental_count_connection)
+
     def _run(self, operation: Callable[[Any], "CatalogResult"]) -> "CatalogResult":
         """Execute one operation with a connection that is always closed."""
         connection = None
@@ -82,6 +88,9 @@ class DuckDBCatalog:
         daily_glob = self._processed_data_dir / "daily_bars" / "*.parquet"
         realtime_glob = self._processed_data_dir / "realtime_quotes" / "**" / "*.parquet"
         risk_glob = self._processed_data_dir / "risk_states" / "**" / "*.parquet"
+        financial_glob = self._processed_data_dir / "fundamentals" / "*.parquet"
+        valuation_glob = self._processed_data_dir / "valuations" / "*.parquet"
+        industry_glob = self._processed_data_dir / "industries" / "*.parquet"
         self._replace_view(
             connection,
             "instruments",
@@ -115,6 +124,32 @@ class DuckDBCatalog:
             _duckdb_path(risk_glob),
             "symbol VARCHAR, as_of DATE, is_st BOOLEAN, is_suspended BOOLEAN, "
             "is_delisting_period BOOLEAN, observed_at TIMESTAMPTZ, source VARCHAR",
+        )
+        self._replace_view(
+            connection,
+            "financial_records",
+            any((self._processed_data_dir / "fundamentals").glob("*.parquet")),
+            _duckdb_path(financial_glob),
+            "symbol VARCHAR, report_period DATE, announcement_date DATE, available_at TIMESTAMPTZ, "
+            "roe DOUBLE, roa DOUBLE, gross_margin DOUBLE, net_margin DOUBLE, revenue DOUBLE, "
+            "net_profit DOUBLE, deducted_net_profit DOUBLE, operating_cash_flow DOUBLE, "
+            "total_assets DOUBLE, total_liabilities DOUBLE, source VARCHAR",
+        )
+        self._replace_view(
+            connection,
+            "valuation_records",
+            any((self._processed_data_dir / "valuations").glob("*.parquet")),
+            _duckdb_path(valuation_glob),
+            "symbol VARCHAR, as_of TIMESTAMPTZ, pe DOUBLE, pb DOUBLE, ps DOUBLE, pcf DOUBLE, "
+            "dividend_yield DOUBLE, total_market_cap DOUBLE, float_market_cap DOUBLE, source VARCHAR",
+        )
+        self._replace_view(
+            connection,
+            "industry_records",
+            any((self._processed_data_dir / "industries").glob("*.parquet")),
+            _duckdb_path(industry_glob),
+            "symbol VARCHAR, industry_code VARCHAR, industry_name VARCHAR, classification VARCHAR, "
+            "effective_from DATE, effective_to DATE, source VARCHAR",
         )
 
     @staticmethod
@@ -180,6 +215,32 @@ class DuckDBCatalog:
         """Fetch the one supported catalog version."""
         result = connection.execute("SELECT schema_version FROM storage_metadata").fetchone()
         return int(result[0])
+
+    @staticmethod
+    def _fundamental_count_connection(
+        connection: Any,
+    ) -> tuple[int, int, datetime | None, int, int, datetime | None, int, int]:
+        financial_rows, financial_symbols, latest_financial = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT symbol), CAST(MAX(available_at) AS VARCHAR) "
+            "FROM financial_records"
+        ).fetchone()
+        valuation_rows, valuation_symbols, latest_valuation = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT symbol), CAST(MAX(as_of) AS VARCHAR) "
+            "FROM valuation_records"
+        ).fetchone()
+        industry_rows, industry_symbols = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT symbol) FROM industry_records"
+        ).fetchone()
+        return (
+            int(financial_rows),
+            int(financial_symbols),
+            datetime.fromisoformat(latest_financial) if latest_financial is not None else None,
+            int(valuation_rows),
+            int(valuation_symbols),
+            datetime.fromisoformat(latest_valuation) if latest_valuation is not None else None,
+            int(industry_rows),
+            int(industry_symbols),
+        )
 
 
 def _duckdb_path(path: Path) -> str:

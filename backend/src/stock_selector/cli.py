@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections import Counter
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -28,7 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="A Stock Selector")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("version", help="Show the A Stock Selector version.")
-    config_parser = subparsers.add_parser("config", help="Inspect application configuration.")
+    config_parser = subparsers.add_parser(
+        "config", help="Inspect application configuration."
+    )
     config_subparsers = config_parser.add_subparsers(dest="config_command")
     config_subparsers.add_parser("check", help="Validate the configured settings.")
     config_subparsers.add_parser("paths", help="Show project paths.")
@@ -44,21 +46,31 @@ def build_parser() -> argparse.ArgumentParser:
         "daily-once", help="Fetch and summarize unadjusted daily bars."
     )
     daily_parser.add_argument("symbol", help="Canonical symbol, for example 600519.SH.")
-    daily_parser.add_argument("--start", required=True, help="Inclusive start date: YYYY-MM-DD.")
-    daily_parser.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    daily_parser.add_argument(
+        "--start", required=True, help="Inclusive start date: YYYY-MM-DD."
+    )
+    daily_parser.add_argument(
+        "--end", required=True, help="Inclusive end date: YYYY-MM-DD."
+    )
     storage_parser = subparsers.add_parser(
         "storage", help="Inspect or run explicit local storage operations."
     )
     storage_subparsers = storage_parser.add_subparsers(dest="storage_command")
-    storage_subparsers.add_parser("status", help="Show offline selective storage coverage.")
+    storage_subparsers.add_parser(
+        "status", help="Show offline selective storage coverage."
+    )
     storage_smoke = storage_subparsers.add_parser(
         "smoke", help="Persist and validate one explicitly requested symbol."
     )
-    storage_smoke.add_argument("symbol", help="Canonical symbol, for example 600519.SH.")
+    storage_smoke.add_argument(
+        "symbol", help="Canonical symbol, for example 600519.SH."
+    )
     storage_smoke.add_argument(
         "--start", required=True, help="Inclusive start date: YYYY-MM-DD."
     )
-    storage_smoke.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    storage_smoke.add_argument(
+        "--end", required=True, help="Inclusive end date: YYYY-MM-DD."
+    )
     universe_parser = subparsers.add_parser(
         "universe", help="Inspect the offline point-in-time structural universe."
     )
@@ -72,16 +84,53 @@ def build_parser() -> argparse.ArgumentParser:
     daily_subparsers = daily_parser.add_subparsers(dest="daily_command")
     daily_subparsers.add_parser("status", help="Show offline RAW daily storage status.")
     daily_collect = daily_subparsers.add_parser(
-        "collect", help="Collect explicitly named symbols over an inclusive finite date range."
+        "collect",
+        help="Collect explicitly named symbols over an inclusive finite date range.",
     )
-    daily_collect.add_argument("--symbols", nargs="+", required=True, help="Canonical symbols.")
-    daily_collect.add_argument("--start", required=True, help="Inclusive start date: YYYY-MM-DD.")
-    daily_collect.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    daily_collect.add_argument(
+        "--symbols", nargs="+", required=True, help="Canonical symbols."
+    )
+    daily_collect.add_argument(
+        "--start", required=True, help="Inclusive start date: YYYY-MM-DD."
+    )
+    daily_collect.add_argument(
+        "--end", required=True, help="Inclusive end date: YYYY-MM-DD."
+    )
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
     quality_subparsers = quality_parser.add_subparsers(dest="quality_command")
-    quality_subparsers.add_parser("status", help="Show conservative local quality status.")
+    quality_subparsers.add_parser(
+        "status", help="Show conservative local quality status."
+    )
+    fundamentals_parser = subparsers.add_parser(
+        "fundamentals", help="Inspect or explicitly collect point-in-time local data."
+    )
+    fundamentals_subparsers = fundamentals_parser.add_subparsers(
+        dest="fundamentals_command"
+    )
+    fundamentals_subparsers.add_parser(
+        "status", help="Show offline fundamentals coverage."
+    )
+    financial_collect = fundamentals_subparsers.add_parser(
+        "collect-financial",
+        help="Collect explicit symbols for an inclusive report-period range.",
+    )
+    financial_collect.add_argument("--symbols", nargs="+", required=True)
+    financial_collect.add_argument("--start-period", required=True)
+    financial_collect.add_argument("--end-period", required=True)
+    valuation_collect = fundamentals_subparsers.add_parser(
+        "collect-valuation",
+        help="Collect explicit symbols no later than one aware as-of instant.",
+    )
+    valuation_collect.add_argument("--symbols", nargs="+", required=True)
+    valuation_collect.add_argument("--as-of", required=True)
+    industry_collect = fundamentals_subparsers.add_parser(
+        "collect-industry",
+        help="Collect explicit symbols for one effective-date cutoff.",
+    )
+    industry_collect.add_argument("--symbols", nargs="+", required=True)
+    industry_collect.add_argument("--as-of", required=True)
     return parser
 
 
@@ -103,6 +152,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_daily_command(arguments)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
+    elif arguments.command == "fundamentals":
+        return _run_fundamentals_command(arguments)
     else:
         parser.print_help()
     return 0
@@ -287,6 +338,72 @@ def _run_daily_command(arguments: argparse.Namespace) -> int:
     return 2
 
 
+def _run_fundamentals_command(arguments: argparse.Namespace) -> int:
+    """Run an offline status read or an explicit bounded Task 09 collection."""
+    from stock_selector.collection import (
+        FinancialCollector,
+        IndustryCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+
+    try:
+        repository = LocalMarketRepository(AppPaths.from_project_root())
+        repository.initialize()
+        if arguments.fundamentals_command == "status":
+            _print_fundamentals_status(repository)
+            return 0
+        provider = AKShareProvider()
+        if arguments.fundamentals_command == "collect-financial":
+            report = FinancialCollector(provider, repository).collect(
+                tuple(arguments.symbols),
+                date.fromisoformat(arguments.start_period),
+                date.fromisoformat(arguments.end_period),
+            )
+        elif arguments.fundamentals_command == "collect-valuation":
+            report = ValuationCollector(provider, repository).collect(
+                tuple(arguments.symbols), datetime.fromisoformat(arguments.as_of)
+            )
+        elif arguments.fundamentals_command == "collect-industry":
+            report = IndustryCollector(provider, repository).collect(
+                tuple(arguments.symbols), date.fromisoformat(arguments.as_of)
+            )
+        else:
+            print(
+                "A fundamentals subcommand is required: status or an explicit collect command.",
+                file=sys.stderr,
+            )
+            return 2
+    except (StorageError, ValueError, ValidationError) as exc:
+        print(f"Fundamentals error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Requested symbols: {len(report.requested_symbols)}")
+    print(f"Succeeded: {report.succeeded_symbols}")
+    print(f"Empty: {report.empty_symbols}")
+    print(f"Failed: {report.failed_symbols}")
+    print(f"Rows persisted: {report.rows_persisted}")
+    return 1 if report.failed_symbols else 0
+
+
+def _print_fundamentals_status(repository) -> None:  # type: ignore[no-untyped-def]
+    """Print only local coverage and conservative capability declarations."""
+    stats = repository.get_stats()
+    print(f"Financial symbols: {stats.financial_symbols}")
+    print(f"Financial rows: {stats.financial_rows}")
+    print(
+        f"Latest financial available at: {stats.latest_financial_available_at or 'unavailable'}"
+    )
+    print(f"Valuation symbols: {stats.valuation_symbols}")
+    print(f"Valuation rows: {stats.valuation_rows}")
+    print(f"Latest valuation at: {stats.latest_valuation_at or 'unavailable'}")
+    print(f"Industry symbols: {stats.industry_symbols}")
+    print(f"Industry rows: {stats.industry_rows}")
+    print("Financial point-in-time safe: YES")
+    print("Valuation history supported: YES (PE/PB/PCF/total market cap only)")
+    print("Industry history supported: YES (CNInfo change history only)")
+
+
 def _provider_label(provider: AKShareProvider) -> str:
     """Return a concise provider identity without implementation details."""
     return f"{provider.info.name} {provider.info.version or 'unknown'}"
@@ -395,7 +512,9 @@ def _print_daily_status(repository) -> None:  # type: ignore[no-untyped-def]
 def _print_daily_collection_report(report) -> None:  # type: ignore[no-untyped-def]
     """Print compact per-symbol outcomes without exposing every stored bar."""
     print(f"Requested symbols: {len(report.requested_symbols)}")
-    print(f"Date range: {report.start_date.isoformat()} to {report.end_date.isoformat()}")
+    print(
+        f"Date range: {report.start_date.isoformat()} to {report.end_date.isoformat()}"
+    )
     print(f"Adjustment: {report.adjustment.value}")
     print(f"Succeeded: {report.succeeded_symbols}")
     print(f"Empty: {report.empty_symbols}")
@@ -403,7 +522,9 @@ def _print_daily_collection_report(report) -> None:  # type: ignore[no-untyped-d
     print(f"Rows received: {report.total_rows_received}")
     for result in report.results:
         if result.status.value == "success":
-            print(f"{result.symbol} success rows={result.rows_persisted} source={result.source}")
+            print(
+                f"{result.symbol} success rows={result.rows_persisted} source={result.source}"
+            )
         elif result.status.value == "empty":
             print(f"{result.symbol} empty")
         else:
@@ -466,8 +587,7 @@ def _print_quality_status(status) -> None:  # type: ignore[no-untyped-def]
         f"{status.latest_realtime_at.isoformat() if status.latest_realtime_at else 'unavailable'}"
     )
     print(
-        "Realtime age: "
-        f"{status.realtime_age_seconds:.1f}s"
+        f"Realtime age: {status.realtime_age_seconds:.1f}s"
         if status.realtime_age_seconds is not None
         else "Realtime age: unavailable"
     )

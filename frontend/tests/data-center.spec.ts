@@ -9,12 +9,14 @@ const api = vi.hoisted(() => ({
   getUniverseStatus: vi.fn(),
   getQualityStatus: vi.fn(),
   getDailyStatus: vi.fn(),
+  getFundamentalsStatus: vi.fn(),
 }))
 vi.mock('@/api/health', () => ({ getHealth: api.getHealth }))
 vi.mock('@/api/storage', () => ({ getStorageStatus: api.getStorageStatus }))
 vi.mock('@/api/universe', () => ({ getUniverseStatus: api.getUniverseStatus }))
 vi.mock('@/api/quality', () => ({ getQualityStatus: api.getQualityStatus }))
 vi.mock('@/api/daily', () => ({ getDailyStatus: api.getDailyStatus }))
+vi.mock('@/api/fundamentals', () => ({ getFundamentalsStatus: api.getFundamentalsStatus }))
 
 import DataCenterView from '@/views/DataCenterView.vue'
 
@@ -25,6 +27,7 @@ describe('DataCenterView structural universe section', () => {
     api.getUniverseStatus.mockResolvedValue({ as_of: '2026-08-29', data_scope: 'current_instrument_master', input_instruments: 2, included_instruments: 1, excluded_instruments: 1, boards: { sh_main: 1, sz_main: 2, chinext: 3, star: 4, bse: 5 }, exclusions: { board_disabled: 1, not_yet_listed: 0, delisted: 0, min_listing_days: 0 }, risk_filters_applied: false, historical_survivorship_safe: false })
     api.getQualityStatus.mockResolvedValue({ as_of: '2026-08-29', structural_instruments: 2, risk_state_records: 0, risk_complete_instruments: 0, risk_coverage_ratio: 0, risk_filter_ready: false, risk_eligible_instruments: null, latest_realtime_at: null, realtime_age_seconds: null, realtime_freshness: 'unavailable' })
     api.getDailyStatus.mockResolvedValue({ stored_symbols: 0, stored_rows: 0, earliest_trade_date: null, latest_trade_date: null, adjustment_basis: 'raw', corporate_action_adjusted: false, full_market_completeness_verified: false, trading_calendar_gap_check_applied: false })
+    api.getFundamentalsStatus.mockResolvedValue({ financial_symbols: 0, financial_rows: 0, latest_financial_available_at: null, valuation_symbols: 0, valuation_rows: 0, latest_valuation_at: null, industry_symbols: 0, industry_rows: 0, financial_point_in_time_safe: true, valuation_history_supported: true, industry_history_supported: true })
     const wrapper = mount(DataCenterView, { global: { plugins: [createPinia(), ElementPlus] } })
     await flushPromises()
     expect(wrapper.text()).toContain('结构股票池')

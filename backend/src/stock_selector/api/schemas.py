@@ -197,3 +197,79 @@ class DailyStatusResponse(APIResponseModel):
     corporate_action_adjusted: bool
     full_market_completeness_verified: bool
     trading_calendar_gap_check_applied: bool
+
+
+class FundamentalsStatusResponse(APIResponseModel):
+    financial_symbols: int
+    financial_rows: int
+    latest_financial_available_at: datetime | None
+    valuation_symbols: int
+    valuation_rows: int
+    latest_valuation_at: datetime | None
+    industry_symbols: int
+    industry_rows: int
+    financial_point_in_time_safe: bool
+    valuation_history_supported: bool
+    industry_history_supported: bool
+
+
+class FinancialRecordResponse(APIResponseModel):
+    symbol: str
+    report_period: date
+    announcement_date: date
+    available_at: datetime
+    roe: float | None
+    roa: float | None
+    gross_margin: float | None
+    net_margin: float | None
+    revenue: float | None
+    net_profit: float | None
+    deducted_net_profit: float | None
+    operating_cash_flow: float | None
+    total_assets: float | None
+    total_liabilities: float | None
+    source: str
+
+
+class FinancialRecordsResponse(APIResponseModel):
+    symbol: str
+    available: bool
+    as_of: datetime | None
+    items: list[FinancialRecordResponse]
+
+
+class ValuationRecordResponse(APIResponseModel):
+    symbol: str
+    as_of: datetime
+    pe: float | None
+    pb: float | None
+    ps: float | None
+    pcf: float | None
+    dividend_yield: float | None
+    total_market_cap: float | None
+    float_market_cap: float | None
+    source: str
+
+
+class ValuationLookupResponse(APIResponseModel):
+    symbol: str
+    available: bool
+    requested_as_of: datetime | None
+    record: ValuationRecordResponse | None
+
+
+class IndustryRecordResponse(APIResponseModel):
+    symbol: str
+    industry_code: str
+    industry_name: str
+    classification: str
+    effective_from: date
+    effective_to: date | None
+    source: str
+
+
+class IndustryRecordsResponse(APIResponseModel):
+    symbol: str
+    available: bool
+    as_of: date | None
+    items: list[IndustryRecordResponse]

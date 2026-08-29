@@ -6,14 +6,24 @@ from typing import Any
 import pyarrow as pa
 from pydantic import ValidationError
 
-from stock_selector.models import DailyBar, Instrument, RealtimeQuote
+from stock_selector.models import (
+    DailyBar,
+    FinancialRecord,
+    IndustryRecord,
+    Instrument,
+    RealtimeQuote,
+    ValuationRecord,
+)
 from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage.errors import StorageDataError
 from stock_selector.storage.schemas import (
     DAILY_BAR_SCHEMA,
+    FINANCIAL_SCHEMA,
+    INDUSTRY_SCHEMA,
     INSTRUMENT_SCHEMA,
     REALTIME_QUOTE_SCHEMA,
     RISK_STATE_SCHEMA,
+    VALUATION_SCHEMA,
 )
 
 
@@ -141,6 +151,104 @@ def table_to_risk_states(table: pa.Table) -> tuple[DatedRiskState, ...]:
         return tuple(DatedRiskState(**row) for row in table.to_pylist())
     except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
         raise StorageDataError("risk-state domain reconstruction failed") from exc
+
+
+def financial_records_to_table(records: tuple[FinancialRecord, ...]) -> pa.Table:
+    """Encode announcement-aware financial records using UTC availability instants."""
+    return _table_from_rows(
+        [
+            {
+                "symbol": item.symbol,
+                "report_period": item.report_period,
+                "announcement_date": item.announcement_date,
+                "available_at": _to_utc(item.available_at),
+                "roe": item.roe,
+                "roa": item.roa,
+                "gross_margin": item.gross_margin,
+                "net_margin": item.net_margin,
+                "revenue": item.revenue,
+                "net_profit": item.net_profit,
+                "deducted_net_profit": item.deducted_net_profit,
+                "operating_cash_flow": item.operating_cash_flow,
+                "total_assets": item.total_assets,
+                "total_liabilities": item.total_liabilities,
+                "source": item.source,
+            }
+            for item in records
+        ],
+        FINANCIAL_SCHEMA,
+        "financial-record encoding",
+    )
+
+
+def table_to_financial_records(table: pa.Table) -> tuple[FinancialRecord, ...]:
+    """Decode financial records through the point-in-time domain model."""
+    _require_schema(table, FINANCIAL_SCHEMA, "financial-record decoding")
+    try:
+        return tuple(FinancialRecord(**row) for row in table.to_pylist())
+    except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
+        raise StorageDataError("financial-record domain reconstruction failed") from exc
+
+
+def valuation_records_to_table(records: tuple[ValuationRecord, ...]) -> pa.Table:
+    """Encode daily valuation observations using UTC market-close instants."""
+    return _table_from_rows(
+        [
+            {
+                "symbol": item.symbol,
+                "as_of": _to_utc(item.as_of),
+                "pe": item.pe,
+                "pb": item.pb,
+                "ps": item.ps,
+                "pcf": item.pcf,
+                "dividend_yield": item.dividend_yield,
+                "total_market_cap": item.total_market_cap,
+                "float_market_cap": item.float_market_cap,
+                "source": item.source,
+            }
+            for item in records
+        ],
+        VALUATION_SCHEMA,
+        "valuation-record encoding",
+    )
+
+
+def table_to_valuation_records(table: pa.Table) -> tuple[ValuationRecord, ...]:
+    """Decode valuation records through the point-in-time domain model."""
+    _require_schema(table, VALUATION_SCHEMA, "valuation-record decoding")
+    try:
+        return tuple(ValuationRecord(**row) for row in table.to_pylist())
+    except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
+        raise StorageDataError("valuation-record domain reconstruction failed") from exc
+
+
+def industry_records_to_table(records: tuple[IndustryRecord, ...]) -> pa.Table:
+    """Encode exact industry effective intervals without manufacturing history."""
+    return _table_from_rows(
+        [
+            {
+                "symbol": item.symbol,
+                "industry_code": item.industry_code,
+                "industry_name": item.industry_name,
+                "classification": item.classification,
+                "effective_from": item.effective_from,
+                "effective_to": item.effective_to,
+                "source": item.source,
+            }
+            for item in records
+        ],
+        INDUSTRY_SCHEMA,
+        "industry-record encoding",
+    )
+
+
+def table_to_industry_records(table: pa.Table) -> tuple[IndustryRecord, ...]:
+    """Decode industry intervals through strict domain validation."""
+    _require_schema(table, INDUSTRY_SCHEMA, "industry-record decoding")
+    try:
+        return tuple(IndustryRecord(**row) for row in table.to_pylist())
+    except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
+        raise StorageDataError("industry-record domain reconstruction failed") from exc
 
 
 def _table_from_rows(rows: list[dict[str, Any]], schema: pa.Schema, operation: str) -> pa.Table:

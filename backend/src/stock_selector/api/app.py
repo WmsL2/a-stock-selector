@@ -12,6 +12,7 @@ from stock_selector.api.errors import APIResourceNotFound
 from stock_selector.api.routers import (
     config,
     daily,
+    fundamentals,
     health,
     instruments,
     quality,
@@ -48,6 +49,7 @@ def create_app(paths: AppPaths | None = None, settings: Settings | None = None) 
     application.include_router(health.router, prefix="/api")
     application.include_router(storage.router, prefix="/api")
     application.include_router(daily.router, prefix="/api")
+    application.include_router(fundamentals.router, prefix="/api")
     application.include_router(instruments.router, prefix="/api")
     application.include_router(config.router, prefix="/api")
     application.include_router(universe.router, prefix="/api")

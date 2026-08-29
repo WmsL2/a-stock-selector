@@ -187,3 +187,70 @@ export interface DailyStatusResponse {
   full_market_completeness_verified: boolean
   trading_calendar_gap_check_applied: boolean
 }
+
+export interface FundamentalsStatusResponse {
+  financial_symbols: number
+  financial_rows: number
+  latest_financial_available_at: string | null
+  valuation_symbols: number
+  valuation_rows: number
+  latest_valuation_at: string | null
+  industry_symbols: number
+  industry_rows: number
+  financial_point_in_time_safe: boolean
+  valuation_history_supported: boolean
+  industry_history_supported: boolean
+}
+
+export interface FinancialRecordResponse {
+  symbol: string
+  report_period: string
+  announcement_date: string
+  available_at: string
+  roe: number | null
+  revenue: number | null
+  net_profit: number | null
+  source: string
+}
+
+export interface FinancialRecordsResponse {
+  symbol: string
+  available: boolean
+  as_of: string | null
+  items: FinancialRecordResponse[]
+}
+
+export interface ValuationRecordResponse {
+  symbol: string
+  as_of: string
+  pe: number | null
+  pb: number | null
+  ps: number | null
+  pcf: number | null
+  total_market_cap: number | null
+  source: string
+}
+
+export interface ValuationLookupResponse {
+  symbol: string
+  available: boolean
+  requested_as_of: string | null
+  record: ValuationRecordResponse | null
+}
+
+export interface IndustryRecordResponse {
+  symbol: string
+  industry_code: string
+  industry_name: string
+  classification: string
+  effective_from: string
+  effective_to: string | null
+  source: string
+}
+
+export interface IndustryRecordsResponse {
+  symbol: string
+  available: boolean
+  as_of: string | null
+  items: IndustryRecordResponse[]
+}

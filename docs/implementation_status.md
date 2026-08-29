@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 08A - Monorepo Project Structure Refactor
+Task 09 - Fundamentals / Valuation / Industry
 
 ## Status
 
@@ -132,7 +132,7 @@ Completed
 - root PowerShell start and complete-validation scripts
 - repository-layout architecture documentation
 
-## Task 08A Verification
+## Task 09 Verification
 
 - `python -m pip install -e ".\\backend[dev]"` — PASS; the editable package remains
   `stock_selector` from `backend/src`.
@@ -140,8 +140,8 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 208 backend tests, 86% coverage, Ruff, mypy, frontend
-  type check, lint, Vitest and production build all completed successfully.
+- `scripts/test-all.ps1` — PASS: 216 backend tests, 84% coverage, Ruff, mypy,
+  frontend type check, lint, 23 Vitest tests and production build all completed.
 - Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
   returned 200.
 - Frontend script and Vite proxy smoke — PASS: localhost `/`, `/api/health` and
@@ -153,10 +153,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (208 passed).
+  (216 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (208 passed, 86% coverage).
+  — PASS (216 passed, 84% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -193,6 +193,20 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   `600519.SH` from 2026-08-03 through 2026-08-07 each returned 5 rows through the Sina
   fallback (`akshare:stock_zh_a_daily`); local storage remained 1 symbol / 5 rows with no
   duplicate dates. FastAPI and Vite `/api/daily/status` both returned 200, then stopped.
+- Fundamentals / valuation / industry foundation — complete: explicit-symbol collectors,
+  typed Parquet schemas and DuckDB views, read-only APIs and CLI status are implemented.
+  Financial records use the source announcement date plus conservative 15:30 Asia/Shanghai
+  availability; revisions are retained rather than overwritten. Valuation history currently
+  covers dated PE (TTM), PB, PCF and total market cap only (CNY-normalized); negative PE and
+  unavailable metrics are retained faithfully. CNInfo industry change events form intervals
+  within each classification; no pre-first-event history is fabricated.
+- Task 09 bounded live collection/API/Vue integration — PASS for `600519.SH` only:
+  the financial collector persisted 6 announcement-dated records, the valuation collector
+  persisted 1,218 dated observations, and the industry collector persisted 10 CNInfo
+  intervals. A direct temporary Uvicorn instance on port 8001 returned those counts from
+  `/api/fundamentals/status`; the per-instrument fundamentals, valuation and industry
+  endpoints returned 200 during the local integration check. The temporary process was
+  stopped afterwards.
 
 ## Not Implemented Yet
 
@@ -203,9 +217,6 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Fundamentals
-- Valuation
-- Industry classification
 - Factor preprocessing
 - Factor engine
 - BaseScore
@@ -222,9 +233,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 ## Next Task
 
-Task 09 - Fundamentals / Valuation / Industry
+Task 10 - Factor Preprocessing
 
-Task 09 NOT STARTED.
+Task 10 NOT STARTED.
 
 ## Roadmap
 
@@ -233,4 +244,5 @@ Task 09 NOT STARTED.
 - Tasks 06–08: structural universe, dated risk/quality semantics and bounded RAW daily
   price collection.
 - Task 08A: monorepo project-structure refactor (complete).
-- Task 09: Fundamentals / Valuation / Industry (not started).
+- Task 09: Fundamentals / Valuation / Industry (complete).
+- Task 10: Factor Preprocessing (not started).

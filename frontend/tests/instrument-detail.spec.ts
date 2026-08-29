@@ -7,6 +7,9 @@ const api = vi.hoisted(() => ({
   getInstrument: vi.fn(),
   getDailyBars: vi.fn(),
   getLatestRealtime: vi.fn(),
+  getFinancialRecords: vi.fn(),
+  getValuation: vi.fn(),
+  getIndustryRecords: vi.fn(),
 }))
 vi.mock('@/api/instruments', () => api)
 vi.mock('echarts', () => ({ init: vi.fn(() => ({ setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() })) }))
@@ -41,6 +44,9 @@ async function mountDetail(symbol = '600519.SH') {
 
 function resolveInstrument(): void {
   api.getInstrument.mockResolvedValue(testInstrument)
+  api.getFinancialRecords.mockResolvedValue({ symbol: '600519.SH', available: false, as_of: null, items: [] })
+  api.getValuation.mockResolvedValue({ symbol: '600519.SH', available: false, requested_as_of: null, record: null })
+  api.getIndustryRecords.mockResolvedValue({ symbol: '600519.SH', available: false, as_of: null, items: [] })
 }
 
 afterEach(() => vi.resetAllMocks())

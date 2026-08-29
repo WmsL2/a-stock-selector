@@ -1,16 +1,23 @@
 """Instrument metadata and locally persisted market-data routes."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from stock_selector.api.dependencies import canonical_symbol, get_repository
+from stock_selector.api.dependencies import (
+    aware_timestamp,
+    canonical_symbol,
+    get_repository,
+)
 from stock_selector.api.schemas import (
     DailyBarsResponse,
+    FinancialRecordsResponse,
+    IndustryRecordsResponse,
     InstrumentListResponse,
     InstrumentResponse,
     RealtimeLookupResponse,
+    ValuationLookupResponse,
 )
 from stock_selector.api.services import ReadOnlyMarketService
 from stock_selector.storage import LocalMarketRepository
@@ -63,4 +70,42 @@ def get_latest_realtime(
     repository: Annotated[LocalMarketRepository, Depends(get_repository)],
 ) -> RealtimeLookupResponse:
     """Return a target quote only from the newest local snapshot."""
-    return ReadOnlyMarketService(repository).get_latest_realtime(canonical_symbol(symbol))
+    return ReadOnlyMarketService(repository).get_latest_realtime(
+        canonical_symbol(symbol)
+    )
+
+
+@router.get("/{symbol}/fundamentals", response_model=FinancialRecordsResponse)
+def get_financials(
+    symbol: str,
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    as_of: datetime | None = None,
+) -> FinancialRecordsResponse:
+    """Return only financial revisions visible by the requested instant."""
+    return ReadOnlyMarketService(repository).get_financials(
+        canonical_symbol(symbol), aware_timestamp(as_of)
+    )
+
+
+@router.get("/{symbol}/valuation", response_model=ValuationLookupResponse)
+def get_valuation(
+    symbol: str,
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    as_of: datetime | None = None,
+) -> ValuationLookupResponse:
+    """Return the latest stored valuation no later than the requested instant."""
+    return ReadOnlyMarketService(repository).get_valuation(
+        canonical_symbol(symbol), aware_timestamp(as_of)
+    )
+
+
+@router.get("/{symbol}/industry", response_model=IndustryRecordsResponse)
+def get_industry(
+    symbol: str,
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    as_of: date | None = None,
+) -> IndustryRecordsResponse:
+    """Return reliable local industry intervals, optionally for one effective date."""
+    return ReadOnlyMarketService(repository).get_industry(
+        canonical_symbol(symbol), as_of
+    )

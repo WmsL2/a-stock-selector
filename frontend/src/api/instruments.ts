@@ -1,9 +1,12 @@
 import client from './client'
 import type {
   DailyBarsResponse,
+  FinancialRecordsResponse,
+  IndustryRecordsResponse,
   InstrumentListResponse,
   InstrumentResponse,
   RealtimeLookupResponse,
+  ValuationLookupResponse,
 } from './types'
 
 export interface InstrumentListParams {
@@ -49,5 +52,20 @@ export async function getLatestRealtime(
   const response = await client.get<RealtimeLookupResponse>(
     `/instruments/${encodeURIComponent(symbol)}/realtime`,
   )
+  return response.data
+}
+
+export async function getFinancialRecords(symbol: string): Promise<FinancialRecordsResponse> {
+  const response = await client.get<FinancialRecordsResponse>(`/instruments/${encodeURIComponent(symbol)}/fundamentals`)
+  return response.data
+}
+
+export async function getValuation(symbol: string): Promise<ValuationLookupResponse> {
+  const response = await client.get<ValuationLookupResponse>(`/instruments/${encodeURIComponent(symbol)}/valuation`)
+  return response.data
+}
+
+export async function getIndustryRecords(symbol: string): Promise<IndustryRecordsResponse> {
+  const response = await client.get<IndustryRecordsResponse>(`/instruments/${encodeURIComponent(symbol)}/industry`)
   return response.data
 }

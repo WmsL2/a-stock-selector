@@ -13,8 +13,16 @@ from stock_selector.models import (
     AdjustmentType,
     Board,
     DailyBar,
+    FinancialRecord,
+    IndustryRecord,
     Instrument,
     RealtimeQuote,
+    ValuationRecord,
+)
+from stock_selector.providers.akshare_fundamentals_mapping import (
+    map_financial_records,
+    map_industry_records,
+    map_valuation_records,
 )
 from stock_selector.providers.akshare_mapping import (
     map_bj_instruments,
@@ -28,6 +36,8 @@ from stock_selector.providers.akshare_mapping import (
 )
 from stock_selector.providers.base import (
     DailyMarketDataProvider,
+    FundamentalDataProvider,
+    IndustryDataProvider,
     InstrumentProvider,
     ProviderInfo,
     RealtimeMarketDataProvider,
@@ -39,7 +49,10 @@ from stock_selector.providers.errors import (
 )
 from stock_selector.providers.requests import (
     DailyBarsRequest,
+    FinancialRecordsRequest,
+    IndustryRecordsRequest,
     RealtimeQuotesRequest,
+    ValuationRecordsRequest,
 )
 
 _LOGGER = logging.getLogger("stock_selector.providers.akshare")
@@ -50,6 +63,8 @@ class AKShareProvider(
     InstrumentProvider,
     DailyMarketDataProvider,
     RealtimeMarketDataProvider,
+    FundamentalDataProvider,
+    IndustryDataProvider,
 ):
     """AKShare adapter that exposes only normalized domain-model batches."""
 
@@ -227,3 +242,85 @@ class AKShareProvider(
             raise ProviderConnectionError(
                 "akshare", "stock_info_bj_name_code", "Beijing listing request failed"
             ) from exc
+
+    def get_financial_records(
+        self, request: FinancialRecordsRequest
+    ) -> tuple[FinancialRecord, ...]:
+        """Fetch only financial rows with provider-supplied notice dates."""
+        records: list[FinancialRecord] = []
+        for symbol in request.symbols:
+            try:
+                frame = cast(
+                    pd.DataFrame,
+                    ak.stock_financial_analysis_indicator_em(
+                        symbol=symbol, indicator="按报告期"
+                    ),
+                )
+            except Exception as exc:
+                raise ProviderConnectionError(
+                    "akshare", "stock_financial_analysis_indicator_em", "financial request failed"
+                ) from exc
+            mapped = map_financial_records(frame, symbol)
+            records.extend(
+                item
+                for item in mapped
+                if (request.start_period is None or item.report_period >= request.start_period)
+                and (request.end_period is None or item.report_period <= request.end_period)
+            )
+        return tuple(sorted(records, key=lambda item: (item.symbol, item.report_period, item.available_at)))
+
+    def get_valuation_records(
+        self, request: ValuationRecordsRequest
+    ) -> tuple[ValuationRecord, ...]:
+        """Fetch dated Baidu valuation history; unsupported fields remain null."""
+        records: list[ValuationRecord] = []
+        for symbol in request.symbols:
+            raw_symbol = symbol.split(".", maxsplit=1)[0]
+            frames: dict[str, pd.DataFrame] = {}
+            for indicator in ("市盈率(TTM)", "市净率", "市现率", "总市值"):
+                try:
+                    frames[indicator] = cast(
+                        pd.DataFrame,
+                        ak.stock_zh_valuation_baidu(
+                            symbol=raw_symbol, indicator=indicator, period="全部"
+                        ),
+                    )
+                except Exception as exc:
+                    raise ProviderConnectionError(
+                        "akshare", "stock_zh_valuation_baidu", "valuation request failed"
+                    ) from exc
+            records.extend(
+                item
+                for item in map_valuation_records(frames, symbol)
+                if request.as_of is None or item.as_of <= request.as_of
+            )
+        return tuple(sorted(records, key=lambda item: (item.symbol, item.as_of)))
+
+    def get_industry_records(
+        self, request: IndustryRecordsRequest
+    ) -> tuple[IndustryRecord, ...]:
+        """Fetch CNInfo industry change events with provider-declared change dates."""
+        records: list[IndustryRecord] = []
+        end_date = request.as_of.strftime("%Y%m%d") if request.as_of is not None else datetime.now(_SHANGHAI).strftime("%Y%m%d")
+        for symbol in request.symbols:
+            try:
+                frame = cast(
+                    pd.DataFrame,
+                    ak.stock_industry_change_cninfo(
+                        symbol=symbol.split(".", maxsplit=1)[0],
+                        start_date="19900101",
+                        end_date=end_date,
+                    ),
+                )
+            except Exception as exc:
+                raise ProviderConnectionError(
+                    "akshare", "stock_industry_change_cninfo", "industry request failed"
+                ) from exc
+            mapped = map_industry_records(frame, symbol)
+            records.extend(
+                item
+                for item in mapped
+                if request.as_of is None
+                or item.effective_from <= request.as_of
+            )
+        return tuple(sorted(records, key=lambda item: (item.symbol, item.classification, item.effective_from)))

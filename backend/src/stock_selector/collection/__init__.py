@@ -6,6 +6,12 @@ from stock_selector.collection.errors import (
     CollectionError,
     CollectionNotSupportedError,
 )
+from stock_selector.collection.fundamentals import (
+    FinancialCollector,
+    FundamentalsCollectionReport,
+    IndustryCollector,
+    ValuationCollector,
+)
 from stock_selector.collection.models import (
     DailyCollectionReport,
     DailyCollectionRequest,
@@ -22,4 +28,8 @@ __all__ = [
     "DailyCollectionStatus",
     "DailyPriceCollector",
     "DailySymbolCollectionResult",
+    "FinancialCollector",
+    "FundamentalsCollectionReport",
+    "IndustryCollector",
+    "ValuationCollector",
 ]

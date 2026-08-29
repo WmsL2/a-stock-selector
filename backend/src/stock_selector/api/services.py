@@ -1,12 +1,17 @@
 """Read-only mappings between local domain records and HTTP DTOs."""
 
-from datetime import date
+from datetime import date, datetime
 
 from stock_selector.api.errors import APIResourceNotFound
 from stock_selector.api.schemas import (
     DailyBarResponse,
     DailyBarsResponse,
     DailyStatusResponse,
+    FinancialRecordResponse,
+    FinancialRecordsResponse,
+    FundamentalsStatusResponse,
+    IndustryRecordResponse,
+    IndustryRecordsResponse,
     InstrumentListResponse,
     InstrumentResponse,
     QualityStatusResponse,
@@ -16,9 +21,19 @@ from stock_selector.api.schemas import (
     UniverseBoardCountsResponse,
     UniverseExclusionCountsResponse,
     UniverseStatusResponse,
+    ValuationLookupResponse,
+    ValuationRecordResponse,
 )
 from stock_selector.config.models import Settings
-from stock_selector.models import Board, DailyBar, Instrument, RealtimeQuote
+from stock_selector.models import (
+    Board,
+    DailyBar,
+    FinancialRecord,
+    IndustryRecord,
+    Instrument,
+    RealtimeQuote,
+    ValuationRecord,
+)
 from stock_selector.quality import CurrentQualityService
 from stock_selector.storage import LocalMarketRepository
 from stock_selector.universe import CurrentUniverseService, UniverseExclusionReason
@@ -63,6 +78,22 @@ class ReadOnlyMarketService:
             corporate_action_adjusted=False,
             full_market_completeness_verified=False,
             trading_calendar_gap_check_applied=False,
+        )
+
+    def fundamentals_status(self) -> FundamentalsStatusResponse:
+        stats = self._repository.get_stats()
+        return FundamentalsStatusResponse(
+            financial_symbols=stats.financial_symbols,
+            financial_rows=stats.financial_rows,
+            latest_financial_available_at=stats.latest_financial_available_at,
+            valuation_symbols=stats.valuation_symbols,
+            valuation_rows=stats.valuation_rows,
+            latest_valuation_at=stats.latest_valuation_at,
+            industry_symbols=stats.industry_symbols,
+            industry_rows=stats.industry_rows,
+            financial_point_in_time_safe=True,
+            valuation_history_supported=True,
+            industry_history_supported=True,
         )
 
     def quality_status(self, settings: Settings) -> QualityStatusResponse:
@@ -173,6 +204,48 @@ class ReadOnlyMarketService:
             quote=_realtime_quote_response(quote) if quote is not None else None,
         )
 
+    def get_financials(
+        self, symbol: str, as_of: datetime | None
+    ) -> FinancialRecordsResponse:
+        self._find_instrument(symbol)
+        items = (
+            self._repository.load_latest_financials_as_of(symbol, as_of)
+            if as_of is not None
+            else self._repository.load_financial_records(symbol)
+        )
+        return FinancialRecordsResponse(
+            symbol=symbol,
+            available=bool(items),
+            as_of=as_of,
+            items=[_financial_record_response(item) for item in items],
+        )
+
+    def get_valuation(
+        self, symbol: str, as_of: datetime | None
+    ) -> ValuationLookupResponse:
+        self._find_instrument(symbol)
+        if as_of is not None:
+            record = self._repository.load_latest_valuation_as_of(symbol, as_of)
+        else:
+            records = self._repository.load_valuation_records(symbol)
+            record = records[-1] if records else None
+        return ValuationLookupResponse(
+            symbol=symbol,
+            available=record is not None,
+            requested_as_of=as_of,
+            record=_valuation_record_response(record) if record is not None else None,
+        )
+
+    def get_industry(self, symbol: str, as_of: date | None) -> IndustryRecordsResponse:
+        self._find_instrument(symbol)
+        items = self._repository.load_industry_records(symbol, as_of=as_of)
+        return IndustryRecordsResponse(
+            symbol=symbol,
+            available=bool(items),
+            as_of=as_of,
+            items=[_industry_record_response(item) for item in items],
+        )
+
     def _find_instrument(self, symbol: str) -> Instrument:
         for instrument in self._repository.load_instruments():
             if instrument.symbol == symbol:
@@ -224,3 +297,15 @@ def _realtime_quote_response(quote: RealtimeQuote) -> RealtimeQuoteResponse:
         ingested_at=quote.ingested_at,
         source=quote.source,
     )
+
+
+def _financial_record_response(record: FinancialRecord) -> FinancialRecordResponse:
+    return FinancialRecordResponse(**record.model_dump())
+
+
+def _valuation_record_response(record: ValuationRecord) -> ValuationRecordResponse:
+    return ValuationRecordResponse(**record.model_dump())
+
+
+def _industry_record_response(record: IndustryRecord) -> IndustryRecordResponse:
+    return IndustryRecordResponse(**record.model_dump())

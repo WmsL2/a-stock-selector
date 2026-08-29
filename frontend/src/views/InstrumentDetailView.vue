@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { getDailyBars, getInstrument, getLatestRealtime } from '@/api/instruments'
-import type { DailyBarsResponse, InstrumentResponse, RealtimeLookupResponse } from '@/api/types'
+import { getDailyBars, getFinancialRecords, getIndustryRecords, getInstrument, getLatestRealtime, getValuation } from '@/api/instruments'
+import type { DailyBarsResponse, FinancialRecordsResponse, IndustryRecordsResponse, InstrumentResponse, RealtimeLookupResponse, ValuationLookupResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 import StockDailyChart from '@/components/StockDailyChart.vue'
 import { formatLocalTime, formatNumber } from '@/utils/format'
@@ -13,6 +13,9 @@ const symbol = computed(() => String(route.params.symbol ?? ''))
 const instrument = ref<InstrumentResponse | null>(null)
 const daily = ref<DailyBarsResponse | null>(null)
 const realtime = ref<RealtimeLookupResponse | null>(null)
+const financials = ref<FinancialRecordsResponse | null>(null)
+const valuation = ref<ValuationLookupResponse | null>(null)
+const industries = ref<IndustryRecordsResponse | null>(null)
 const loading = ref(false)
 const instrumentError = ref<string | null>(null)
 const dailyError = ref<string | null>(null)
@@ -31,10 +34,16 @@ async function loadDetail(): Promise<void> {
   instrument.value = null
   daily.value = null
   realtime.value = null
-  const [instrumentResult, dailyResult, realtimeResult] = await Promise.allSettled([
+  financials.value = null
+  valuation.value = null
+  industries.value = null
+  const [instrumentResult, dailyResult, realtimeResult, financialResult, valuationResult, industryResult] = await Promise.allSettled([
     getInstrument(symbol.value),
     getDailyBars(symbol.value, { limit: 500 }),
     getLatestRealtime(symbol.value),
+    getFinancialRecords(symbol.value),
+    getValuation(symbol.value),
+    getIndustryRecords(symbol.value),
   ])
   if (instrumentResult.status === 'fulfilled') {
     instrument.value = instrumentResult.value
@@ -51,6 +60,9 @@ async function loadDetail(): Promise<void> {
   } else {
     realtimeError.value = '无法读取本地实时数据。'
   }
+  if (financialResult.status === 'fulfilled') financials.value = financialResult.value
+  if (valuationResult.status === 'fulfilled') valuation.value = valuationResult.value
+  if (industryResult.status === 'fulfilled') industries.value = industryResult.value
   loading.value = false
 }
 
@@ -78,5 +90,14 @@ onMounted(() => void loadDetail())
     </section>
     <section class="panel"><h2>本地日线 K 线</h2><el-alert v-if="dailyError" :title="dailyError" type="error" show-icon :closable="false" /><StockDailyChart v-else :bars="daily?.items ?? []" /></section>
     <section class="panel"><h2>最近本地 DailyBar</h2><el-table v-if="!dailyError" :data="daily?.items ?? []"><el-table-column prop="trade_date" label="日期" /><el-table-column prop="open" label="开盘" /><el-table-column prop="high" label="最高" /><el-table-column prop="low" label="最低" /><el-table-column prop="close" label="收盘" /><el-table-column prop="volume" label="成交量" /><el-table-column prop="amount" label="成交额" /><el-table-column prop="adjustment" label="复权口径" /><el-table-column prop="source" label="数据源" /></el-table><EmptyState v-if="!dailyError && daily && daily.items.length === 0" title="暂无本地日线数据" description="股票基础信息存在，但尚未保存日线数据。" /></section>
+    <section class="panel"><h2>已公开财务、估值与行业</h2>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="最新财报期">{{ financials?.items.at(-1)?.report_period ?? '暂无本地数据' }}</el-descriptions-item><el-descriptions-item label="公告 / 系统可用">{{ financials?.items.at(-1) ? `${financials.items.at(-1)?.announcement_date} / ${formatLocalTime(financials.items.at(-1)?.available_at ?? null)}` : '—' }}</el-descriptions-item>
+        <el-descriptions-item label="ROE (%)">{{ formatNumber(financials?.items.at(-1)?.roe ?? null) }}</el-descriptions-item><el-descriptions-item label="净利润 (CNY)">{{ formatNumber(financials?.items.at(-1)?.net_profit ?? null) }}</el-descriptions-item>
+        <el-descriptions-item label="估值 as_of">{{ formatLocalTime(valuation?.record?.as_of ?? null) }}</el-descriptions-item><el-descriptions-item label="PE / PB / PCF">{{ `${formatNumber(valuation?.record?.pe ?? null)} / ${formatNumber(valuation?.record?.pb ?? null)} / ${formatNumber(valuation?.record?.pcf ?? null)}` }}</el-descriptions-item>
+        <el-descriptions-item label="行业">{{ industries?.items.at(-1)?.industry_name ?? '暂无可靠本地数据' }}</el-descriptions-item><el-descriptions-item label="有效区间">{{ industries?.items.at(-1) ? `${industries.items.at(-1)?.effective_from} 至 ${industries.items.at(-1)?.effective_to ?? '当前'}` : '—' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-alert title="报告期不等于市场可用时间；历史读取仅使用公告日 15:30 后已经公开的本地记录。" type="info" :closable="false" />
+    </section>
   </template>
 </template>

@@ -2,10 +2,18 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from itertools import pairwise
 from pathlib import Path
 
 from stock_selector.config.paths import AppPaths
-from stock_selector.models import DailyBar, Instrument, RealtimeQuote
+from stock_selector.models import (
+    DailyBar,
+    FinancialRecord,
+    IndustryRecord,
+    Instrument,
+    RealtimeQuote,
+    ValuationRecord,
+)
 from stock_selector.models.common import validate_symbol
 from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage.duckdb_catalog import DuckDBCatalog
@@ -29,6 +37,14 @@ class StorageStats:
     risk_state_rows: int
     risk_state_dates: int
     latest_risk_state_date: date | None
+    financial_rows: int
+    financial_symbols: int
+    latest_financial_available_at: datetime | None
+    valuation_rows: int
+    valuation_symbols: int
+    latest_valuation_at: datetime | None
+    industry_rows: int
+    industry_symbols: int
     disk_usage_bytes: int
 
 
@@ -55,6 +71,9 @@ class LocalMarketRepository:
                 self._parquet.daily_bars_dir,
                 self._parquet.realtime_quotes_dir,
                 self._parquet.risk_states_dir,
+                self._parquet.financials_dir,
+                self._parquet.valuations_dir,
+                self._parquet.industries_dir,
                 self.paths.metadata_dir,
             ):
                 directory.mkdir(parents=True, exist_ok=True)
@@ -201,6 +220,138 @@ class LocalMarketRepository:
             states = tuple(state for state in states if state.symbol in wanted)
         return tuple(sorted(states, key=lambda item: item.symbol))
 
+    def upsert_financial_records(self, records: tuple[FinancialRecord, ...]) -> None:
+        """Merge one symbol's revision-safe financial records by full PIT key."""
+        self._require_initialized()
+        if not records:
+            return
+        _require_one_symbol(records, "financial-record upsert")
+        _require_unique_financial_keys(records, "financial-record input")
+        symbol = records[0].symbol
+        existing = self._parquet.read_financial_records(symbol)
+        _require_one_symbol(existing, "persisted financial records", allow_empty=True)
+        _require_unique_financial_keys(existing, "persisted financial records")
+        merged = {
+            (item.report_period, item.available_at): item
+            for item in existing
+        }
+        merged.update({(item.report_period, item.available_at): item for item in records})
+        ordered = tuple(
+            sorted(merged.values(), key=lambda item: (item.report_period, item.available_at))
+        )
+        self._parquet.write_financial_records(symbol, ordered)
+        self._catalog.refresh_views()
+
+    def load_financial_records(
+        self, symbol: str, *, available_at_or_before: datetime | None = None
+    ) -> tuple[FinancialRecord, ...]:
+        """Load all known revisions visible no later than an explicit instant."""
+        self._require_initialized()
+        _validate_storage_symbol(symbol)
+        records = self._parquet.read_financial_records(symbol)
+        _require_one_symbol(records, "persisted financial records", allow_empty=True)
+        _require_unique_financial_keys(records, "persisted financial records")
+        return tuple(
+            item
+            for item in sorted(records, key=lambda value: (value.report_period, value.available_at))
+            if available_at_or_before is None or item.available_at <= available_at_or_before
+        )
+
+    def load_latest_financials_as_of(
+        self, symbol: str, available_at_or_before: datetime
+    ) -> tuple[FinancialRecord, ...]:
+        """Select the newest visible revision for each report period at one PIT instant."""
+        visible = self.load_financial_records(
+            symbol, available_at_or_before=available_at_or_before
+        )
+        latest_by_period: dict[date, FinancialRecord] = {}
+        for item in visible:
+            previous = latest_by_period.get(item.report_period)
+            if previous is None or item.available_at > previous.available_at:
+                latest_by_period[item.report_period] = item
+        return tuple(latest_by_period[period] for period in sorted(latest_by_period))
+
+    def upsert_valuation_records(self, records: tuple[ValuationRecord, ...]) -> None:
+        """Merge one symbol's dated valuation observations; incoming exact instants win."""
+        self._require_initialized()
+        if not records:
+            return
+        _require_one_symbol(records, "valuation-record upsert")
+        _require_unique_valuation_keys(records, "valuation-record input")
+        symbol = records[0].symbol
+        existing = self._parquet.read_valuation_records(symbol)
+        _require_one_symbol(existing, "persisted valuation records", allow_empty=True)
+        _require_unique_valuation_keys(existing, "persisted valuation records")
+        merged = {item.as_of: item for item in existing}
+        merged.update({item.as_of: item for item in records})
+        self._parquet.write_valuation_records(
+            symbol, tuple(sorted(merged.values(), key=lambda item: item.as_of))
+        )
+        self._catalog.refresh_views()
+
+    def load_valuation_records(
+        self, symbol: str, *, as_of_or_before: datetime | None = None
+    ) -> tuple[ValuationRecord, ...]:
+        """Load only valuation observations no later than the requested instant."""
+        self._require_initialized()
+        _validate_storage_symbol(symbol)
+        records = self._parquet.read_valuation_records(symbol)
+        _require_one_symbol(records, "persisted valuation records", allow_empty=True)
+        _require_unique_valuation_keys(records, "persisted valuation records")
+        return tuple(
+            item
+            for item in sorted(records, key=lambda value: value.as_of)
+            if as_of_or_before is None or item.as_of <= as_of_or_before
+        )
+
+    def load_latest_valuation_as_of(
+        self, symbol: str, as_of_or_before: datetime
+    ) -> ValuationRecord | None:
+        """Return the latest available valuation at-or-before a requested instant."""
+        records = self.load_valuation_records(symbol, as_of_or_before=as_of_or_before)
+        return records[-1] if records else None
+
+    def upsert_industry_records(self, records: tuple[IndustryRecord, ...]) -> None:
+        """Merge one symbol's reliable industry intervals without overlap ambiguity."""
+        self._require_initialized()
+        if not records:
+            return
+        _require_one_symbol(records, "industry-record upsert")
+        _require_unique_industry_keys(records, "industry-record input")
+        symbol = records[0].symbol
+        existing = self._parquet.read_industry_records(symbol)
+        _require_one_symbol(existing, "persisted industry records", allow_empty=True)
+        _require_unique_industry_keys(existing, "persisted industry records")
+        merged = {
+            (item.classification, item.effective_from): item
+            for item in existing
+        }
+        merged.update({(item.classification, item.effective_from): item for item in records})
+        ordered = tuple(sorted(merged.values(), key=lambda item: (item.classification, item.effective_from)))
+        _require_non_overlapping_industry_intervals(ordered)
+        self._parquet.write_industry_records(symbol, ordered)
+        self._catalog.refresh_views()
+
+    def load_industry_records(
+        self, symbol: str, *, as_of: date | None = None
+    ) -> tuple[IndustryRecord, ...]:
+        """Read exact industry intervals, optionally retaining only those covering a date."""
+        self._require_initialized()
+        _validate_storage_symbol(symbol)
+        records = self._parquet.read_industry_records(symbol)
+        _require_one_symbol(records, "persisted industry records", allow_empty=True)
+        _require_unique_industry_keys(records, "persisted industry records")
+        _require_non_overlapping_industry_intervals(records)
+        ordered = tuple(sorted(records, key=lambda item: (item.classification, item.effective_from)))
+        if as_of is None:
+            return ordered
+        return tuple(
+            item
+            for item in ordered
+            if item.effective_from <= as_of
+            and (item.effective_to is None or as_of <= item.effective_to)
+        )
+
     def get_stats(self) -> StorageStats:
         """Report actual selected coverage and storage bytes without scanning project caches."""
         self._require_initialized()
@@ -217,6 +368,16 @@ class LocalMarketRepository:
             risk_dates,
             latest_risk_date,
         ) = self._catalog.counts()
+        (
+            financial_rows,
+            financial_symbols,
+            latest_financial_available_at,
+            valuation_rows,
+            valuation_symbols,
+            latest_valuation_at,
+            industry_rows,
+            industry_symbols,
+        ) = self._catalog.fundamental_counts()
         return StorageStats(
             instrument_rows=len(self.load_instruments()),
             daily_bar_rows=daily_rows,
@@ -230,6 +391,14 @@ class LocalMarketRepository:
             risk_state_rows=risk_rows,
             risk_state_dates=risk_dates,
             latest_risk_state_date=latest_risk_date,
+            financial_rows=financial_rows,
+            financial_symbols=financial_symbols,
+            latest_financial_available_at=latest_financial_available_at,
+            valuation_rows=valuation_rows,
+            valuation_symbols=valuation_symbols,
+            latest_valuation_at=latest_valuation_at,
+            industry_rows=industry_rows,
+            industry_symbols=industry_symbols,
             disk_usage_bytes=self._disk_usage_bytes(),
         )
 
@@ -274,3 +443,43 @@ def _require_unique_risk_symbols(
 ) -> None:
     if len({record.symbol for record in records}) != len(records):
         raise StorageDataError(f"{operation} contains duplicate symbols")
+
+
+def _require_one_symbol(
+    records: tuple[FinancialRecord, ...] | tuple[ValuationRecord, ...] | tuple[IndustryRecord, ...],
+    operation: str,
+    *,
+    allow_empty: bool = False,
+) -> None:
+    if not records:
+        if allow_empty:
+            return
+        raise StorageDataError(f"{operation} must not be empty")
+    if len({item.symbol for item in records}) != 1:
+        raise StorageDataError(f"{operation} requires exactly one symbol")
+
+
+def _require_unique_financial_keys(records: tuple[FinancialRecord, ...], operation: str) -> None:
+    if len({(item.report_period, item.available_at) for item in records}) != len(records):
+        raise StorageDataError(f"{operation} contains duplicate logical keys")
+
+
+def _require_unique_valuation_keys(records: tuple[ValuationRecord, ...], operation: str) -> None:
+    if len({item.as_of for item in records}) != len(records):
+        raise StorageDataError(f"{operation} contains duplicate logical keys")
+
+
+def _require_unique_industry_keys(records: tuple[IndustryRecord, ...], operation: str) -> None:
+    if len({(item.classification, item.effective_from) for item in records}) != len(records):
+        raise StorageDataError(f"{operation} contains duplicate logical keys")
+
+
+def _require_non_overlapping_industry_intervals(records: tuple[IndustryRecord, ...]) -> None:
+    by_classification: dict[str, list[IndustryRecord]] = {}
+    for item in records:
+        by_classification.setdefault(item.classification, []).append(item)
+    for classification_records in by_classification.values():
+        ordered = sorted(classification_records, key=lambda item: item.effective_from)
+        for previous, current in pairwise(ordered):
+            if previous.effective_to is None or current.effective_from <= previous.effective_to:
+                raise StorageDataError("industry intervals must not overlap within a classification")
