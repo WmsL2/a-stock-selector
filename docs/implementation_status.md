@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 05A - FastAPI Read-only API Foundation
+Task 05B - Vue 3 Frontend Skeleton
 
 ## Status
 
@@ -77,6 +77,20 @@ Completed
 - read-only HTTP boundary
 - API/storage/provider separation
 - OpenAPI development docs
+- Vue 3 application shell
+- TypeScript frontend
+- Vite development server
+- Vue Router navigation
+- Pinia application state
+- Element Plus research-terminal layout
+- FastAPI Axios client
+- storage dashboard
+- instrument browser
+- local stock detail page
+- ECharts local OHLC chart
+- safe public settings page
+- truthful unimplemented states
+- Vite-to-FastAPI proxy integration
 
 ## Tests
 
@@ -90,6 +104,11 @@ Completed
 - `ruff check .` — PASS
 - `mypy src` — PASS
 - `git diff --check` — PASS
+- `cd frontend && npm install` — PASS
+- `cd frontend && npm run type-check` — PASS
+- `cd frontend && npm run lint` — PASS
+- `cd frontend && npm run test` — PASS (12 passed)
+- `cd frontend && npm run build` — PASS
 
 ## Live Smoke
 
@@ -107,6 +126,9 @@ Completed
 - FastAPI Uvicorn/API smoke — PASS on `127.0.0.1:8000`: `/api/health`,
   `/api/storage/status`, `/api/instruments/600519.SH`, and `/docs` returned 200.
   The server was stopped after the local smoke check.
+- Vue/FastAPI integration — PASS on localhost: Vite `/` returned 200; Vite proxy
+  requests to `/api/health` and `/api/storage/status` returned 200. Both local
+  development processes were stopped after verification.
 
 ## Not Implemented Yet
 
@@ -133,4 +155,4 @@ Completed
 
 ## Next Task
 
-Task 05B - Vue 3 Frontend Skeleton
+Task 06 - A-share Universe

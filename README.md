@@ -72,8 +72,28 @@ python -m stock_selector config paths
 - `GET /api/instruments/{symbol}/realtime`
 - `GET /api/config/public`
 
-前端路线为 FastAPI + Vue 3 + TypeScript + Vite；Vue 实现属于后续 Task 05B，当前仓库尚未创建
-前端项目。旧的 Streamlit Task 05A 已取消。
+前端路线为 FastAPI + Vue 3 + TypeScript + Vite。旧的 Streamlit 路线已取消。
+
+## Frontend
+
+前端使用 Vue 3、TypeScript、Vite、Element Plus、Pinia、Axios 和 ECharts。先在一个终端启动本地
+后端：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn stock_selector.api.app:app --host 127.0.0.1 --port 8000
+```
+
+再启动前端：
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+打开 <http://127.0.0.1:5173>。Vite 开发代理将 `/api` 转发到 `127.0.0.1:8000`，因此前端仅通过
+本地 FastAPI 读取数据。当前 UI 真实展示本地存储状态、股票基础信息、保存的日线和实时快照；
+BaseScore、RealtimeScore、因子研究和回测尚未实现，页面会明确说明其状态。
 
 ## Storage strategy
 
