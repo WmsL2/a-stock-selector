@@ -45,3 +45,19 @@ strictly positive prior base. Quality, Value and Growth use industry percentiles
 use market percentiles. Current operational RAW daily bars are never consumed: price factors
 require a caller-provided `corporate_action_adjusted=True` series, which this task does not
 manufacture or fetch.
+
+## BaseScore
+
+Task 12 composes the completed five-family scores through the caller-supplied `FactorsConfig`:
+Quality 0.30, Value 0.25, Growth 0.20, Momentum 0.15, and Low Volatility 0.10 by default.
+An enabled family with no score is not treated as a zero: its configured weight is omitted from
+the BaseScore denominator, and the weights of available enabled families are renormalized. For
+example, when Quality=80, Value=70 and Growth=60 are available but Momentum and Low Volatility
+are missing, BaseScore is `(80×0.30 + 70×0.25 + 60×0.20) / 0.75`.
+
+`data_completeness` is the available enabled-family weight divided by all enabled-family weight.
+`confidence` is the corresponding configured-weight average of available family component
+coverage; it therefore cannot exceed completeness. `confidence_adjusted_score = BaseScore ×
+confidence` is a supplemental conservative reference, not a replacement for BaseScore. The
+engine returns the configured and renormalized weight plus weighted contribution for every family
+in fixed order, and does not fetch data, filter securities, rank results or persist snapshots.
