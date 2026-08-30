@@ -25,11 +25,18 @@ def test_realtime_status_reports_a_fresh_local_snapshot(
     client: TestClient, repository: LocalMarketRepository
 ) -> None:
     now = datetime.now(UTC)
-    repository.save_realtime_snapshot((_quote(now),))
+    repository.save_realtime_snapshot((_quote(now, source_timestamp=now),))
+    before = repository.load_latest_realtime_snapshot()
     fresh = client.get("/api/realtime/status")
     assert fresh.status_code == 200
-    assert fresh.json()["freshness"] == "fresh"
-    assert fresh.json()["ranking_allowed"] is True
+    body = fresh.json()
+    assert body["freshness"] == "fresh"
+    assert body["ranking_allowed"] is True
+    assert body["source"] == "test:local"
+    assert body["stored_quotes"] == 1
+    assert body["source_timestamp_available_quotes"] == 1
+    assert body["snapshot_scope"] == "selective_persisted"
+    assert repository.load_latest_realtime_snapshot() == before
 
 
 def test_realtime_status_reports_a_stale_local_snapshot(
@@ -45,10 +52,15 @@ def test_realtime_status_reports_a_stale_local_snapshot(
     assert stale.json()["snapshot_scope"] == "selective_persisted"
 
 
-def _quote(ingested_at: datetime) -> RealtimeQuote:
+def _quote(
+    ingested_at: datetime,
+    *,
+    source_timestamp: datetime | None = None,
+) -> RealtimeQuote:
     return RealtimeQuote(
         symbol="600519.SH",
         price=10,
         ingested_at=ingested_at,
         source="test:local",
+        source_timestamp=source_timestamp,
     )

@@ -23,6 +23,7 @@ def test_capture_request_keeps_all_market_distinct_and_orders_explicit_symbols()
     [
         {"symbols": ()},
         {"symbols": ("600519.SH", "600519.SH")},
+        {"symbols": ("invalid",)},
         {"persist_symbols": ("600519.SH", "600519.SH")},
         {"symbols": ("600519.SH",), "persist_symbols": ("invalid",)},
         {"symbols": ("600519.SH",), "persist_symbols": ("000001.SZ",)},

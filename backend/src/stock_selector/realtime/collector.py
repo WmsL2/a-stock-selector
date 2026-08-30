@@ -1,4 +1,5 @@
 from stock_selector.providers.base import RealtimeMarketDataProvider
+from stock_selector.providers.errors import ProviderError
 from stock_selector.providers.requests import RealtimeQuotesRequest
 from stock_selector.storage import LocalMarketRepository, StorageError
 
@@ -23,7 +24,7 @@ class RealtimeSnapshotCollector:
             quotes = self._provider.get_realtime_quotes(
                 RealtimeQuotesRequest(symbols=request.symbols)
             )
-        except Exception as exc:
+        except ProviderError as exc:
             raise RealtimeCollectionError("provider realtime capture failed") from exc
         if not quotes:
             raise RealtimeDataError("realtime snapshot must not be empty")

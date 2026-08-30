@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 13 - Explanation & Risk
+Task 14 - Realtime Market Data Foundation
 
 ## Status
 
@@ -208,8 +208,8 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 308 backend tests, 88% coverage, Ruff, mypy,
-  frontend type check, lint, 29 Vitest tests and production build all completed.
+- `scripts/test-all.ps1` — PASS: 351 backend tests, 88% coverage, Ruff, mypy,
+  frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
   verified with synthetic temporary repositories; confidence-adjusted score does not rank.
@@ -239,14 +239,14 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (308 passed; one third-party TestClient deprecation warning).
+  (351 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (308 passed, 88% coverage).
+  — PASS (351 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
-  `npm run test` — PASS (29 passed), and `npm run build` — PASS.
+  `npm run test` — PASS (34 passed), and `npm run build` — PASS.
 - `git diff --check` — PASS.
 
 ## Live Smoke
@@ -346,10 +346,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   `None` all-market scope from an explicit canonical symbol tuple, rejects empty and
   duplicate batches, validates exact explicit request/response equality, and requires a
   single source plus a single aware `ingested_at` across a returned snapshot.
-- Full-market capture is intentionally in-memory only. Persistence is restricted to an
-  explicit requested subset, and CLI `realtime capture --all-market --persist` is rejected
-  before provider construction. No scheduler, polling loop, or full-market runtime write was
-  added.
+- Application-core full-market capture can persist only an explicitly named returned subset;
+  it never persists an entire returned all-market batch. The CLI has no subset-selection flag
+  for `--all-market`, so `realtime capture --all-market --persist` is rejected before provider
+  construction. No scheduler, polling loop, or full-market runtime write was added.
 - Source timestamps are not fabricated: current Eastmoney and Sina mappings retain
   `source_timestamp=None`; `ingested_at` is the provider-boundary collection instant.
 - The repository-only status service evaluates configured 60/120-second freshness at a
@@ -358,6 +358,26 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - `GET /api/realtime/status`, CLI `realtime status`, and the realtime Vue view display only
   the locally persisted selective snapshot state. They do not collect data or claim that
   `Realtime Scanner`, `IntradayScore`, or `RealTimeScore` exists.
+
+## Task 14 Verification
+
+- `tests/realtime` plus `tests/api/test_realtime_status_api.py` — PASS (40 tests).
+- Full backend validation — PASS (351 tests; 88% coverage); Ruff and mypy pass.
+- Frontend type check, lint, Vitest (34 tests), and production build — PASS.
+- Offline collector regressions cover all-market no-persist capture, an explicitly persisted
+  all-market subset, exact explicit request matching, provider-error translation with preserved
+  causes, programming-error propagation, and a 50-symbol single provider call.
+- Offline status regressions cover source-timestamp availability and ingestion-based freshness:
+  a one-day-old source timestamp with a 30-second local ingestion age remains fresh and allows
+  ranking; 60/61/120/121-second and unavailable boundaries remain explicit.
+- Offline CLI regressions prove that `realtime status` constructs no provider and formats in the
+  configured `Asia/Shanghai` timezone; capture is one provider call, writes only when explicit
+  symbols use `--persist`, and full-market persistence fails before runtime access.
+- Realtime status API regressions expose freshness metadata and prove repository-only read-only
+  behavior. The Vue realtime view was intentionally unchanged.
+- Earlier bounded live smoke remains the only live evidence: a selected `600519.SH` quote used
+  the AKShare/Sina fallback path; the final offline storage snapshot remains 3 snapshots / 3
+  realtime rows. This fix performed no live call or runtime write.
 
 ## Next Task
 

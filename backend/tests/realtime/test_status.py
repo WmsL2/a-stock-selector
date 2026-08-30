@@ -10,6 +10,7 @@ from stock_selector.realtime import RealtimeDataError, RealtimeStatusService
 @pytest.mark.parametrize(
     ("age", "freshness", "ranking_allowed"),
     [
+        (30, "fresh", True),
         (60, "fresh", True),
         (61, "warning", True),
         (120, "warning", True),
@@ -49,6 +50,30 @@ def test_status_rejects_future_ingestion() -> None:
         ).build(calculation_at)
 
 
+def test_status_counts_present_source_timestamps_and_uses_ingestion_freshness() -> None:
+    calculation_at = datetime(2026, 8, 30, 10, 5, tzinfo=UTC)
+    ingested_at = calculation_at - timedelta(seconds=30)
+    status = RealtimeStatusService(
+        FakeRepository(
+            (
+                _quote(
+                    ingested_at,
+                    source_timestamp=calculation_at - timedelta(days=1),
+                ),
+                _quote(ingested_at),
+                _quote(ingested_at),
+            )
+        ),
+        Settings(),
+    ).build(calculation_at)
+    assert status.source_timestamp_available_quotes == 1
+    assert (status.freshness.value, status.age_seconds, status.ranking_allowed) == (
+        "fresh",
+        30,
+        True,
+    )
+
+
 class FakeRepository:
     def __init__(self, quotes: tuple[RealtimeQuote, ...]) -> None:
         self.quotes = quotes
@@ -57,10 +82,15 @@ class FakeRepository:
         return self.quotes
 
 
-def _quote(at: datetime) -> RealtimeQuote:
+def _quote(
+    at: datetime,
+    *,
+    source_timestamp: datetime | None = None,
+) -> RealtimeQuote:
     return RealtimeQuote(
         symbol="600519.SH",
         price=10,
         ingested_at=at,
         source="fake:realtime",
+        source_timestamp=source_timestamp,
     )

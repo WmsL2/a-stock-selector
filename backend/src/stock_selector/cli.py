@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -395,7 +396,7 @@ def _run_realtime_command(arguments: argparse.Namespace) -> int:
         repository.initialize()
         if arguments.realtime_command == "status":
             status = RealtimeStatusService(repository, settings).build(
-                datetime.now().astimezone()
+                datetime.now(ZoneInfo(settings.app.timezone))
             )
             _print_realtime_status(status)
             return 0
