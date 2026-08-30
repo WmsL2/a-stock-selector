@@ -375,9 +375,12 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   symbols use `--persist`, and full-market persistence fails before runtime access.
 - Realtime status API regressions expose freshness metadata and prove repository-only read-only
   behavior. The Vue realtime view was intentionally unchanged.
-- Earlier bounded live smoke remains the only live evidence: a selected `600519.SH` quote used
-  the AKShare/Sina fallback path; the final offline storage snapshot remains 3 snapshots / 3
-  realtime rows. This fix performed no live call or runtime write.
+- One one-shot all-market realtime live smoke was performed: `AKShareProvider` encountered an
+  Eastmoney realtime connection-boundary failure, then the Sina fallback returned 5,546 quotes
+  from `akshare:stock_zh_a_spot` at `2026-08-30T16:09:49.472584+08:00`. Source timestamps were
+  available for 0 quotes and 0 quotes were persisted, so the full-market result existed only in
+  the capture result / memory; runtime realtime snapshots remained 3 and realtime rows remained
+  3. This subsequent Task 14 Fix performed no additional live call or runtime write.
 
 ## Next Task
 
