@@ -311,6 +311,14 @@ class LocalMarketRepository:
         records = self.load_valuation_records(symbol, as_of_or_before=as_of_or_before)
         return records[-1] if records else None
 
+    def load_factor_input_symbols(self) -> tuple[str, ...]:
+        """Return deterministic local symbols with industry plus financial or valuation data."""
+        self._require_initialized()
+        financials = _symbols_from_parquet_directory(self._parquet.financials_dir)
+        valuations = _symbols_from_parquet_directory(self._parquet.valuations_dir)
+        industries = _symbols_from_parquet_directory(self._parquet.industries_dir)
+        return tuple(sorted(industries & (financials | valuations)))
+
     def upsert_industry_records(self, records: tuple[IndustryRecord, ...]) -> None:
         """Merge one symbol's reliable industry intervals without overlap ambiguity."""
         self._require_initialized()
@@ -427,6 +435,16 @@ def _validate_storage_symbol(symbol: str) -> None:
         validate_symbol(symbol)
     except ValueError as exc:
         raise StorageDataError("invalid canonical symbol") from exc
+
+
+def _symbols_from_parquet_directory(directory: Path) -> set[str]:
+    try:
+        symbols = {path.stem for path in directory.glob("*.parquet")}
+    except OSError as exc:
+        raise StorageIOError("failed to inspect local factor-input coverage") from exc
+    for symbol in symbols:
+        _validate_storage_symbol(symbol)
+    return symbols
 
 
 def _require_unique_symbols(

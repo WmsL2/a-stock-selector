@@ -9,6 +9,15 @@ vi.mock('@/api/health', () => ({
 vi.mock('@/api/storage', () => ({
   getStorageStatus: vi.fn().mockResolvedValue({ instrument_rows: 0, daily_rows: 0, daily_symbols: 0, realtime_rows: 0, realtime_symbols: 0, realtime_snapshots: 0, latest_realtime_at: null, disk_usage_bytes: 0, storage_root: '', duckdb_path: '' }),
 }))
+vi.mock('@/api/selection', () => ({
+  getDailySelection: vi.fn().mockResolvedValue({
+    selection_ready: false,
+    blockers: ['risk_state_coverage_incomplete'],
+    diagnostics: { structural_members: 0 },
+    items: [],
+  }),
+}))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 
 import BacktestView from '@/views/BacktestView.vue'
 import DailySelectionView from '@/views/DailySelectionView.vue'
@@ -18,9 +27,9 @@ import RealtimeSelectionView from '@/views/RealtimeSelectionView.vue'
 const mountView = (component: object) =>
   mount(component, { global: { plugins: [createPinia(), ElementPlus] } })
 
-describe('truthful unimplemented views', () => {
-  it('states that selection, factor, and backtest engines are not implemented', () => {
-    expect(mountView(DailySelectionView).text()).toContain('今日选股引擎尚未实现')
+describe('truthful unfinished and readiness views', () => {
+  it('shows daily selection as a local readiness workflow while preserving later placeholders', () => {
+    expect(mountView(DailySelectionView).text()).toContain('今日选股')
     expect(mountView(RealtimeSelectionView).text()).toContain('实时选股引擎尚未实现')
     expect(mountView(FactorResearchView).text()).toContain('因子研究尚未实现')
     expect(mountView(BacktestView).text()).toContain('回测引擎尚未实现')

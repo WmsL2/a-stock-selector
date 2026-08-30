@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 12 - BaseScore
+Task 12A - Daily Selection API + Vue
 
 ## Status
 
@@ -165,8 +165,23 @@ Completed
 - family contribution breakdown
 - no-factor unavailable score semantics
 - deterministic pure scoring engine
+- local PIT daily selection orchestration
+- structural universe integration
+- conservative exact-date risk gating
+- point-in-time financial input assembly
+- point-in-time valuation input assembly
+- explicit PIT industry classification
+- FiveFactorEngine integration
+- BaseScoreEngine integration
+- deterministic BaseScore ranking
+- TopN selection
+- read-only daily selection API
+- truthful readiness diagnostics
+- Vue daily selection page
+- missing-family display semantics
+- current local risk-not-ready handling
 
-## Task 12 Verification
+## Task 12A Verification
 
 - `python -m pip install -e ".\\backend[dev]"` — PASS; the editable package remains
   `stock_selector` from `backend/src`.
@@ -174,7 +189,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 279 backend tests, 87% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 286 backend tests, 87% coverage, Ruff, mypy,
   frontend type check, lint, 23 Vitest tests and production build all completed.
 - Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
   returned 200.
@@ -187,10 +202,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (279 passed; one third-party TestClient deprecation warning).
+  (286 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (279 passed, 87% coverage).
+  — PASS (286 passed, 87% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -260,6 +275,8 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Task 12 BaseScore — PASS entirely offline: caller-supplied configured weights compose
   immutable five-factor cross sections with available-weight renormalization, family-level
   completeness, coverage-weighted confidence and contribution audit trails only.
+- Task 12A daily selection — PASS with local-only structural universe, exact-date conservative
+  risk coverage, PIT factor-input assembly, deterministic BaseScore ranking and a read-only API/UI.
 
 ## Not Implemented Yet
 
@@ -283,9 +300,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 ## Next Task
 
-Task 12A - Daily Selection API + Vue
+Task 13 - Explanation & Risk
 
-Task 12A NOT STARTED.
+Task 13 NOT STARTED.
 
 ## Roadmap
 
@@ -298,4 +315,5 @@ Task 12A NOT STARTED.
 - Task 10: Factor Preprocessing (complete).
 - Task 11: Five Factor Families (complete).
 - Task 12: BaseScore (complete).
-- Task 12A: Daily Selection API + Vue (not started).
+- Task 12A: Daily Selection API + Vue (complete).
+- Task 13: Explanation & Risk (not started).

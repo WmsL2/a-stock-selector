@@ -87,6 +87,15 @@ class SelectionConfig(StrictConfigModel):
 
     top_n: int = Field(default=20, gt=0)
     watchlist_n: int = Field(default=10, ge=0)
+    industry_classification: str = "证监会行业分类标准（2012）"
+
+    @field_validator("industry_classification")
+    @classmethod
+    def validate_industry_classification(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("industry_classification must not be empty")
+        return normalized
 
 
 class RealtimeConfig(StrictConfigModel):

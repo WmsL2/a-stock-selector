@@ -158,6 +158,7 @@ class PublicFactorsConfigResponse(APIResponseModel):
 class PublicSelectionConfigResponse(APIResponseModel):
     top_n: int
     watchlist_n: int
+    industry_classification: str
 
 
 class PublicRealtimeConfigResponse(APIResponseModel):
@@ -273,3 +274,43 @@ class IndustryRecordsResponse(APIResponseModel):
     available: bool
     as_of: date | None
     items: list[IndustryRecordResponse]
+
+
+class DailySelectionItemResponse(APIResponseModel):
+    rank: int
+    symbol: str
+    name: str
+    board: str
+    industry_code: str | None
+    industry_name: str | None
+    base_score: float
+    confidence_adjusted_score: float | None
+    data_completeness: float
+    confidence: float
+    quality_score: float | None
+    value_score: float | None
+    growth_score: float | None
+    momentum_score: float | None
+    low_volatility_score: float | None
+
+
+class DailySelectionDiagnosticsResponse(APIResponseModel):
+    input_instruments: int
+    structural_members: int
+    risk_records: int
+    risk_complete_members: int
+    risk_coverage_ratio: float
+    risk_eligible_members: int
+    factor_input_members: int
+    scoreable_members: int
+    requested_top_n: int
+    returned_items: int
+    price_factors_operational: bool
+
+
+class DailySelectionResponse(APIResponseModel):
+    as_of: datetime
+    selection_ready: bool
+    blockers: list[str]
+    diagnostics: DailySelectionDiagnosticsResponse
+    items: list[DailySelectionItemResponse]

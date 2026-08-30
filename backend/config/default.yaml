@@ -5,6 +5,7 @@ app:
 selection:
   top_n: 20
   watchlist_n: 10
+  industry_classification: "证监会行业分类标准（2012）"
 
 realtime:
   enabled: true

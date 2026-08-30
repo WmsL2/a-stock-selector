@@ -6,6 +6,9 @@ from stock_selector.api.errors import APIResourceNotFound
 from stock_selector.api.schemas import (
     DailyBarResponse,
     DailyBarsResponse,
+    DailySelectionDiagnosticsResponse,
+    DailySelectionItemResponse,
+    DailySelectionResponse,
     DailyStatusResponse,
     FinancialRecordResponse,
     FinancialRecordsResponse,
@@ -35,6 +38,7 @@ from stock_selector.models import (
     ValuationRecord,
 )
 from stock_selector.quality import CurrentQualityService
+from stock_selector.selection import DailySelectionService
 from stock_selector.storage import LocalMarketRepository
 from stock_selector.universe import CurrentUniverseService, UniverseExclusionReason
 
@@ -148,6 +152,65 @@ class ReadOnlyMarketService:
             exclusions=UniverseExclusionCountsResponse(**exclusion_counts),
             risk_filters_applied=False,
             historical_survivorship_safe=False,
+        )
+
+    def daily_selection(
+        self, settings: Settings, as_of: datetime
+    ) -> DailySelectionResponse:
+        """Map the local explicit-time selection result into an HTTP-only DTO."""
+        result = DailySelectionService(self._repository, settings).build(as_of)
+        instruments = {item.symbol: item for item in self._repository.load_instruments()}
+        items = []
+        for score in result.selection.items:
+            instrument = instruments[score.symbol]
+            industry = next(
+                (
+                    item
+                    for item in self._repository.load_industry_records(
+                        score.symbol, as_of=as_of.date()
+                    )
+                    if item.classification == settings.selection.industry_classification
+                ),
+                None,
+            )
+            items.append(
+                DailySelectionItemResponse(
+                    rank=score.market_rank or 0,
+                    symbol=score.symbol,
+                    name=instrument.name,
+                    board=instrument.board.value,
+                    industry_code=industry.industry_code if industry else None,
+                    industry_name=industry.industry_name if industry else None,
+                    base_score=score.base_score,
+                    confidence_adjusted_score=score.confidence_adjusted_score,
+                    data_completeness=score.data_completeness,
+                    confidence=score.confidence,
+                    quality_score=score.quality_score,
+                    value_score=score.value_score,
+                    growth_score=score.growth_score,
+                    momentum_score=score.momentum_score,
+                    low_volatility_score=score.low_volatility_score,
+                )
+            )
+        diagnostics = result.diagnostics
+        return DailySelectionResponse(
+            as_of=result.as_of,
+            selection_ready=diagnostics.selection_ready,
+            blockers=[blocker.value for blocker in diagnostics.blockers],
+            diagnostics=DailySelectionDiagnosticsResponse(
+                input_instruments=diagnostics.input_instruments,
+                structural_members=diagnostics.structural_members,
+                risk_records=diagnostics.risk_records,
+                risk_complete_members=diagnostics.risk_complete_members,
+                risk_coverage_ratio=diagnostics.risk_coverage_ratio,
+                risk_eligible_members=diagnostics.risk_eligible_members,
+                factor_input_members=diagnostics.factor_input_members,
+                scoreable_members=diagnostics.scoreable_members,
+                requested_top_n=diagnostics.requested_top_n,
+                returned_items=diagnostics.returned_items,
+                price_factors_operational=diagnostics.price_factors_operational,
+            ),
+            items=items,
         )
 
     def list_instruments(

@@ -54,6 +54,7 @@ def get_public_config(
         selection=PublicSelectionConfigResponse(
             top_n=settings.selection.top_n,
             watchlist_n=settings.selection.watchlist_n,
+            industry_classification=settings.selection.industry_classification,
         ),
         realtime=PublicRealtimeConfigResponse(
             enabled=settings.realtime.enabled,

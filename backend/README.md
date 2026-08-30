@@ -61,3 +61,18 @@ coverage; it therefore cannot exceed completeness. `confidence_adjusted_score = 
 confidence` is a supplemental conservative reference, not a replacement for BaseScore. The
 engine returns the configured and renormalized weight plus weighted contribution for every family
 in fixed order, and does not fetch data, filter securities, rank results or persist snapshots.
+
+## Daily Selection
+
+Task 12A provides a read-only, on-demand local pipeline: structural universe → exact-date
+conservative risk eligibility → point-in-time financial, valuation and industry inputs → five
+factor families → BaseScore → deterministic BaseScore ranking. Missing or unknown enabled risk
+fields block official selection; incomplete risk coverage returns HTTP 200 readiness diagnostics
+and an empty item list rather than treating an unknown security as safe.
+
+The explicit industry policy is `证监会行业分类标准（2012）`, verified in the local CNInfo-derived
+industry records. Its stable `classification:industry_code` becomes the factor industry key.
+Current local daily bars are RAW only and are never represented as adjusted closes, so they do not
+supply Momentum or Low Volatility. Quality, Value and Growth can still form a renormalized
+BaseScore when their PIT inputs are available. The endpoint does not collect data, call providers,
+persist selection snapshots, make recommendations or apply a minimum completeness threshold.

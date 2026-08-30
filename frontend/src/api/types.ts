@@ -254,3 +254,43 @@ export interface IndustryRecordsResponse {
   as_of: string | null
   items: IndustryRecordResponse[]
 }
+
+export interface DailySelectionItemResponse {
+  rank: number
+  symbol: string
+  name: string
+  board: string
+  industry_code: string | null
+  industry_name: string | null
+  base_score: number
+  confidence_adjusted_score: number | null
+  data_completeness: number
+  confidence: number
+  quality_score: number | null
+  value_score: number | null
+  growth_score: number | null
+  momentum_score: number | null
+  low_volatility_score: number | null
+}
+
+export interface DailySelectionDiagnosticsResponse {
+  input_instruments: number
+  structural_members: number
+  risk_records: number
+  risk_complete_members: number
+  risk_coverage_ratio: number
+  risk_eligible_members: number
+  factor_input_members: number
+  scoreable_members: number
+  requested_top_n: number
+  returned_items: number
+  price_factors_operational: boolean
+}
+
+export interface DailySelectionResponse {
+  as_of: string
+  selection_ready: boolean
+  blockers: string[]
+  diagnostics: DailySelectionDiagnosticsResponse
+  items: DailySelectionItemResponse[]
+}
