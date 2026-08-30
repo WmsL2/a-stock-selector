@@ -171,6 +171,20 @@ class FactorComponentResult(DomainModel):
             raise ValueError("available component requires a score")
         if not self.available and self.score is not None:
             raise ValueError("unavailable component must not have a score")
+        if self.raw_value is not None and self.raw_unavailable_reason is not None:
+            raise ValueError("observed raw value must not have an unavailable reason")
+        if self.raw_value is None and self.raw_unavailable_reason is None:
+            raise ValueError("missing raw value requires an unavailable reason")
+        if self.available and (
+            self.raw_unavailable_reason is not None
+            or self.preprocessing_unavailable_reason is not None
+        ):
+            raise ValueError("available component must have no unavailable reason")
+        if not self.available and (
+            self.raw_unavailable_reason is None
+            and self.preprocessing_unavailable_reason is None
+        ):
+            raise ValueError("unavailable component requires an unavailable reason")
         return self
 
 
@@ -227,6 +241,8 @@ class FactorFamilyResult(DomainModel):
             raise ValueError("availability must match score")
         if any(item.family is not self.family for item in self.components):
             raise ValueError("components must match family")
+        if len({item.factor_name for item in self.components}) != len(self.components):
+            raise ValueError("component factor names must be unique")
         return self
 
 
