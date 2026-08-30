@@ -43,11 +43,23 @@ const readyResponse = {
       rank: 1, symbol: '000001.SZ', name: '平安银行', board: 'sz_main', industry_code: 'J66', industry_name: '货币金融服务',
       base_score: 81.234, confidence_adjusted_score: 64.987, data_completeness: 0.75, confidence: 0.8,
       quality_score: 85, value_score: 80, growth_score: 79, momentum_score: null, low_volatility_score: null,
+      evidence: [
+        { code: 'family_quality_contribution', message: 'Quality 得分 85.0，对 BaseScore 贡献 34.0 分。', factor_name: 'quality', value: 85, percentile: null, contribution: 34 },
+      ],
+      risks: [
+        { code: 'price_factors_unavailable', message: '当前本地 operational 日线为 RAW，Momentum 和 LowVol 未参与 BaseScore。', severity: 'warning' },
+      ],
     },
     {
       rank: 2, symbol: '600519.SH', name: '贵州茅台', board: 'sh_main', industry_code: 'C15', industry_name: '酒、饮料和精制茶制造业',
       base_score: 80, confidence_adjusted_score: 60, data_completeness: 0.75, confidence: 0.75,
       quality_score: 80, value_score: 81, growth_score: 79, momentum_score: null, low_volatility_score: null,
+      evidence: [
+        { code: 'family_value_contribution', message: 'Value 得分 81.0，对 BaseScore 贡献 27.0 分。', factor_name: 'value', value: 81, percentile: null, contribution: 27 },
+      ],
+      risks: [
+        { code: 'missing_momentum', message: 'Momentum 当前未参与 BaseScore。', severity: 'info' },
+      ],
     },
   ],
 }
@@ -114,5 +126,36 @@ describe('DailySelectionView', () => {
       name: 'instrument-detail',
       params: { symbol: '000001.SZ' },
     })
+  })
+
+  it('expands structured evidence and data limitations with severity presentation', async () => {
+    api.getDailySelection.mockResolvedValue(readyResponse)
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.el-table__expand-icon').trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('主要依据')
+    expect(wrapper.text()).toContain('数据与模型限制')
+    expect(wrapper.text()).toContain('Quality 得分 85.0')
+    expect(wrapper.text()).toContain('Momentum 和 LowVol 未参与 BaseScore')
+    expect(wrapper.text()).toContain('warning')
+    expect(wrapper.text()).toContain('不构成投资建议')
+  })
+
+  it('makes the empty-risk disclaimer explicit in an expanded row', async () => {
+    api.getDailySelection.mockResolvedValue({
+      ...readyResponse,
+      items: [{ ...readyResponse.items[0], risks: [] }],
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.el-table__expand-icon').trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('未生成额外数据/模型限制标签')
+    expect(wrapper.text()).toContain('不代表证券无投资风险')
   })
 })

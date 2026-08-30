@@ -20,6 +20,11 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(0)}%`
 }
 
+function riskTagType(severity: DailySelectionItemResponse['risks'][number]['severity']): 'danger' | 'warning' | 'info' {
+  if (severity === 'high') return 'danger'
+  return severity
+}
+
 function openInstrument(row: DailySelectionItemResponse): void {
   void router.push({ name: 'instrument-detail', params: { symbol: row.symbol } })
 }
@@ -72,7 +77,30 @@ onMounted(() => void loadSelection())
     <section v-else class="panel">
       <h2>BaseScore Top {{ diagnostics.returned_items }}</h2>
       <p class="provenance">完整度和置信度显示为百分比；Momentum / LowVol 缺失时显示“—”，不会被显示为 0 分。</p>
+      <p class="provenance">解释仅来自当前结构化因子与数据完整度，不构成投资建议。</p>
       <el-table v-loading="loading" :data="selection?.items ?? []" class="instrument-table" @row-click="openInstrument">
+        <el-table-column type="expand">
+          <template #default="scope">
+            <div class="selection-explanation">
+              <div>
+                <h3>主要依据</h3>
+                <ul>
+                  <li v-for="evidence in scope.row.evidence" :key="evidence.code">{{ evidence.message }}</li>
+                </ul>
+              </div>
+              <div>
+                <h3>数据与模型限制</h3>
+                <template v-if="scope.row.risks.length">
+                  <p v-for="risk in scope.row.risks" :key="risk.code">
+                    <el-tag size="small" :type="riskTagType(risk.severity)">{{ risk.severity }}</el-tag>
+                    {{ risk.message }}
+                  </p>
+                </template>
+                <p v-else>未生成额外数据/模型限制标签；不代表证券无投资风险。</p>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="rank" label="排名" width="66" />
         <el-table-column prop="symbol" label="代码" min-width="112" />
         <el-table-column prop="name" label="名称" min-width="112" />

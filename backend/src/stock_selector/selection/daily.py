@@ -3,6 +3,11 @@
 from datetime import datetime
 
 from stock_selector.config.models import Settings
+from stock_selector.explanation import (
+    ExplanationEngine,
+    ExplanationInput,
+    ExplanationResult,
+)
 from stock_selector.factors import FiveFactorEngine, FiveFactorRequest, StockFactorInput
 from stock_selector.models import Instrument
 from stock_selector.models.common import ensure_aware_datetime
@@ -31,6 +36,7 @@ class DailySelectionService:
         self._risk_evaluator = RiskEligibilityEvaluator()
         self._factor_engine = FiveFactorEngine()
         self._score_engine = BaseScoreEngine()
+        self._explanation_engine = ExplanationEngine()
 
     def build(self, as_of: datetime) -> DailySelectionResult:
         """Build one explicit-time result without a clock, provider, or storage mutation."""
@@ -75,8 +81,23 @@ class DailySelectionService:
         )
         scoreable = tuple(item for item in score_result.stocks if item.base_score is not None)
         ordered = tuple(sorted(scoreable, key=lambda item: (-_base_score(item), item.symbol)))
+        factor_by_symbol = {item.symbol: item for item in factor_result.stocks}
+        risk_by_symbol = {item.symbol: item for item in risk.decisions}
         top_items = tuple(
-            _stock_score(item, rank)
+            _stock_score(
+                item,
+                rank,
+                self._explanation_engine.explain(
+                    ExplanationInput(
+                        symbol=item.symbol,
+                        as_of=as_of,
+                        factor_result=factor_by_symbol[item.symbol],
+                        score_result=item,
+                        risk_decision=risk_by_symbol[item.symbol],
+                        price_factors_operational=False,
+                    )
+                ),
+            )
             for rank, item in enumerate(ordered[: self._settings.selection.top_n], start=1)
         )
         blockers = _readiness_blockers(risk_ready, risk.structural_members, len(risk.eligible_members))
@@ -185,7 +206,9 @@ def _readiness_blockers(
     return tuple(blockers)
 
 
-def _stock_score(result: BaseScoreStockResult, rank: int) -> StockScore:
+def _stock_score(
+    result: BaseScoreStockResult, rank: int, explanation: ExplanationResult
+) -> StockScore:
     base_score = _base_score(result)
     families = {item.family.value: item.family_score for item in result.contributions}
     return StockScore(
@@ -202,8 +225,8 @@ def _stock_score(result: BaseScoreStockResult, rank: int) -> StockScore:
         confidence_adjusted_score=result.confidence_adjusted_score,
         market_rank=rank,
         industry_rank=None,
-        evidence=(),
-        risks=(),
+        evidence=explanation.evidence,
+        risks=explanation.risks,
     )
 
 

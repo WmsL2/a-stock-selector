@@ -10,6 +10,7 @@ from stock_selector.api.schemas import (
     DailySelectionItemResponse,
     DailySelectionResponse,
     DailyStatusResponse,
+    EvidenceResponse,
     FinancialRecordResponse,
     FinancialRecordsResponse,
     FundamentalsStatusResponse,
@@ -20,6 +21,7 @@ from stock_selector.api.schemas import (
     QualityStatusResponse,
     RealtimeLookupResponse,
     RealtimeQuoteResponse,
+    RiskFlagResponse,
     StorageStatusResponse,
     UniverseBoardCountsResponse,
     UniverseExclusionCountsResponse,
@@ -190,6 +192,25 @@ class ReadOnlyMarketService:
                     growth_score=score.growth_score,
                     momentum_score=score.momentum_score,
                     low_volatility_score=score.low_volatility_score,
+                    evidence=[
+                        EvidenceResponse(
+                            code=evidence.code,
+                            message=evidence.message,
+                            factor_name=evidence.factor_name,
+                            value=evidence.value,
+                            percentile=evidence.percentile,
+                            contribution=evidence.contribution,
+                        )
+                        for evidence in score.evidence
+                    ],
+                    risks=[
+                        RiskFlagResponse(
+                            code=risk.code,
+                            message=risk.message,
+                            severity=risk.severity.value,
+                        )
+                        for risk in score.risks
+                    ],
                 )
             )
         diagnostics = result.diagnostics

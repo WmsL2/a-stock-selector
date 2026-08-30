@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 12A - Daily Selection API + Vue
+Task 13 - Explanation & Risk
 
 ## Status
 
@@ -186,6 +186,19 @@ Completed
 - low-completeness rankability coverage without a threshold
 - ready and not-ready selection API contract coverage
 - Vue ready, not-ready, loading, error and instrument-navigation coverage
+- deterministic structured evidence engine
+- BaseScore contribution evidence
+- strongest/weakest component evidence
+- missing-family limitation flags
+- partial-family coverage flags
+- completeness/confidence severity flags
+- operational price-factor limitation
+- stable evidence/risk ordering
+- Daily Selection explanation integration
+- read-only API explanation fields
+- Vue expandable explanation display
+- no-LLM evidence boundary
+- explanation-does-not-change-ranking regression
 
 ## Task 12A Verification
 
@@ -195,8 +208,8 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 292 backend tests, 87% coverage, Ruff, mypy,
-  frontend type check, lint, 27 Vitest tests and production build all completed.
+- `scripts/test-all.ps1` — PASS: 308 backend tests, 88% coverage, Ruff, mypy,
+  frontend type check, lint, 29 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
   verified with synthetic temporary repositories; confidence-adjusted score does not rank.
@@ -211,20 +224,29 @@ Completed
 - Frontend script and Vite proxy smoke — PASS: localhost `/`, `/api/health` and
   `/api/storage/status` returned 200. Temporary local processes were stopped afterwards.
 
+## Task 13 Verification
+
+- `tests/explanation` — PASS (16 tests): contribution points, strongest/weakest components,
+  missing/partial families, thresholds, RAW-price limitation, identity, determinism and purity.
+- Daily Selection and API integration — PASS: ready items contain ordered structured evidence and
+  limitations, while incomplete risk coverage still returns no items or explanation objects.
+- Vue Daily Selection — PASS: expandable evidence/limitation display, severity mapping, no-risk
+  disclaimer and investment-advice disclaimer are covered without changing the ranking table.
+
 ## Tests
 
 The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (292 passed; one third-party TestClient deprecation warning).
+  (308 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (292 passed, 87% coverage).
+  — PASS (308 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
-  `npm run test` — PASS (27 passed), and `npm run build` — PASS.
+  `npm run test` — PASS (29 passed), and `npm run build` — PASS.
 - `git diff --check` — PASS.
 
 ## Live Smoke
@@ -295,6 +317,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Task 12A Fix — PASS: regression coverage now proves BaseScore-first ranking, deterministic
   ties, TopN, no-score behavior, no completeness threshold, ready/not-ready API contracts and
   Vue rendering without writing runtime data or using a provider/network.
+- Task 13 deterministic explanation — PASS: pure structured Evidence/RiskFlag output is derived
+  only from factor, BaseScore and completeness inputs; it adds no persistence, provider, network,
+  LLM or recommendation behavior and does not alter ranking or risk gating.
 
 ## Not Implemented Yet
 
@@ -305,7 +330,6 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Explanation engine
 - Realtime scanner / engine
 - Minute bars
 - Intraday factors
@@ -318,9 +342,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 ## Next Task
 
-Task 13 - Explanation & Risk
+Task 14 - Realtime Market Data Foundation
 
-Task 13 NOT STARTED.
+Task 14 NOT STARTED.
 
 ## Roadmap
 
@@ -334,4 +358,5 @@ Task 13 NOT STARTED.
 - Task 11: Five Factor Families (complete).
 - Task 12: BaseScore (complete).
 - Task 12A: Daily Selection API + Vue (complete).
-- Task 13: Explanation & Risk (not started).
+- Task 13: Deterministic Explanation & Risk (complete).
+- Task 14: Realtime Market Data Foundation (not started).

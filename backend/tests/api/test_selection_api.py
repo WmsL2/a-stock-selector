@@ -134,3 +134,8 @@ def test_daily_selection_ready_contract_returns_ranked_qvg_items(tmp_path) -> No
     assert item["data_completeness"] == 0.75
     assert item["momentum_score"] is None
     assert item["low_volatility_score"] is None
+    assert isinstance(item["evidence"], list) and item["evidence"]
+    assert {"code", "message", "factor_name", "value", "percentile", "contribution"} <= item["evidence"][0].keys()
+    assert isinstance(item["risks"], list) and item["risks"]
+    assert {"code", "message", "severity"} <= item["risks"][0].keys()
+    assert any(risk["code"] == "price_factors_unavailable" for risk in item["risks"])

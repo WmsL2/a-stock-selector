@@ -76,3 +76,18 @@ Current local daily bars are RAW only and are never represented as adjusted clos
 supply Momentum or Low Volatility. Quality, Value and Growth can still form a renormalized
 BaseScore when their PIT inputs are available. The endpoint does not collect data, call providers,
 persist selection snapshots, make recommendations or apply a minimum completeness threshold.
+
+## Deterministic Explanation
+
+Task 13 attaches structured `Evidence` and `RiskFlag` records to each already-ranked daily
+selection item. Evidence is derived only from factor component values and scores, available
+family scores, BaseScore contributions, data completeness and confidence. Family contribution
+is expressed in BaseScore points, not as a percentage. The engine uses deterministic templates
+and stable ordering, and never uses an LLM or free-form text generation.
+
+The first RiskFlag set communicates data/model limitations only: unavailable or partially covered
+families, low completeness, low confidence, and the current operational RAW-price limitation for
+Momentum and LowVol. These flags do not change BaseScore, ranking, TopN, selection readiness or
+risk eligibility. They are not investment recommendations and are generated on demand without
+persistence, provider access or network calls. A future LLM layer, if introduced, may only
+verbalize these structured records and must not invent evidence.

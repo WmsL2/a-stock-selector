@@ -271,6 +271,23 @@ export interface DailySelectionItemResponse {
   growth_score: number | null
   momentum_score: number | null
   low_volatility_score: number | null
+  evidence: EvidenceResponse[]
+  risks: RiskFlagResponse[]
+}
+
+export interface EvidenceResponse {
+  code: string
+  message: string
+  factor_name: string | null
+  value: number | null
+  percentile: number | null
+  contribution: number | null
+}
+
+export interface RiskFlagResponse {
+  code: string
+  message: string
+  severity: 'high' | 'warning' | 'info'
 }
 
 export interface DailySelectionDiagnosticsResponse {

@@ -276,6 +276,21 @@ class IndustryRecordsResponse(APIResponseModel):
     items: list[IndustryRecordResponse]
 
 
+class EvidenceResponse(APIResponseModel):
+    code: str
+    message: str
+    factor_name: str | None
+    value: float | None
+    percentile: float | None
+    contribution: float | None
+
+
+class RiskFlagResponse(APIResponseModel):
+    code: str
+    message: str
+    severity: str
+
+
 class DailySelectionItemResponse(APIResponseModel):
     rank: int
     symbol: str
@@ -292,6 +307,8 @@ class DailySelectionItemResponse(APIResponseModel):
     growth_score: float | None
     momentum_score: float | None
     low_volatility_score: float | None
+    evidence: list[EvidenceResponse]
+    risks: list[RiskFlagResponse]
 
 
 class DailySelectionDiagnosticsResponse(APIResponseModel):

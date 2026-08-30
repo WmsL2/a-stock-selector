@@ -180,6 +180,15 @@ def test_complete_safe_risk_builds_qvg_only_ranked_selection(tmp_path) -> None: 
     assert [item.market_rank for item in result.selection.items] == [1, 2, 3]
     assert all(item.data_completeness == pytest.approx(0.75) for item in result.selection.items)
     assert all(item.momentum_score is None and item.low_volatility_score is None for item in result.selection.items)
+    assert all(item.evidence for item in result.selection.items)
+    assert all(
+        any(evidence.code.startswith("family_") for evidence in item.evidence)
+        for item in result.selection.items
+    )
+    assert all(
+        any(risk.code == "price_factors_unavailable" for risk in item.risks)
+        for item in result.selection.items
+    )
 
 
 def test_ranking_uses_base_score_then_symbol_and_preserves_market_rank(
