@@ -340,11 +340,30 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Factor research
 - Scheduler
 
+## Task 14 — Realtime Market Data Foundation (complete)
+
+- `RealtimeSnapshotCollector` captures a provider batch exactly once. It distinguishes
+  `None` all-market scope from an explicit canonical symbol tuple, rejects empty and
+  duplicate batches, validates exact explicit request/response equality, and requires a
+  single source plus a single aware `ingested_at` across a returned snapshot.
+- Full-market capture is intentionally in-memory only. Persistence is restricted to an
+  explicit requested subset, and CLI `realtime capture --all-market --persist` is rejected
+  before provider construction. No scheduler, polling loop, or full-market runtime write was
+  added.
+- Source timestamps are not fabricated: current Eastmoney and Sina mappings retain
+  `source_timestamp=None`; `ingested_at` is the provider-boundary collection instant.
+- The repository-only status service evaluates configured 60/120-second freshness at a
+  caller-supplied `calculation_at`. `fresh` and `warning` pass the freshness gate;
+  `stale` and `unavailable` do not. Future ingestion is rejected.
+- `GET /api/realtime/status`, CLI `realtime status`, and the realtime Vue view display only
+  the locally persisted selective snapshot state. They do not collect data or claim that
+  `Realtime Scanner`, `IntradayScore`, or `RealTimeScore` exists.
+
 ## Next Task
 
-Task 14 - Realtime Market Data Foundation
+Task 15 - Realtime Candidate Foundation
 
-Task 14 NOT STARTED.
+Task 15 NOT STARTED.
 
 ## Roadmap
 
@@ -359,4 +378,4 @@ Task 14 NOT STARTED.
 - Task 12: BaseScore (complete).
 - Task 12A: Daily Selection API + Vue (complete).
 - Task 13: Deterministic Explanation & Risk (complete).
-- Task 14: Realtime Market Data Foundation (not started).
+- Task 14: Realtime Market Data Foundation (complete).

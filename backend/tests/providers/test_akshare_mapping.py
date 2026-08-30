@@ -11,6 +11,7 @@ from stock_selector.providers.akshare_mapping import (
     canonical_symbol_from_akshare_code,
     canonical_symbol_from_sina_code,
     lots_to_shares,
+    map_realtime_quotes,
     map_sh_instruments,
     map_sina_daily_bars,
     map_sina_realtime_quotes,
@@ -154,6 +155,32 @@ def test_sina_realtime_mapping_preserves_share_volume_and_missing_optional_value
     assert pingan.volume is None
     assert pingan.amount is None
     assert {quote.ingested_at for quote in quotes} == {ingested_at}
+
+
+def test_realtime_mappings_do_not_fabricate_source_timestamps() -> None:
+    """Neither AKShare realtime schema provides a trustworthy full source datetime."""
+    ingested_at = datetime(2026, 8, 28, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    eastmoney, _ = map_realtime_quotes(
+        pd.DataFrame(
+            {
+                "代码": ["600519"],
+                "最新价": [10.0],
+                "今开": [9.0],
+                "最高": [11.0],
+                "最低": [8.0],
+                "昨收": [9.5],
+                "成交量": [100],
+                "成交额": [100_000.0],
+                "涨跌幅": [3.25],
+                "换手率": [1.2],
+                "量比": [1.1],
+            }
+        ),
+        ingested_at,
+    )
+    sina, _ = map_sina_realtime_quotes(_sina_frame(), ingested_at)
+    assert all(quote.source_timestamp is None for quote in (*eastmoney, *sina))
+    assert all(quote.ingested_at == ingested_at for quote in (*eastmoney, *sina))
 
 
 def test_sina_realtime_mapping_rejects_invalid_values_and_skips_invalid_prices() -> None:

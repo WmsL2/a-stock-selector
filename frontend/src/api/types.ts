@@ -164,6 +164,20 @@ export interface PublicConfigResponse {
 
 export type RealtimeFreshness = 'fresh' | 'warning' | 'stale' | 'unavailable'
 
+export interface RealtimeStatusResponse {
+  calculation_at: string
+  latest_ingested_at: string | null
+  source: string | null
+  stored_quotes: number
+  source_timestamp_available_quotes: number
+  freshness: RealtimeFreshness
+  age_seconds: number | null
+  ranking_allowed: boolean
+  normal_max_seconds: number
+  warning_max_seconds: number
+  snapshot_scope: 'selective_persisted'
+}
+
 export interface QualityStatusResponse {
   as_of: string
   structural_instruments: number

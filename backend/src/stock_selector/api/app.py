@@ -16,6 +16,7 @@ from stock_selector.api.routers import (
     health,
     instruments,
     quality,
+    realtime,
     selection,
     storage,
     universe,
@@ -55,6 +56,7 @@ def create_app(paths: AppPaths | None = None, settings: Settings | None = None) 
     application.include_router(config.router, prefix="/api")
     application.include_router(universe.router, prefix="/api")
     application.include_router(quality.router, prefix="/api")
+    application.include_router(realtime.router, prefix="/api")
     application.include_router(selection.router, prefix="/api")
     return application
 

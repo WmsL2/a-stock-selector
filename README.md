@@ -50,4 +50,9 @@ Operational daily prices are currently RAW source-of-truth prices. They are not 
 
 ## Project Status
 
-Tasks 00–08 and Task 08A are complete. The next planned task is Task 09 — Fundamentals / Valuation / Industry; it has not started. The broader roadmap is documented in [implementation status](docs/implementation_status.md).
+Tasks 00–14 are complete, including the local-only realtime capture and freshness
+foundation. It supports one-shot all-market reads without persistence and explicitly
+selected local snapshot writes, but it does not provide a realtime scanner, intraday score,
+ranking, scheduler, or full-market persisted dataset. The next planned task is Task 15 —
+Realtime Candidate Foundation; it has not started. The broader roadmap is documented in
+[implementation status](docs/implementation_status.md).

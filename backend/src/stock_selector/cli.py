@@ -96,6 +96,34 @@ def build_parser() -> argparse.ArgumentParser:
     daily_collect.add_argument(
         "--end", required=True, help="Inclusive end date: YYYY-MM-DD."
     )
+    realtime_parser = subparsers.add_parser(
+        "realtime", help="Inspect local realtime status or capture one snapshot."
+    )
+    realtime_subparsers = realtime_parser.add_subparsers(dest="realtime_command")
+    realtime_subparsers.add_parser(
+        "status",
+        help="Show offline status for the latest selectively persisted snapshot.",
+    )
+    realtime_capture = realtime_subparsers.add_parser(
+        "capture", help="Capture once; persistence is limited to explicit symbols."
+    )
+    realtime_scope = realtime_capture.add_mutually_exclusive_group(required=True)
+    realtime_scope.add_argument(
+        "--all-market",
+        action="store_true",
+        help="Capture one all-market batch without persistence.",
+    )
+    realtime_scope.add_argument(
+        "--symbol",
+        action="append",
+        dest="symbols",
+        help="Canonical symbol; repeat for an explicit batch.",
+    )
+    realtime_capture.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist the explicit requested symbols only.",
+    )
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
@@ -150,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_universe_command(arguments.universe_command)
     elif arguments.command == "daily":
         return _run_daily_command(arguments)
+    elif arguments.command == "realtime":
+        return _run_realtime_command(arguments)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
     elif arguments.command == "fundamentals":
@@ -338,6 +368,62 @@ def _run_daily_command(arguments: argparse.Namespace) -> int:
     return 2
 
 
+def _run_realtime_command(arguments: argparse.Namespace) -> int:
+    """Run an offline status read or one explicit realtime capture."""
+    from stock_selector.realtime import (
+        RealtimeCaptureRequest,
+        RealtimeError,
+        RealtimeSnapshotCollector,
+        RealtimeStatusService,
+    )
+    from stock_selector.storage import LocalMarketRepository, StorageError
+
+    try:
+        if (
+            arguments.realtime_command == "capture"
+            and arguments.all_market
+            and arguments.persist
+        ):
+            print(
+                "Realtime usage error: --persist requires one or more --symbol values.",
+                file=sys.stderr,
+            )
+            return 2
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        if arguments.realtime_command == "status":
+            status = RealtimeStatusService(repository, settings).build(
+                datetime.now().astimezone()
+            )
+            _print_realtime_status(status)
+            return 0
+        if arguments.realtime_command == "capture":
+            from stock_selector.providers import AKShareProvider
+
+            symbols = None if arguments.all_market else tuple(arguments.symbols)
+            persist_symbols = tuple(arguments.symbols) if arguments.persist else ()
+            result = RealtimeSnapshotCollector(
+                AKShareProvider(), repository if persist_symbols else None
+            ).capture(
+                RealtimeCaptureRequest(
+                    symbols=symbols,
+                    persist_symbols=persist_symbols,
+                )
+            )
+            _print_realtime_capture_result(result)
+            return 0
+    except (ConfigurationError, RealtimeError, StorageError) as exc:
+        print(f"Realtime error: {exc}", file=sys.stderr)
+        return 1
+    except (ValidationError, ValueError) as exc:
+        print(f"Realtime usage error: {exc}", file=sys.stderr)
+        return 2
+    print("A realtime subcommand is required: status or capture.", file=sys.stderr)
+    return 2
+
+
 def _run_fundamentals_command(arguments: argparse.Namespace) -> int:
     """Run an offline status read or an explicit bounded Task 09 collection."""
     from stock_selector.collection import (
@@ -442,6 +528,40 @@ def _print_realtime_summary(
     for quote in quotes[:3]:
         print(f"{quote.symbol} price={quote.price} change_pct={quote.change_pct}")
     print("Validation: PASS")
+
+
+def _print_realtime_status(status) -> None:  # type: ignore[no-untyped-def]
+    """Print the local-only realtime foundation status."""
+    print(f"Calculation at: {status.calculation_at.isoformat()}")
+    print(
+        "Latest ingested at: "
+        f"{status.latest_ingested_at.isoformat() if status.latest_ingested_at else 'unavailable'}"
+    )
+    print(f"Source: {status.source or 'unavailable'}")
+    print(f"Stored quotes: {status.stored_quotes}")
+    print(f"Freshness: {status.freshness.value}")
+    print(
+        f"Age seconds: {status.age_seconds:.1f}"
+        if status.age_seconds is not None
+        else "Age seconds: unavailable"
+    )
+    print(f"Ranking allowed: {'YES' if status.ranking_allowed else 'NO'}")
+    print("Snapshot scope: selective_persisted")
+
+
+def _print_realtime_capture_result(result) -> None:  # type: ignore[no-untyped-def]
+    """Print one bounded capture without presenting it as scheduled ingestion."""
+    print(f"Scope: {result.scope.value}")
+    print(f"Received quotes: {result.received_quotes}")
+    print(f"Source: {result.source}")
+    print(f"Ingested at: {result.ingested_at.isoformat()}")
+    print(f"Source timestamps available: {result.source_timestamp_available_quotes}")
+    print(f"Persisted quotes: {result.persisted_quotes}")
+    print(
+        "Persistence: selective"
+        if result.persistence_performed
+        else "Persistence: none"
+    )
 
 
 def _print_daily_summary(provider: AKShareProvider, request: DailyBarsRequest) -> None:

@@ -91,3 +91,20 @@ Momentum and LowVol. These flags do not change BaseScore, ranking, TopN, selecti
 risk eligibility. They are not investment recommendations and are generated on demand without
 persistence, provider access or network calls. A future LLM layer, if introduced, may only
 verbalize these structured records and must not invent evidence.
+
+## Realtime Market Data Foundation
+
+Task 14 adds a deliberately narrow realtime foundation. `RealtimeSnapshotCollector`
+calls the provider exactly once per capture and accepts either one all-market batch or
+an explicit canonical symbol batch. All-market capture is in-memory only; persistence
+is available only for an explicit subset of returned symbols, never for an implicit
+full-market request. A valid batch has unique symbols plus one source and one
+`ingested_at` instant. The current AKShare Eastmoney and Sina adapters retain
+`source_timestamp=None` because neither mapping has a trustworthy full source datetime.
+
+`GET /api/realtime/status`, `realtime status`, and the Vue realtime page are local-only
+freshness reads. They do not call a provider or initiate capture. Freshness is evaluated
+from the stored ingestion timestamp using the configured 60/120-second thresholds; only
+fresh and warning snapshots pass this single freshness gate. This is not a realtime
+scanner, intraday factor, ranker, recommendation, scheduler, or statement of full-market
+coverage.

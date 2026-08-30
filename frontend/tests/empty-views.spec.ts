@@ -9,6 +9,9 @@ vi.mock('@/api/health', () => ({
 vi.mock('@/api/storage', () => ({
   getStorageStatus: vi.fn().mockResolvedValue({ instrument_rows: 0, daily_rows: 0, daily_symbols: 0, realtime_rows: 0, realtime_symbols: 0, realtime_snapshots: 0, latest_realtime_at: null, disk_usage_bytes: 0, storage_root: '', duckdb_path: '' }),
 }))
+vi.mock('@/api/realtime', () => ({
+  getRealtimeStatus: vi.fn().mockResolvedValue({ calculation_at: '2026-08-30T10:00:00Z', latest_ingested_at: null, source: null, stored_quotes: 0, source_timestamp_available_quotes: 0, freshness: 'unavailable', age_seconds: null, ranking_allowed: false, normal_max_seconds: 60, warning_max_seconds: 120, snapshot_scope: 'selective_persisted' }),
+}))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 
 import BacktestView from '@/views/BacktestView.vue'

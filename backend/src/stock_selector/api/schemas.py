@@ -124,6 +124,20 @@ class RealtimeLookupResponse(APIResponseModel):
     quote: RealtimeQuoteResponse | None
 
 
+class RealtimeStatusResponse(APIResponseModel):
+    calculation_at: datetime
+    latest_ingested_at: datetime | None
+    source: str | None
+    stored_quotes: int
+    source_timestamp_available_quotes: int
+    freshness: str
+    age_seconds: float | None
+    ranking_allowed: bool
+    normal_max_seconds: int
+    warning_max_seconds: int
+    snapshot_scope: str
+
+
 class PublicAppConfigResponse(APIResponseModel):
     timezone: str
 

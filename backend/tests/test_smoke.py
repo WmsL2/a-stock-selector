@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import stock_selector
-from stock_selector.cli import build_parser
+from stock_selector.cli import build_parser, main
 
 
 def run_module(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -95,6 +95,26 @@ def test_daily_cli_parser_requires_explicit_symbols_and_range() -> None:
     )
     assert arguments.daily_command == "collect"
     assert arguments.symbols == ["600519.SH"]
+
+
+def test_realtime_cli_parser_makes_scope_and_persistence_explicit() -> None:
+    all_market = build_parser().parse_args(["realtime", "capture", "--all-market"])
+    explicit = build_parser().parse_args(
+        ["realtime", "capture", "--symbol", "600519.SH", "--persist"]
+    )
+    status = build_parser().parse_args(["realtime", "status"])
+    assert all_market.all_market is True
+    assert all_market.persist is False
+    assert explicit.symbols == ["600519.SH"]
+    assert explicit.persist is True
+    assert status.realtime_command == "status"
+
+
+def test_realtime_cli_rejects_full_market_persistence_before_runtime_access(
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    assert main(["realtime", "capture", "--all-market", "--persist"]) == 2
+    assert "--persist requires one or more --symbol" in capsys.readouterr().err
 
 
 def test_config_check() -> None:
