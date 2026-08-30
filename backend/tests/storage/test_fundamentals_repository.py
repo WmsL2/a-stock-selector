@@ -104,3 +104,69 @@ def test_industry_intervals_are_inclusive_and_non_overlapping(tmp_path) -> None:
     )
     with pytest.raises(StorageDataError):
         repository.upsert_industry_records((overlapping,))
+
+
+def test_factor_input_symbol_coverage_requires_industry_and_financial_or_valuation(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    available_at = datetime(2026, 3, 25, 15, 30, tzinfo=_SHANGHAI)
+    repository.upsert_financial_records(
+        (
+            FinancialRecord(
+                symbol="000001.SZ",
+                report_period=date(2025, 12, 31),
+                announcement_date=date(2026, 3, 25),
+                available_at=available_at,
+                revenue=100,
+                source="test",
+            ),
+        )
+    )
+    repository.upsert_valuation_records(
+        (
+            ValuationRecord(
+                symbol="000002.SZ",
+                as_of=available_at,
+                pe=10,
+                source="test",
+            ),
+        )
+    )
+    for symbol in ("000003.SZ", "600519.SH"):
+        repository.upsert_industry_records(
+            (
+                IndustryRecord(
+                    symbol=symbol,
+                    industry_code="C15",
+                    industry_name="test",
+                    classification="test",
+                    effective_from=date(2020, 1, 1),
+                    source="test",
+                ),
+            )
+        )
+    repository.upsert_financial_records(
+        (
+            FinancialRecord(
+                symbol="000003.SZ",
+                report_period=date(2025, 12, 31),
+                announcement_date=date(2026, 3, 25),
+                available_at=available_at,
+                revenue=100,
+                source="test",
+            ),
+        )
+    )
+    repository.upsert_valuation_records(
+        (
+            ValuationRecord(
+                symbol="600519.SH",
+                as_of=available_at,
+                pe=10,
+                source="test",
+            ),
+        )
+    )
+
+    assert repository.load_factor_input_symbols() == ("000003.SZ", "600519.SH")

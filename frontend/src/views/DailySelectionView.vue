@@ -50,6 +50,8 @@ onMounted(() => void loadSelection())
     <el-button type="primary" :loading="loading" @click="loadSelection">刷新本地结果</el-button>
   </section>
 
+  <p v-if="loading" role="status" class="provenance">正在读取本地今日选股状态…</p>
+
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
   <template v-else-if="diagnostics">
     <section class="metrics-grid">

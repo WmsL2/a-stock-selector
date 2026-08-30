@@ -180,6 +180,12 @@ Completed
 - Vue daily selection page
 - missing-family display semantics
 - current local risk-not-ready handling
+- BaseScore descending ranking regression coverage
+- deterministic symbol tie-break and market-rank coverage
+- service-side TopN truncation and no-score exclusion coverage
+- low-completeness rankability coverage without a threshold
+- ready and not-ready selection API contract coverage
+- Vue ready, not-ready, loading, error and instrument-navigation coverage
 
 ## Task 12A Verification
 
@@ -189,8 +195,17 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 286 backend tests, 87% coverage, Ruff, mypy,
-  frontend type check, lint, 23 Vitest tests and production build all completed.
+- `scripts/test-all.ps1` — PASS: 292 backend tests, 87% coverage, Ruff, mypy,
+  frontend type check, lint, 27 Vitest tests and production build all completed.
+- Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
+  ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
+  verified with synthetic temporary repositories; confidence-adjusted score does not rank.
+- Task 12A Fix API/UI contracts — PASS: synthetic ready API returns Q/V/G-only ranked items
+  with 0.75 completeness and null Momentum/LowVol; not-ready risk coverage, Vue ready,
+  not-ready, loading, HTTP-error and instrument-navigation states are covered.
+- Task 12A Fix runtime smoke — PASS read-only: `/api/selection/daily` returned HTTP 200 with
+  5,551 structural members, zero complete risk records, `selection_ready=false` and no items;
+  no runtime risk, factor or market data was written.
 - Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
   returned 200.
 - Frontend script and Vite proxy smoke — PASS: localhost `/`, `/api/health` and
@@ -202,14 +217,14 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (286 passed; one third-party TestClient deprecation warning).
+  (292 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (286 passed, 87% coverage).
+  — PASS (292 passed, 87% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
-  `npm run test` — PASS (23 passed), and `npm run build` — PASS.
+  `npm run test` — PASS (27 passed), and `npm run build` — PASS.
 - `git diff --check` — PASS.
 
 ## Live Smoke
@@ -277,6 +292,9 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   completeness, coverage-weighted confidence and contribution audit trails only.
 - Task 12A daily selection — PASS with local-only structural universe, exact-date conservative
   risk coverage, PIT factor-input assembly, deterministic BaseScore ranking and a read-only API/UI.
+- Task 12A Fix — PASS: regression coverage now proves BaseScore-first ranking, deterministic
+  ties, TopN, no-score behavior, no completeness threshold, ready/not-ready API contracts and
+  Vue rendering without writing runtime data or using a provider/network.
 
 ## Not Implemented Yet
 
