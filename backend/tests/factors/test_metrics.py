@@ -109,6 +109,20 @@ def test_quality_value_and_growth_formulas_and_reasons():
         )
         for item in negative.values()
     )
+    missing_financial = financial_components(_stock(financial_current=None))
+    assert all(
+        item.reason is ComponentUnavailableReason.MISSING_FINANCIAL
+        for item in missing_financial.values()
+    )
+    partial_quality = financial_components(_stock(financial_current=_financial(roa=None)))
+    assert (
+        partial_quality["quality_roa"].reason
+        is ComponentUnavailableReason.MISSING_COMPONENT_VALUE
+    )
+    assert all(
+        partial_quality[name].value is not None
+        for name in ("quality_roe", "quality_gross_margin", "quality_net_margin")
+    )
 
 
 def test_growth_and_price_boundaries_and_formulas():
@@ -129,11 +143,31 @@ def test_growth_and_price_boundaries_and_formulas():
         )
     )
     assert negative_current["growth_net_profit_yoy"].value == -120.0
-    short = price_components(_stock(price_series=_series(10)))
-    assert all(
-        item.reason is ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY
-        for item in short.values()
-    )
+    for base in (0, -100):
+        growth = growth_components(
+            _stock(
+                financial_current=_financial(net_profit=50),
+                financial_prior_year=_financial(
+                    date(2024, 9, 30), net_profit=base
+                ),
+            )
+        )
+        assert growth["growth_net_profit_yoy"].value is None
+        assert (
+            growth["growth_net_profit_yoy"].reason
+            is ComponentUnavailableReason.NONPOSITIVE_GROWTH_BASE
+        )
+    for count, expected_20d, expected_60d in (
+        (10, False, False),
+        (30, True, False),
+        (60, True, False),
+        (61, True, True),
+    ):
+        components = price_components(_stock(price_series=_series(count)))
+        for name in ("momentum_20d", "low_volatility_20d"):
+            assert (components[name].value is not None) is expected_20d
+        for name in ("momentum_60d", "low_volatility_60d"):
+            assert (components[name].value is not None) is expected_60d
     closes = [100.0] + [101.0] * 59 + [120.0]
     price = price_components(_stock(price_series=_series(61, closes=closes)))
     assert price["momentum_20d"].value == pytest.approx((120 / 101 - 1) * 100)
@@ -141,6 +175,10 @@ def test_growth_and_price_boundaries_and_formulas():
     returns = [closes[index] / closes[index - 1] - 1 for index in range(41, 61)]
     assert price["low_volatility_20d"].value == pytest.approx(
         pstdev(returns) * sqrt(252) * 100
+    )
+    returns_60d = [closes[index] / closes[index - 1] - 1 for index in range(1, 61)]
+    assert price["low_volatility_60d"].value == pytest.approx(
+        pstdev(returns_60d) * sqrt(252) * 100
     )
     raw = price_components(_stock(price_series=_series(61, adjusted=False)))
     assert all(

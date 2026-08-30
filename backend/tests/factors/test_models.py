@@ -10,8 +10,13 @@ from stock_selector.factors.models import (
     AdjustedClosePoint,
     FactorComponentResult,
     FactorFamily,
+    FactorFamilyResult,
+    FiveFactorCrossSectionResult,
+    FiveFactorStockResult,
     PriceSeriesInput,
+    StockFactorInput,
 )
+from stock_selector.models import FinancialRecord, ValuationRecord
 
 _AS_OF = datetime(2026, 3, 31, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -68,3 +73,173 @@ def test_component_audit_invariants():
     ):
         with pytest.raises(ValidationError):
             FactorComponentResult(**{**base, **changes})
+
+
+def _financial(symbol: str) -> FinancialRecord:
+    return FinancialRecord(
+        symbol=symbol,
+        report_period=date(2025, 12, 31),
+        announcement_date=date(2026, 2, 1),
+        available_at=datetime(2026, 2, 1, 15, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+        roe=1,
+        source="fixture",
+    )
+
+
+def _valuation(symbol: str) -> ValuationRecord:
+    return ValuationRecord(symbol=symbol, as_of=_AS_OF, pe=10, source="fixture")
+
+
+def _component(
+    name: str = "quality_roe", family: FactorFamily = FactorFamily.QUALITY
+) -> FactorComponentResult:
+    return FactorComponentResult(
+        factor_name=name,
+        family=family,
+        raw_value=1,
+        score=50,
+        available=True,
+        raw_unavailable_reason=None,
+        preprocessing_unavailable_reason=None,
+    )
+
+
+def _family(
+    family: FactorFamily = FactorFamily.QUALITY,
+    symbol: str = "600519.SH",
+    as_of: datetime = _AS_OF,
+) -> FactorFamilyResult:
+    component = _component(f"{family.value}_component", family)
+    return FactorFamilyResult(
+        symbol=symbol,
+        as_of=as_of,
+        family=family,
+        score=50,
+        available=True,
+        available_components=1,
+        total_components=1,
+        component_coverage=1,
+        components=(component,),
+    )
+
+
+def _stock_result(
+    symbol: str = "600519.SH", as_of: datetime = _AS_OF
+) -> FiveFactorStockResult:
+    return FiveFactorStockResult(
+        symbol=symbol,
+        as_of=as_of,
+        quality=_family(FactorFamily.QUALITY, symbol, as_of),
+        value=_family(FactorFamily.VALUE, symbol, as_of),
+        growth=_family(FactorFamily.GROWTH, symbol, as_of),
+        momentum=_family(FactorFamily.MOMENTUM, symbol, as_of),
+        low_volatility=_family(FactorFamily.LOW_VOLATILITY, symbol, as_of),
+    )
+
+
+def test_stock_factor_input_child_symbols_and_price_as_of_contracts():
+    for field, child in (
+        ("financial_current", _financial("000001.SZ")),
+        ("financial_prior_year", _financial("000001.SZ")),
+        ("valuation", _valuation("000001.SZ")),
+        (
+            "price_series",
+            PriceSeriesInput(
+                symbol="000001.SZ",
+                as_of=_AS_OF,
+                points=(AdjustedClosePoint(trade_date=date(2026, 3, 30), close=1),),
+                corporate_action_adjusted=True,
+            ),
+        ),
+    ):
+        with pytest.raises(ValidationError):
+            StockFactorInput(symbol="600519.SH", as_of=_AS_OF, **{field: child})
+
+    prior_as_of = _AS_OF.replace(day=30)
+    price_series = PriceSeriesInput(
+        symbol="600519.SH",
+        as_of=prior_as_of,
+        points=(AdjustedClosePoint(trade_date=date(2026, 3, 29), close=1),),
+        corporate_action_adjusted=True,
+    )
+    with pytest.raises(ValidationError):
+        StockFactorInput(
+            symbol="600519.SH", as_of=_AS_OF, price_series=price_series
+        )
+
+
+def test_price_series_naive_empty_source_and_unordered_points_contracts():
+    point = AdjustedClosePoint(trade_date=date(2026, 3, 30), close=1)
+    with pytest.raises(ValidationError):
+        PriceSeriesInput(
+            symbol="600519.SH",
+            as_of=_AS_OF.replace(tzinfo=None),
+            points=(point,),
+            corporate_action_adjusted=True,
+        )
+    with pytest.raises(ValidationError):
+        PriceSeriesInput(
+            symbol="600519.SH",
+            as_of=_AS_OF,
+            points=(point,),
+            corporate_action_adjusted=True,
+            source="",
+        )
+    unordered = PriceSeriesInput(
+        symbol="600519.SH",
+        as_of=_AS_OF,
+        points=(
+            point,
+            AdjustedClosePoint(trade_date=date(2026, 3, 29), close=0.9),
+        ),
+        corporate_action_adjusted=True,
+    )
+    assert unordered.points[0].trade_date > unordered.points[1].trade_date
+
+
+def test_factor_family_result_invariants():
+    base = {
+        "symbol": "600519.SH",
+        "as_of": _AS_OF,
+        "family": FactorFamily.QUALITY,
+        "score": 50,
+        "available": True,
+        "available_components": 1,
+        "total_components": 1,
+        "component_coverage": 1,
+        "components": (_component(),),
+    }
+    invalid = (
+        {
+            "components": (_component(), _component()),
+            "available_components": 2,
+            "total_components": 2,
+        },
+        {"components": (_component(family=FactorFamily.VALUE),)},
+        {"available_components": 0},
+        {"total_components": 2},
+        {"component_coverage": 0.5},
+    )
+    for changes in invalid:
+        with pytest.raises(ValidationError):
+            FactorFamilyResult(**{**base, **changes})
+
+
+def test_cross_section_result_invariants():
+    first = _stock_result("000001.SZ")
+    second = _stock_result("600519.SH")
+    base = {"as_of": _AS_OF, "input_count": 2, "stocks": (first, second)}
+    invalid = (
+        {"input_count": 1},
+        {"stocks": (second, first)},
+        {"stocks": (first, first)},
+        {
+            "stocks": (
+                first,
+                _stock_result("600519.SH", _AS_OF.replace(day=30)),
+            )
+        },
+    )
+    for changes in invalid:
+        with pytest.raises(ValidationError):
+            FiveFactorCrossSectionResult(**{**base, **changes})

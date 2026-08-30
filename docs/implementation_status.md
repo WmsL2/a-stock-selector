@@ -164,7 +164,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 260 backend tests, 87% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 268 backend tests, 87% coverage, Ruff, mypy,
   frontend type check, lint, 23 Vitest tests and production build all completed.
 - Backend script smoke — PASS: localhost `/api/health`, `/api/storage/status` and `/docs`
   returned 200.
@@ -177,10 +177,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (260 passed; one third-party TestClient deprecation warning).
+  (268 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (260 passed, 87% coverage).
+  — PASS (268 passed, 87% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -245,6 +245,8 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Task 11 mathematical regression hardening — PASS: component-level synthetic formulas,
   full engine cross-sectional ranking, family renormalization, PIT rejection and deterministic
   result ordering are covered without runtime data or network access.
+- Task 11 remaining PIT/model/window/low-volatility regression gaps — closed with synthetic
+  engine, direct-formula and domain-contract coverage only.
 
 ## Not Implemented Yet
 
