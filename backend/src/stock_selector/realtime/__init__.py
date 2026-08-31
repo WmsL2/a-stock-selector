@@ -51,6 +51,11 @@ from .models import (
     RealtimeScoreLayerContribution,
     RealtimeScorePolicy,
     RealtimeScoreResult,
+    RealtimeSelectionBlocker,
+    RealtimeSelectionDiagnostics,
+    RealtimeSelectionItem,
+    RealtimeSelectionPolicy,
+    RealtimeSelectionResult,
     RealtimeSignalNormalizationBlocker,
     RealtimeSignalNormalizationDiagnostics,
     RealtimeSignalNormalizationItem,
@@ -58,6 +63,7 @@ from .models import (
     RealtimeSignalPercentiles,
 )
 from .realtime_score import RealtimeScoreEngine
+from .realtime_selection import RealtimeSelectionEngine
 from .signal_normalizer import RealtimeSignalNormalizerEngine
 from .status import RealtimeStatusService
 
@@ -114,6 +120,12 @@ __all__ = [
     "RealtimeScoreLayerContribution",
     "RealtimeScorePolicy",
     "RealtimeScoreResult",
+    "RealtimeSelectionBlocker",
+    "RealtimeSelectionDiagnostics",
+    "RealtimeSelectionEngine",
+    "RealtimeSelectionItem",
+    "RealtimeSelectionPolicy",
+    "RealtimeSelectionResult",
     "RealtimeSignalNormalizationBlocker",
     "RealtimeSignalNormalizationDiagnostics",
     "RealtimeSignalNormalizationItem",

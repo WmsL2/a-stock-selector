@@ -1370,3 +1370,112 @@ class RealtimeScoreResult(DomainModel):
             if tuple(contribution.configured_weight for contribution in item.contributions) != expected_weights:
                 raise ValueError("contributions must match result policy")
         return self
+
+
+class RealtimeSelectionPolicy(DomainModel):
+    """Immutable, explicit ranking policy for an already-built realtime score result."""
+
+    min_intraday_score: float = 65.0
+    top_n: int = Field(default=100, gt=0)
+
+    @field_validator("min_intraday_score")
+    @classmethod
+    def finite_threshold(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "min_intraday_score")
+        assert finite is not None
+        if not 0 <= finite <= 100:
+            raise ValueError("min_intraday_score must be between 0 and 100")
+        return finite
+
+
+class RealtimeSelectionBlocker(StrEnum):
+    REALTIME_SCORE_NOT_READY = "realtime_score_not_ready"
+
+
+class RealtimeSelectionItem(DomainModel):
+    score_item: RealtimeScoreItem
+    realtime_rank: int = Field(gt=0)
+
+
+class RealtimeSelectionDiagnostics(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    upstream_realtime_score_ready: bool
+    upstream_blockers: tuple[RealtimeScoreBlocker, ...]
+    input_items: int = Field(ge=0)
+    intraday_score_available_items: int = Field(ge=0)
+    intraday_score_missing_items: int = Field(ge=0)
+    intraday_threshold_qualified_items: int = Field(ge=0)
+    intraday_threshold_rejected_items: int = Field(ge=0)
+    ranking_universe_items: int = Field(ge=0)
+    selected_items: int = Field(ge=0)
+    selection_ready: bool
+    blockers: tuple[RealtimeSelectionBlocker, ...]
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeSelectionDiagnostics":
+        expected = (
+            ()
+            if self.upstream_realtime_score_ready
+            else (RealtimeSelectionBlocker.REALTIME_SCORE_NOT_READY,)
+        )
+        if self.selection_ready != self.upstream_realtime_score_ready or self.blockers != expected:
+            raise ValueError("selection readiness must follow realtime score readiness")
+        if self.intraday_score_available_items + self.intraday_score_missing_items != self.input_items:
+            raise ValueError("intraday availability counts must match input items")
+        if self.intraday_threshold_qualified_items + self.intraday_threshold_rejected_items != self.intraday_score_available_items:
+            raise ValueError("threshold counts must match available intraday scores")
+        if self.ranking_universe_items != self.intraday_threshold_qualified_items:
+            raise ValueError("ranking universe must equal threshold-qualified items")
+        if not self.selection_ready and self.selected_items:
+            raise ValueError("blocked selection must not expose items")
+        if self.selected_items > self.ranking_universe_items:
+            raise ValueError("selected items cannot exceed ranking universe")
+        return self
+
+
+class RealtimeSelectionResult(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    policy: RealtimeSelectionPolicy
+    diagnostics: RealtimeSelectionDiagnostics
+    items: tuple[RealtimeSelectionItem, ...]
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeSelectionResult":
+        if self.calculation_at != self.diagnostics.calculation_at or self.candidate_as_of != self.diagnostics.candidate_as_of:
+            raise ValueError("result timestamps must match diagnostics")
+        if self.diagnostics.selected_items != len(self.items):
+            raise ValueError("selected_items must match selection items")
+        if self.diagnostics.selection_ready:
+            expected_count = min(self.diagnostics.ranking_universe_items, self.policy.top_n)
+            if len(self.items) != expected_count:
+                raise ValueError("ready selection must include the policy-sized ranking result")
+        elif self.items:
+            raise ValueError("blocked selection must expose zero items")
+        if len(self.items) > self.policy.top_n:
+            raise ValueError("selection cannot exceed policy top_n")
+        symbols = tuple(
+            item.score_item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol
+            for item in self.items
+        )
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("selected candidate symbols must be unique")
+        if tuple(item.realtime_rank for item in self.items) != tuple(range(1, len(self.items) + 1)):
+            raise ValueError("realtime ranks must be sequential")
+        for item in self.items:
+            intraday_score = item.score_item.intraday_score_item.intraday_score
+            if intraday_score is None or intraday_score < self.policy.min_intraday_score:
+                raise ValueError("selected items must satisfy the intraday threshold")
+        ordered = tuple(
+            sorted(
+                self.items,
+                key=lambda item: (
+                    -item.score_item.realtime_score,
+                    item.score_item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol,
+                ),
+            )
+        )
+        if self.items != ordered:
+            raise ValueError("selection items must be ordered by realtime score then symbol")
+        return self

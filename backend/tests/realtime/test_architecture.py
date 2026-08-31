@@ -117,3 +117,16 @@ def test_realtime_score_has_only_model_composition_dependencies() -> None:
         "stock_selector.config", "yaml",
     ):
         assert forbidden not in score
+
+
+def test_realtime_selection_has_only_policy_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    selection = (root / "realtime" / "realtime_selection.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "stock_selector.providers", "RealtimeSnapshotCollector", "LocalMarketRepository",
+        "stock_selector.storage", "FastAPI", "DataQualityEvaluator", "FactorPreprocessingEngine",
+        "BaseScoreEngine", "stock_selector.scoring", "RealtimeIntradayScoreEngine",
+        "RealtimeScoreEngine", "RealtimeIntradayFactorEngine", "datetime.now", "time.sleep",
+        "Settings", "stock_selector.config", "yaml",
+    ):
+        assert forbidden not in selection
