@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 20 - IntradayScore Composition Foundation
+Task 21 - RealTimeScore Composition Foundation
 
 ## Status
 
@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (450 passed; one third-party TestClient deprecation warning).
+  (482 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (450 passed, 88% coverage).
+  — PASS (482 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -335,8 +335,11 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Minute-backed VWAP/Trend factor inputs
 - Minute-backed Short Momentum factor inputs
 - IntradayScore realtime API/UI integration
+- RealTimeScore realtime API/UI integration
 - IntradayScore threshold/filter policy
-- RealTimeScore
+- RealTimeScore ranking / selection policy
+- Top100 / Top20 realtime selection policy
+- RiskPenalty / separate realtime risk deduction
 - Replay engine
 - Backtest
 - Factor research
@@ -583,6 +586,30 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (450 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 21 — RealTimeScore Composition Foundation (complete)
+
+- `RealtimeScoreEngine` purely composes the retained Task 15 candidate BaseScore with the retained
+  Task 20 IntradayScore. Its immutable default policy is BaseScore 75% and IntradayScore 25%; the
+  core also accepts caller-supplied policies such as 80% / 20%, without Settings or YAML.
+- Available score layers are renormalized for the official RealTimeScore. A missing IntradayScore
+  is missing rather than zero, so the ready item falls back to its full BaseScore. Overall data
+  completeness and confidence instead retain configured policy weights, including missing
+  intraday evidence. `confidence_adjusted_score` is diagnostic only.
+- Every audit contribution is linked to its retained upstream source score, completeness and
+  confidence. Task 15 membership and ascending `market_rank` order are retained exactly; Task21
+  adds no threshold, filtering, ranking, RiskPenalty, persistence, provider call, API or UI data
+  integration.
+- The realtime Vue view truthfully says that IntradayScore and RealTimeScore core scoring exist,
+  while realtime selection API/UI, Scanner, ranking and filtering remain unimplemented.
+
+## Task 21 Verification
+
+- Focused Task21 score contracts cover default/custom policy, score-layer renormalization,
+  missing-Intraday BaseScore fallback, configured-weight evidence propagation, source linkage,
+  readiness, ready-empty, preserved membership/order and invalid model states.
+- Canonical root validation — PASS (482 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -607,3 +634,4 @@ No subsequent task has been started.
 - Task 18: Realtime Cross-Sectional Signal Normalization (complete).
 - Task 19: Intraday Factor Families Foundation (complete).
 - Task 20: IntradayScore Composition Foundation (complete).
+- Task 21: RealTimeScore Composition Foundation (complete).

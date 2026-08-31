@@ -44,12 +44,20 @@ from .models import (
     RealtimeLightScanResult,
     RealtimeLightSignals,
     RealtimeMarketStatus,
+    RealtimeScoreBlocker,
+    RealtimeScoreDiagnostics,
+    RealtimeScoreItem,
+    RealtimeScoreLayer,
+    RealtimeScoreLayerContribution,
+    RealtimeScorePolicy,
+    RealtimeScoreResult,
     RealtimeSignalNormalizationBlocker,
     RealtimeSignalNormalizationDiagnostics,
     RealtimeSignalNormalizationItem,
     RealtimeSignalNormalizationResult,
     RealtimeSignalPercentiles,
 )
+from .realtime_score import RealtimeScoreEngine
 from .signal_normalizer import RealtimeSignalNormalizerEngine
 from .status import RealtimeStatusService
 
@@ -98,6 +106,14 @@ __all__ = [
     "RealtimeLightScannerEngine",
     "RealtimeLightSignals",
     "RealtimeMarketStatus",
+    "RealtimeScoreBlocker",
+    "RealtimeScoreDiagnostics",
+    "RealtimeScoreEngine",
+    "RealtimeScoreItem",
+    "RealtimeScoreLayer",
+    "RealtimeScoreLayerContribution",
+    "RealtimeScorePolicy",
+    "RealtimeScoreResult",
     "RealtimeSignalNormalizationBlocker",
     "RealtimeSignalNormalizationDiagnostics",
     "RealtimeSignalNormalizationItem",

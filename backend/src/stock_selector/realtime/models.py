@@ -1139,3 +1139,234 @@ class RealtimeIntradayScoreResult(DomainModel):
                 if contribution.enabled != group.enabled or contribution.configured_weight != group.weight:
                     raise ValueError("contributions must match result policy")
         return self
+
+
+class RealtimeScoreLayer(StrEnum):
+    BASE_SCORE = "base_score"
+    INTRADAY_SCORE = "intraday_score"
+
+
+class RealtimeScorePolicy(DomainModel):
+    """Immutable two-layer composition policy for the official RealTimeScore."""
+
+    base_weight: float = 0.75
+    intraday_weight: float = 0.25
+
+    @field_validator("base_weight", "intraday_weight")
+    @classmethod
+    def finite(cls, value: float, info: ValidationInfo) -> float:
+        finite = ensure_finite_float(value, info.field_name)
+        assert finite is not None
+        if not 0 < finite < 1:
+            raise ValueError(f"{info.field_name} must be greater than zero and less than one")
+        return finite
+
+    @model_validator(mode="after")
+    def weights_sum_to_one(self) -> "RealtimeScorePolicy":
+        if not math.isclose(
+            self.base_weight + self.intraday_weight, 1.0, rel_tol=1e-9, abs_tol=1e-9
+        ):
+            raise ValueError("realtime score policy weights must sum to one")
+        return self
+
+
+class RealtimeScoreLayerContribution(DomainModel):
+    layer: RealtimeScoreLayer
+    configured_weight: float
+    source_score: float | None
+    source_data_completeness: float
+    source_confidence: float
+    available: bool
+    renormalized_weight: float
+    weighted_contribution: float | None
+
+    @field_validator(
+        "configured_weight", "source_score", "source_data_completeness",
+        "source_confidence", "renormalized_weight", "weighted_contribution",
+    )
+    @classmethod
+    def finite(cls, value: float | None, info: ValidationInfo) -> float | None:
+        return ensure_finite_float(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_contribution(self) -> "RealtimeScoreLayerContribution":
+        if not 0 <= self.configured_weight <= 1 or not 0 <= self.renormalized_weight <= 1:
+            raise ValueError("layer weights must be between 0 and 1")
+        if self.source_score is not None and not 0 <= self.source_score <= 100:
+            raise ValueError("source_score must be between 0 and 100")
+        if self.weighted_contribution is not None and not 0 <= self.weighted_contribution <= 100:
+            raise ValueError("weighted_contribution must be between 0 and 100")
+        if not 0 <= self.source_data_completeness <= 1:
+            raise ValueError("source_data_completeness must be between 0 and 1")
+        if not 0 <= self.source_confidence <= self.source_data_completeness:
+            raise ValueError("source_confidence must not exceed source_data_completeness")
+        if self.layer is RealtimeScoreLayer.BASE_SCORE:
+            if self.source_score is None or not self.available:
+                raise ValueError("base score contribution must always be available")
+        elif self.available != (self.source_score is not None):
+            raise ValueError("intraday availability must match source_score")
+        if not self.available:
+            if self.renormalized_weight != 0 or self.weighted_contribution is not None:
+                raise ValueError("unavailable contribution must be unweighted")
+        else:
+            if self.weighted_contribution is None or self.source_score is None:
+                raise ValueError("available contribution requires score and weighted contribution")
+            if not math.isclose(
+                self.weighted_contribution,
+                self.source_score * self.renormalized_weight,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            ):
+                raise ValueError("weighted_contribution must match source score and weight")
+        return self
+
+
+class RealtimeScoreBlocker(StrEnum):
+    INTRADAY_SCORE_NOT_READY = "intraday_score_not_ready"
+
+
+class RealtimeScoreItem(DomainModel):
+    intraday_score_item: RealtimeIntradayScoreItem
+    realtime_score: float
+    data_completeness: float
+    confidence: float
+    confidence_adjusted_score: float
+    available_layer_weight: float
+    available_layers: int = Field(ge=0, le=2)
+    total_layers: int = Field(default=2, frozen=True)
+    contributions: tuple[RealtimeScoreLayerContribution, ...]
+
+    @field_validator(
+        "realtime_score", "data_completeness", "confidence",
+        "confidence_adjusted_score", "available_layer_weight",
+    )
+    @classmethod
+    def finite(cls, value: float, info: ValidationInfo) -> float:
+        finite = ensure_finite_float(value, info.field_name)
+        assert finite is not None
+        return finite
+
+    @model_validator(mode="after")
+    def validate_item(self) -> "RealtimeScoreItem":
+        if self.total_layers != 2 or len(self.contributions) != 2:
+            raise ValueError("realtime score items require exactly two layers")
+        if tuple(item.layer for item in self.contributions) != tuple(RealtimeScoreLayer):
+            raise ValueError("contributions must use canonical layer order")
+        if not 0 <= self.realtime_score <= 100 or not 0 <= self.confidence_adjusted_score <= 100:
+            raise ValueError("score values must be between 0 and 100")
+        if not 0 <= self.data_completeness <= 1 or not 0 <= self.confidence <= self.data_completeness:
+            raise ValueError("confidence must be between 0 and data_completeness")
+        if not 0 <= self.available_layer_weight <= 1:
+            raise ValueError("available_layer_weight must be between 0 and 1")
+        candidate = self.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate
+        base, intraday = self.contributions
+        expected_sources = (
+            (candidate.base_score, candidate.data_completeness, candidate.confidence),
+            (
+                self.intraday_score_item.intraday_score,
+                self.intraday_score_item.data_completeness,
+                self.intraday_score_item.confidence,
+            ),
+        )
+        for contribution, expected in zip(self.contributions, expected_sources, strict=True):
+            if (
+                contribution.source_score != expected[0]
+                or contribution.source_data_completeness != expected[1]
+                or contribution.source_confidence != expected[2]
+            ):
+                raise ValueError("contributions must match retained upstream score evidence")
+        if not base.available:
+            raise ValueError("base score contribution must be available")
+        if self.available_layers != sum(item.available for item in self.contributions):
+            raise ValueError("available_layers must match contributions")
+        if self.available_layers != (2 if intraday.source_score is not None else 1):
+            raise ValueError("available_layers must follow intraday score availability")
+        available_weight = sum(item.configured_weight for item in self.contributions if item.available)
+        if not math.isclose(self.available_layer_weight, available_weight, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("available_layer_weight must match available contributions")
+        if available_weight <= 0:
+            raise ValueError("base score makes available_layer_weight positive")
+        if not math.isclose(
+            sum(item.renormalized_weight for item in self.contributions), 1.0,
+            rel_tol=1e-9, abs_tol=1e-9,
+        ):
+            raise ValueError("available renormalized weights must sum to one")
+        score = sum(item.weighted_contribution or 0.0 for item in self.contributions)
+        if not math.isclose(self.realtime_score, score, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("realtime_score must match weighted contributions")
+        configured_weight = sum(item.configured_weight for item in self.contributions)
+        if configured_weight <= 0:
+            raise ValueError("configured layer weight must be positive")
+        completeness = sum(
+            item.configured_weight * item.source_data_completeness
+            for item in self.contributions
+        ) / configured_weight
+        confidence = sum(
+            item.configured_weight * item.source_confidence for item in self.contributions
+        ) / configured_weight
+        if not math.isclose(self.data_completeness, completeness, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("data_completeness must match configured layer evidence")
+        if not math.isclose(self.confidence, confidence, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("confidence must match configured layer evidence")
+        if not math.isclose(
+            self.confidence_adjusted_score, self.realtime_score * self.confidence,
+            rel_tol=1e-9, abs_tol=1e-9,
+        ):
+            raise ValueError("confidence_adjusted_score must match realtime_score")
+        return self
+
+
+class RealtimeScoreDiagnostics(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    upstream_intraday_score_ready: bool
+    upstream_blockers: tuple[RealtimeIntradayScoreBlocker, ...]
+    input_items: int = Field(ge=0)
+    output_items: int = Field(ge=0)
+    realtime_score_ready: bool
+    blockers: tuple[RealtimeScoreBlocker, ...]
+    blended_items: int = Field(ge=0)
+    base_only_items: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeScoreDiagnostics":
+        expected = () if self.upstream_intraday_score_ready else (RealtimeScoreBlocker.INTRADAY_SCORE_NOT_READY,)
+        if self.realtime_score_ready != self.upstream_intraday_score_ready or self.blockers != expected:
+            raise ValueError("realtime score readiness must follow intraday score")
+        if self.realtime_score_ready and self.input_items != self.output_items:
+            raise ValueError("ready realtime score result must retain every input item")
+        if not self.realtime_score_ready and self.output_items:
+            raise ValueError("blocked realtime score result must not expose items")
+        if self.blended_items + self.base_only_items != self.output_items:
+            raise ValueError("layer availability counts must match output items")
+        return self
+
+
+class RealtimeScoreResult(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    policy: RealtimeScorePolicy
+    diagnostics: RealtimeScoreDiagnostics
+    items: tuple[RealtimeScoreItem, ...]
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeScoreResult":
+        if self.calculation_at != self.diagnostics.calculation_at or self.candidate_as_of != self.diagnostics.candidate_as_of:
+            raise ValueError("result timestamps must match diagnostics")
+        if self.diagnostics.output_items != len(self.items):
+            raise ValueError("output_items must match realtime score items")
+        if self.diagnostics.realtime_score_ready and len(self.items) != self.diagnostics.input_items:
+            raise ValueError("ready result must retain every intraday score item")
+        if not self.diagnostics.realtime_score_ready and self.items:
+            raise ValueError("blocked result must expose zero items")
+        symbols = tuple(item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol for item in self.items)
+        ranks = tuple(item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.market_rank for item in self.items)
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("realtime score item symbols must be unique")
+        if ranks != tuple(sorted(ranks)):
+            raise ValueError("realtime score items must preserve candidate market rank")
+        expected_weights = (self.policy.base_weight, self.policy.intraday_weight)
+        for item in self.items:
+            if tuple(contribution.configured_weight for contribution in item.contributions) != expected_weights:
+                raise ValueError("contributions must match result policy")
+        return self

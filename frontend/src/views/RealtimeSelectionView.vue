@@ -62,5 +62,5 @@ onMounted(() => {
     </el-descriptions>
     <el-alert title="状态仅来自本地选择性持久化快照；不会触发网络拉取，也不代表全市场覆盖或交易所行情有效。" type="info" :closable="false" />
   </section>
-  <section class="panel"><EmptyState title="实时选股引擎尚未实现" :description="`IntradayScore 核心评分已实现，但尚未接入实时选股 API/UI；Realtime Scanner 与 RealTimeScore 尚未实现。${infrastructureStatus}`" /></section>
+  <section class="panel"><EmptyState title="实时选股引擎尚未实现" :description="`IntradayScore 与 RealTimeScore 核心评分已实现，但尚未接入实时选股 API/UI；Realtime Scanner、排名与筛选策略尚未实现。${infrastructureStatus}`" /></section>
 </template>
