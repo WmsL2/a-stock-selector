@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (492 passed; one third-party TestClient deprecation warning).
+  (498 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (492 passed, 88% coverage).
+  — PASS (498 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -631,6 +631,16 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   ranking/ties, Top100 boundary behavior, filter-before-ranking, custom policy, readiness and
   normal model-construction rejection paths.
 - Canonical root validation — PASS (492 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
+## Task 22 Fix Verification
+
+- Final regression closure — PASS: deterministic repeated selection on one immutable Task21 result,
+  low retained BaseScore admission without Task15 re-filtering, blocked-result rejection,
+  missing-Intraday selected-item rejection, symbol tie-order rejection and positive distinct
+  timestamp preservation are covered with normal Task22 model construction where rejection is
+  asserted.
+- Canonical root validation — PASS (498 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
 ## Next Task

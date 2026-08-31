@@ -181,6 +181,99 @@ def test_selection_and_diagnostics_normal_construction_reject_invalid_states() -
             RealtimeSelectionDiagnostics(**(diagnostic_values | update))
 
 
+def test_selection_is_deterministic_for_one_immutable_task21_result() -> None:
+    source = _scores(
+        _upstream_item("000001.SZ", 1, 70, 80),
+        _upstream_item("000002.SZ", 2, 90, 70),
+        _upstream_item("000003.SZ", 3, 80, None),
+    )
+    engine = RealtimeSelectionEngine()
+    assert engine.select(source, RealtimeSelectionPolicy(top_n=2)) == engine.select(
+        source, RealtimeSelectionPolicy(top_n=2)
+    )
+
+
+def test_low_retained_base_score_is_not_re_filtered_by_task22() -> None:
+    source = _scores(_upstream_item("000001.SZ", 1, 20, 80))
+    result = _select(source, RealtimeSelectionPolicy(top_n=1))
+    assert _symbols(result) == ["000001.SZ"]
+    assert result.items[0].score_item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.base_score == 20
+
+
+def test_normal_result_construction_rejects_blocked_result_with_item() -> None:
+    item = RealtimeSelectionItem(
+        score_item=_scores(_upstream_item("000001.SZ", 1, 80, 80)).items[0],
+        realtime_rank=1,
+    )
+    diagnostics = RealtimeSelectionDiagnostics(
+        calculation_at=_CALCULATION_AT,
+        candidate_as_of=_CANDIDATE_AS_OF,
+        upstream_realtime_score_ready=False,
+        upstream_blockers=(RealtimeScoreBlocker.INTRADAY_SCORE_NOT_READY,),
+        input_items=1,
+        intraday_score_available_items=1,
+        intraday_score_missing_items=0,
+        intraday_threshold_qualified_items=1,
+        intraday_threshold_rejected_items=0,
+        ranking_universe_items=1,
+        selected_items=0,
+        selection_ready=False,
+        blockers=(RealtimeSelectionBlocker.REALTIME_SCORE_NOT_READY,),
+    )
+    with pytest.raises(ValidationError):
+        RealtimeSelectionResult(
+            calculation_at=_CALCULATION_AT,
+            candidate_as_of=_CANDIDATE_AS_OF,
+            policy=RealtimeSelectionPolicy(),
+            diagnostics=diagnostics,
+            items=(item,),
+        )
+
+
+def test_normal_result_construction_rejects_selected_missing_intraday_score() -> None:
+    missing = RealtimeSelectionItem(
+        score_item=_scores(_upstream_item("000001.SZ", 1, 80, None)).items[0],
+        realtime_rank=1,
+    )
+    with pytest.raises(ValidationError):
+        RealtimeSelectionResult(
+            calculation_at=_CALCULATION_AT,
+            candidate_as_of=_CANDIDATE_AS_OF,
+            policy=RealtimeSelectionPolicy(),
+            diagnostics=_diagnostics(1, 1),
+            items=(missing,),
+        )
+
+
+def test_normal_result_construction_rejects_wrong_symbol_order_for_score_tie() -> None:
+    source = _scores(
+        _upstream_item("000001.SZ", 1, 80, 80),
+        _upstream_item("000002.SZ", 2, 80, 80),
+    )
+    wrong_order = (
+        RealtimeSelectionItem(score_item=source.items[1], realtime_rank=1),
+        RealtimeSelectionItem(score_item=source.items[0], realtime_rank=2),
+    )
+    with pytest.raises(ValidationError):
+        RealtimeSelectionResult(
+            calculation_at=_CALCULATION_AT,
+            candidate_as_of=_CANDIDATE_AS_OF,
+            policy=RealtimeSelectionPolicy(),
+            diagnostics=_diagnostics(2, 2),
+            items=wrong_order,
+        )
+
+
+def test_selection_preserves_distinct_task21_timestamps() -> None:
+    source = _scores(_upstream_item("000001.SZ", 1, 80, 80))
+    result = _select(source)
+    assert result.calculation_at == source.calculation_at
+    assert result.candidate_as_of == source.candidate_as_of
+    assert result.diagnostics.calculation_at == source.calculation_at
+    assert result.diagnostics.candidate_as_of == source.candidate_as_of
+    assert result.calculation_at != result.candidate_as_of
+
+
 _CALCULATION_AT = datetime(2026, 8, 31, tzinfo=UTC)
 _CANDIDATE_AS_OF = datetime(2026, 8, 30, tzinfo=UTC)
 
