@@ -351,3 +351,206 @@ class RealtimeCandidateSnapshotResult(DomainModel):
         if self.diagnostics.snapshot_ready and len(self.items) != self.diagnostics.candidate_members:
             raise ValueError("ready snapshot items must cover all candidates")
         return self
+
+
+class RealtimeLightScanPolicy(DomainModel):
+    """Explicit thresholds for deterministic per-quote descriptive flags."""
+
+    strong_move_pct: float = 3.0
+    high_turnover_rate_pct: float = 3.0
+    high_volume_ratio: float = 1.5
+
+    @field_validator(
+        "strong_move_pct", "high_turnover_rate_pct", "high_volume_ratio"
+    )
+    @classmethod
+    def positive_finite(cls, value: float, info: ValidationInfo) -> float:
+        finite = ensure_finite_float(value, info.field_name)
+        assert finite is not None
+        if finite <= 0:
+            raise ValueError(f"{info.field_name} must be greater than zero")
+        return finite
+
+
+class RealtimeLightSignals(DomainModel):
+    """The six unrounded Task 17 quote observations in their source units."""
+
+    change_pct: float | None
+    price_vs_open_pct: float | None
+    price_vs_prev_close_pct: float | None
+    session_range_pct: float | None
+    turnover_rate_pct: float | None
+    volume_ratio: float | None
+
+    @field_validator(
+        "change_pct",
+        "price_vs_open_pct",
+        "price_vs_prev_close_pct",
+        "session_range_pct",
+        "turnover_rate_pct",
+        "volume_ratio",
+    )
+    @classmethod
+    def finite(cls, value: float | None, info: ValidationInfo) -> float | None:
+        return ensure_finite_float(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_non_negative_activity_values(self) -> "RealtimeLightSignals":
+        if self.turnover_rate_pct is not None and self.turnover_rate_pct < 0:
+            raise ValueError("turnover_rate_pct must not be negative")
+        if self.volume_ratio is not None and self.volume_ratio < 0:
+            raise ValueError("volume_ratio must not be negative")
+        return self
+
+
+class RealtimeLightFlag(StrEnum):
+    STRONG_UP_MOVE = "strong_up_move"
+    STRONG_DOWN_MOVE = "strong_down_move"
+    HIGH_TURNOVER = "high_turnover"
+    HIGH_VOLUME_RATIO = "high_volume_ratio"
+
+
+class RealtimeLightScanBlocker(StrEnum):
+    """The scanner has one downstream readiness dependency."""
+
+    CANDIDATE_SNAPSHOT_NOT_READY = "candidate_snapshot_not_ready"
+
+
+_REALTIME_LIGHT_FLAG_ORDER = (
+    RealtimeLightFlag.STRONG_UP_MOVE,
+    RealtimeLightFlag.STRONG_DOWN_MOVE,
+    RealtimeLightFlag.HIGH_TURNOVER,
+    RealtimeLightFlag.HIGH_VOLUME_RATIO,
+)
+
+
+class RealtimeLightScanItem(DomainModel):
+    """One unchanged Task 16 item annotated with observations and flags."""
+
+    snapshot_item: RealtimeCandidateSnapshotItem
+    signals: RealtimeLightSignals
+    flags: tuple[RealtimeLightFlag, ...]
+    available_signals: int = Field(ge=0, le=6)
+    signal_completeness: float
+
+    @field_validator("signal_completeness")
+    @classmethod
+    def finite_completeness(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "signal_completeness")
+        assert finite is not None
+        if not 0 <= finite <= 1:
+            raise ValueError("signal_completeness must be between 0 and 1")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_item(self) -> "RealtimeLightScanItem":
+        if len(set(self.flags)) != len(self.flags):
+            raise ValueError("light scan flags must be unique")
+        expected_flags = tuple(flag for flag in _REALTIME_LIGHT_FLAG_ORDER if flag in self.flags)
+        if self.flags != expected_flags:
+            raise ValueError("light scan flags must follow semantic order")
+        actual_available = sum(value is not None for value in self.signals.model_dump().values())
+        if self.available_signals != actual_available:
+            raise ValueError("available_signals must match non-missing signals")
+        if self.signal_completeness != self.available_signals / 6:
+            raise ValueError("signal_completeness must match available_signals")
+        return self
+
+
+class RealtimeLightScanDiagnostics(DomainModel):
+    """Auditable availability and readiness information for one light scan."""
+
+    calculation_at: datetime
+    candidate_as_of: datetime
+    upstream_snapshot_ready: bool
+    upstream_blockers: tuple[RealtimeCandidateSnapshotBlocker, ...]
+    input_items: int = Field(ge=0)
+    output_items: int = Field(ge=0)
+    scan_ready: bool
+    blockers: tuple[RealtimeLightScanBlocker, ...]
+    flagged_items: int = Field(ge=0)
+    change_pct_available_items: int = Field(ge=0)
+    price_vs_open_available_items: int = Field(ge=0)
+    price_vs_prev_close_available_items: int = Field(ge=0)
+    session_range_available_items: int = Field(ge=0)
+    turnover_rate_available_items: int = Field(ge=0)
+    volume_ratio_available_items: int = Field(ge=0)
+    available_signal_values: int = Field(ge=0)
+    total_signal_slots: int = Field(ge=0)
+    overall_signal_coverage: float | None
+
+    @field_validator("calculation_at", "candidate_as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "timestamp")
+
+    @field_validator("overall_signal_coverage")
+    @classmethod
+    def finite_coverage(cls, value: float | None) -> float | None:
+        finite = ensure_finite_float(value, "overall_signal_coverage")
+        if finite is not None and not 0 <= finite <= 1:
+            raise ValueError("overall_signal_coverage must be between 0 and 1")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeLightScanDiagnostics":
+        if self.candidate_as_of > self.calculation_at:
+            raise ValueError("candidate_as_of must not follow calculation_at")
+        if len(set(self.upstream_blockers)) != len(self.upstream_blockers):
+            raise ValueError("upstream blockers must be unique")
+        if len(set(self.blockers)) != len(self.blockers):
+            raise ValueError("scan blockers must be unique")
+        if self.flagged_items > self.output_items:
+            raise ValueError("flagged_items must not exceed output_items")
+        if self.total_signal_slots != self.input_items * 6:
+            raise ValueError("total_signal_slots must equal input_items times six")
+        if self.available_signal_values > self.total_signal_slots:
+            raise ValueError("available_signal_values must not exceed total_signal_slots")
+        if self.input_items == 0 and self.overall_signal_coverage is not None:
+            raise ValueError("empty scans must not report signal coverage")
+        if self.input_items and self.overall_signal_coverage != (
+            self.available_signal_values / self.total_signal_slots
+        ):
+            raise ValueError("overall_signal_coverage must match availability")
+        expected_blockers = (
+            ()
+            if self.upstream_snapshot_ready
+            else (RealtimeLightScanBlocker.CANDIDATE_SNAPSHOT_NOT_READY,)
+        )
+        if self.blockers != expected_blockers or self.scan_ready != self.upstream_snapshot_ready:
+            raise ValueError("scan readiness must follow upstream snapshot readiness")
+        if not self.scan_ready and (self.output_items or self.flagged_items):
+            raise ValueError("blocked scans must not expose output items")
+        return self
+
+
+class RealtimeLightScanResult(DomainModel):
+    """A deterministic Task 17 annotation result, never a new ranking."""
+
+    as_of: datetime
+    policy: RealtimeLightScanPolicy
+    diagnostics: RealtimeLightScanDiagnostics
+    items: tuple[RealtimeLightScanItem, ...]
+
+    @field_validator("as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "as_of")
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeLightScanResult":
+        if self.as_of != self.diagnostics.candidate_as_of:
+            raise ValueError("result as_of must match candidate_as_of")
+        if self.diagnostics.output_items != len(self.items):
+            raise ValueError("output_items must match scan items")
+        symbols = tuple(item.snapshot_item.candidate.symbol for item in self.items)
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("scan item symbols must be unique")
+        ranks = tuple(item.snapshot_item.candidate.market_rank for item in self.items)
+        if ranks != tuple(sorted(ranks)):
+            raise ValueError("scan items must preserve candidate market rank")
+        if self.diagnostics.scan_ready and len(self.items) != self.diagnostics.input_items:
+            raise ValueError("ready scans must retain every input item")
+        if not self.diagnostics.scan_ready and self.items:
+            raise ValueError("blocked scans must not expose items")
+        return self

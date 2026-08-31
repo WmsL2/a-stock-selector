@@ -42,3 +42,19 @@ def test_candidate_snapshot_engine_has_no_operational_dependencies() -> None:
         "time.sleep",
     ):
         assert forbidden not in snapshot
+
+
+def test_light_scanner_has_no_operational_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    scanner = (root / "realtime" / "light_scanner.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "stock_selector.providers",
+        "RealtimeSnapshotCollector",
+        "LocalMarketRepository",
+        "stock_selector.storage",
+        "FastAPI",
+        "DataQualityEvaluator",
+        "datetime.now",
+        "time.sleep",
+    ):
+        assert forbidden not in scanner

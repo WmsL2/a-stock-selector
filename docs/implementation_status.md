@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 16 - Realtime Candidate Snapshot Join
+Task 17 - Realtime Light Scanner Foundation
 
 ## Status
 
@@ -330,7 +330,7 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Realtime light scanner / engine
+- Realtime cross-sectional scanner ranking / scoring
 - Minute bars
 - Intraday factors
 - IntradayScore
@@ -432,6 +432,37 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Full backend validation — PASS (388 tests); Ruff and mypy pass. The canonical root validation
   also covers backend coverage and the unchanged frontend checks.
 
+## Task 17 — Realtime Light Scanner Foundation (complete)
+
+- `RealtimeLightScannerEngine` is a pure deterministic annotation layer that consumes only a
+  validated Task 16 candidate snapshot. It retains the exact upstream candidate membership,
+  `market_rank` order, candidate records and quote records; it does not capture, join, filter,
+  rank, score or persist anything.
+- Each item exposes exactly six unrounded quote observations: provider `change_pct`,
+  `price_vs_open_pct`, `price_vs_prev_close_pct`, `session_range_pct`, provider
+  `turnover_rate_pct`, and provider `volume_ratio`. Percentage values remain percentage points.
+  Missing optional quote fields stay `None` with no imputation or substitute change signal.
+- The immutable default policy uses `strong_move_pct=3.0`,
+  `high_turnover_rate_pct=3.0`, and `high_volume_ratio=1.5`. It produces only the stable,
+  descriptive flag order `STRONG_UP_MOVE`, `STRONG_DOWN_MOVE`, `HIGH_TURNOVER`, and
+  `HIGH_VOLUME_RATIO`; flags never alter candidates.
+- Diagnostics expose upstream readiness/blockers plus per-signal availability, item-level and
+  aggregate completeness, and flagged-item counts. A blocked Task 16 snapshot maps to the sole
+  scanner blocker `CANDIDATE_SNAPSHOT_NOT_READY`; a ready-empty snapshot remains scan-ready with
+  no artificial 100% coverage.
+- Sina fallback quotes with unavailable turnover rate and volume ratio remain scan-ready; those
+  two observations are simply `None`. No IntradayScore, RealTimeScore, Top100, Top20,
+  cross-sectional ranking, near-limit or liquidity detection, minute bars, scheduler, polling,
+  API, CLI, Vue scanner UI, or persistence was added.
+
+## Task 17 Verification
+
+- `tests/realtime` — PASS (91 tests), including signal formula and units, missingness, provider
+  versus derived change separation, inclusive thresholds, stable flag ordering, rank/membership
+  preservation, readiness, availability accounting, determinism and scanner dependency boundaries.
+- Canonical root validation — PASS (405 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build all pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -452,3 +483,4 @@ No subsequent task has been started.
 - Task 14: Realtime Market Data Foundation (complete).
 - Task 15: Realtime Candidate Foundation (complete).
 - Task 16: Realtime Candidate Snapshot Join (complete).
+- Task 17: Realtime Light Scanner Foundation (complete).
