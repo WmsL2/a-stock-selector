@@ -559,6 +559,14 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (427 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 20 Fix Verification
+
+- Result-contract hardening — PASS: score results now require unique candidate symbols, preserved
+  ascending Task15 market ranks, empty blocked output, and exact Task19 family evidence in every
+  contribution; each contribution must also match the declared result policy.
+- Canonical root validation — PASS (427 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.

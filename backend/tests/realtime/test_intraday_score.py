@@ -7,6 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from stock_selector.realtime import (
+    RealtimeCandidate,
+    RealtimeCandidateSnapshotItem,
     RealtimeIntradayFactorDiagnostics,
     RealtimeIntradayFactorFamily,
     RealtimeIntradayFactorItem,
@@ -15,6 +17,8 @@ from stock_selector.realtime import (
     RealtimeIntradayFamilyWeight,
     RealtimeIntradayScoreEngine,
     RealtimeIntradayScorePolicy,
+    RealtimeLightScanItem,
+    RealtimeSignalNormalizationItem,
 )
 
 
@@ -66,7 +70,13 @@ def _factors(relative, activity, risk, rs_coverage=1):
         "risk_stability": _family(RealtimeIntradayFactorFamily.RISK_STABILITY, risk),
     }
     available = sum(f.available for f in families.values())
-    item = RealtimeIntradayFactorItem.model_construct(normalization_item=None, **families, available_families=available, total_families=5, family_coverage=available / 5)
+    candidate = RealtimeCandidate.model_construct(symbol="000001.SZ", market_rank=1)
+    normalization_item = RealtimeSignalNormalizationItem.model_construct(
+        scan_item=RealtimeLightScanItem.model_construct(
+            snapshot_item=RealtimeCandidateSnapshotItem.model_construct(candidate=candidate)
+        )
+    )
+    item = RealtimeIntradayFactorItem.model_construct(normalization_item=normalization_item, **families, available_families=available, total_families=5, family_coverage=available / 5)
     now = datetime(2026, 8, 31, tzinfo=UTC)
     return RealtimeIntradayFactorResult.model_construct(calculation_at=now, candidate_as_of=now, diagnostics=RealtimeIntradayFactorDiagnostics.model_construct(factor_ready=True, blockers=()), items=(item,))
 

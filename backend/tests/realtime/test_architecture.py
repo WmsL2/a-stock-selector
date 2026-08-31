@@ -101,5 +101,6 @@ def test_intraday_score_has_no_operational_or_scoring_dependencies() -> None:
         "stock_selector.providers", "RealtimeSnapshotCollector", "LocalMarketRepository",
         "stock_selector.storage", "FastAPI", "DataQualityEvaluator", "FactorPreprocessingEngine",
         "BaseScoreEngine", "stock_selector.scoring", "RealtimeIntradayFactorEngine", "datetime.now", "time.sleep",
+        "Settings", "stock_selector.config", "yaml",
     ):
         assert forbidden not in score

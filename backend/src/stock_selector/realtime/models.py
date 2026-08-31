@@ -1046,6 +1046,13 @@ class RealtimeIntradayScoreItem(DomainModel):
             raise ValueError("confidence must not exceed data_completeness")
         if tuple(item.family for item in self.contributions) != tuple(RealtimeIntradayFactorFamily):
             raise ValueError("contributions must use canonical family order")
+        for contribution in self.contributions:
+            family = getattr(self.factor_item, contribution.family.value)
+            if (
+                contribution.family_score != family.score
+                or contribution.family_component_coverage != family.component_coverage
+            ):
+                raise ValueError("contributions must match retained factor families")
         if self.enabled_families != sum(item.enabled for item in self.contributions) or self.available_families != sum(item.available for item in self.contributions):
             raise ValueError("family counts must match contributions")
         enabled = sum(item.configured_weight for item in self.contributions if item.enabled)
@@ -1112,6 +1119,20 @@ class RealtimeIntradayScoreResult(DomainModel):
             raise ValueError("output_items must match score items")
         if self.diagnostics.score_ready and len(self.items) != self.diagnostics.input_items:
             raise ValueError("ready result must retain every factor item")
+        if not self.diagnostics.score_ready and self.items:
+            raise ValueError("blocked score result must expose zero items")
+        symbols = tuple(
+            item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol
+            for item in self.items
+        )
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("score item symbols must be unique")
+        ranks = tuple(
+            item.factor_item.normalization_item.scan_item.snapshot_item.candidate.market_rank
+            for item in self.items
+        )
+        if ranks != tuple(sorted(ranks)):
+            raise ValueError("score items must preserve candidate market rank")
         for item in self.items:
             for contribution in item.contributions:
                 group = getattr(self.policy, contribution.family.value)
