@@ -92,3 +92,14 @@ def test_intraday_factors_have_no_operational_or_preprocessing_dependencies() ->
         "time.sleep",
     ):
         assert forbidden not in factors
+
+
+def test_intraday_score_has_no_operational_or_scoring_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    score = (root / "realtime" / "intraday_score.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "stock_selector.providers", "RealtimeSnapshotCollector", "LocalMarketRepository",
+        "stock_selector.storage", "FastAPI", "DataQualityEvaluator", "FactorPreprocessingEngine",
+        "BaseScoreEngine", "stock_selector.scoring", "RealtimeIntradayFactorEngine", "datetime.now", "time.sleep",
+    ):
+        assert forbidden not in score

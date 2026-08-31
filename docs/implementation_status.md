@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 19 - Intraday Factor Families Foundation
+Task 20 - IntradayScore Composition Foundation
 
 ## Status
 
@@ -208,7 +208,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 423 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 427 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (423 passed; one third-party TestClient deprecation warning).
+  (427 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (423 passed, 88% coverage).
+  — PASS (427 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -334,7 +334,8 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Minute bars
 - Minute-backed VWAP/Trend factor inputs
 - Minute-backed Short Momentum factor inputs
-- IntradayScore
+- IntradayScore realtime API/UI integration
+- IntradayScore threshold/filter policy
 - RealTimeScore
 - Replay engine
 - Backtest
@@ -533,6 +534,31 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (423 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 20 — IntradayScore Composition Foundation (complete)
+
+- `RealtimeIntradayScoreEngine` purely composes Task 19 family scores with an explicit immutable
+  core policy: Relative Strength 30%, Activity/Liquidity 25%, VWAP/Trend 20%, Short Momentum 15%,
+  and Risk/Stability 10%. Available family weights are renormalized; unavailable families are
+  missing rather than zero contributions.
+- `data_completeness` is available configured family weight divided by enabled weight. `confidence`
+  uses configured weight times Task 19 family component coverage divided by enabled weight, so
+  partial component coverage affects confidence but not the main IntradayScore. The separate
+  `confidence_adjusted_score` is diagnostic only and does not rank or filter candidates.
+- With current RS, Activity and Risk availability the maximum default completeness is 0.65; with
+  Sina-style absent Activity it is 0.40. A ready item with no available family remains present with
+  no score rather than a fabricated zero. Membership and market-rank order are retained.
+- The realtime selection view now truthfully states that IntradayScore core composition exists but
+  is not connected to selection API/UI. Realtime Scanner and RealTimeScore remain unimplemented;
+  no endpoint, score table, ranking, threshold, scheduler or persistence was added.
+
+## Task 20 Verification
+
+- Focused Task20 score contracts cover default policy, invalid policy values, available-family
+  renormalization, current three-family and Sina semantics, partial-coverage confidence behavior,
+  and score-unavailable items.
+- Canonical root validation — PASS (427 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -556,3 +582,4 @@ No subsequent task has been started.
 - Task 17: Realtime Light Scanner Foundation (complete).
 - Task 18: Realtime Cross-Sectional Signal Normalization (complete).
 - Task 19: Intraday Factor Families Foundation (complete).
+- Task 20: IntradayScore Composition Foundation (complete).

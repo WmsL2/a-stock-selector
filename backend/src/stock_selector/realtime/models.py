@@ -1,3 +1,4 @@
+import math
 from datetime import datetime
 from enum import StrEnum
 
@@ -934,4 +935,186 @@ class RealtimeIntradayFactorResult(DomainModel):
             raise ValueError("ready factors must retain every input item")
         if not self.diagnostics.factor_ready and self.items:
             raise ValueError("blocked factors must not expose items")
+        return self
+
+
+class RealtimeIntradayFamilyWeight(DomainModel):
+    enabled: bool = True
+    weight: float
+
+    @field_validator("weight")
+    @classmethod
+    def valid_weight(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "weight")
+        assert finite is not None
+        if not 0 <= finite <= 1:
+            raise ValueError("weight must be between 0 and 1")
+        return finite
+
+    @model_validator(mode="after")
+    def enabled_weight_is_positive(self) -> "RealtimeIntradayFamilyWeight":
+        if self.enabled and self.weight <= 0:
+            raise ValueError("enabled family weight must be greater than zero")
+        return self
+
+
+class RealtimeIntradayScorePolicy(DomainModel):
+    relative_strength: RealtimeIntradayFamilyWeight = RealtimeIntradayFamilyWeight(weight=0.30)
+    activity_liquidity: RealtimeIntradayFamilyWeight = RealtimeIntradayFamilyWeight(weight=0.25)
+    vwap_trend: RealtimeIntradayFamilyWeight = RealtimeIntradayFamilyWeight(weight=0.20)
+    short_momentum: RealtimeIntradayFamilyWeight = RealtimeIntradayFamilyWeight(weight=0.15)
+    risk_stability: RealtimeIntradayFamilyWeight = RealtimeIntradayFamilyWeight(weight=0.10)
+
+    @model_validator(mode="after")
+    def validate_enabled_weights(self) -> "RealtimeIntradayScorePolicy":
+        groups = tuple(getattr(self, family.value) for family in RealtimeIntradayFactorFamily)
+        enabled = tuple(group for group in groups if group.enabled)
+        if not enabled:
+            raise ValueError("at least one intraday family must be enabled")
+        if not math.isclose(sum(group.weight for group in enabled), 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("enabled intraday family weights must sum to one")
+        return self
+
+
+class RealtimeIntradayFamilyWeightContribution(DomainModel):
+    family: RealtimeIntradayFactorFamily
+    enabled: bool
+    configured_weight: float
+    family_score: float | None
+    family_component_coverage: float
+    available: bool
+    renormalized_weight: float
+    weighted_contribution: float | None
+
+    @field_validator("configured_weight", "family_score", "family_component_coverage", "renormalized_weight", "weighted_contribution")
+    @classmethod
+    def finite(cls, value: float | None, info: ValidationInfo) -> float | None:
+        return ensure_finite_float(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_contribution(self) -> "RealtimeIntradayFamilyWeightContribution":
+        if not 0 <= self.configured_weight <= 1 or not 0 <= self.family_component_coverage <= 1 or not 0 <= self.renormalized_weight <= 1:
+            raise ValueError("contribution weights and coverage must be between 0 and 1")
+        if self.family_score is not None and not 0 <= self.family_score <= 100:
+            raise ValueError("family_score must be between 0 and 100")
+        if self.weighted_contribution is not None and not 0 <= self.weighted_contribution <= 100:
+            raise ValueError("weighted_contribution must be between 0 and 100")
+        if self.available != (self.enabled and self.family_score is not None):
+            raise ValueError("availability must match enabled family score")
+        if not self.available and (self.renormalized_weight != 0 or self.weighted_contribution is not None):
+            raise ValueError("unavailable contribution must be unweighted")
+        if self.available and self.weighted_contribution is None:
+            raise ValueError("available contribution requires weighted_contribution")
+        if self.available:
+            assert self.weighted_contribution is not None and self.family_score is not None
+            if not math.isclose(self.weighted_contribution, self.family_score * self.renormalized_weight, rel_tol=1e-9, abs_tol=1e-9):
+                raise ValueError("weighted_contribution must match family score and weight")
+        return self
+
+
+class RealtimeIntradayScoreBlocker(StrEnum):
+    INTRADAY_FACTORS_NOT_READY = "intraday_factors_not_ready"
+
+
+class RealtimeIntradayScoreItem(DomainModel):
+    factor_item: RealtimeIntradayFactorItem
+    intraday_score: float | None
+    data_completeness: float
+    confidence: float
+    confidence_adjusted_score: float | None
+    available_family_weight: float
+    enabled_family_weight: float
+    available_families: int = Field(ge=0, le=5)
+    enabled_families: int = Field(ge=0, le=5)
+    contributions: tuple[RealtimeIntradayFamilyWeightContribution, ...]
+
+    @field_validator("intraday_score", "data_completeness", "confidence", "confidence_adjusted_score", "available_family_weight", "enabled_family_weight")
+    @classmethod
+    def finite_score_values(cls, value: float | None, info: ValidationInfo) -> float | None:
+        return ensure_finite_float(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_score_item(self) -> "RealtimeIntradayScoreItem":
+        for name in ("intraday_score", "confidence_adjusted_score"):
+            value = getattr(self, name)
+            if value is not None and not 0 <= value <= 100:
+                raise ValueError(f"{name} must be between 0 and 100")
+        for name in ("data_completeness", "confidence", "available_family_weight", "enabled_family_weight"):
+            if not 0 <= getattr(self, name) <= 1:
+                raise ValueError(f"{name} must be between 0 and 1")
+        if self.confidence > self.data_completeness:
+            raise ValueError("confidence must not exceed data_completeness")
+        if tuple(item.family for item in self.contributions) != tuple(RealtimeIntradayFactorFamily):
+            raise ValueError("contributions must use canonical family order")
+        if self.enabled_families != sum(item.enabled for item in self.contributions) or self.available_families != sum(item.available for item in self.contributions):
+            raise ValueError("family counts must match contributions")
+        enabled = sum(item.configured_weight for item in self.contributions if item.enabled)
+        available = sum(item.configured_weight for item in self.contributions if item.available)
+        if not math.isclose(self.enabled_family_weight, enabled, rel_tol=1e-9, abs_tol=1e-9) or not math.isclose(self.available_family_weight, available, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("family weights must match contributions")
+        if not math.isclose(self.data_completeness, available / enabled if enabled else 0.0, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("data_completeness must match family weights")
+        confidence = sum(item.configured_weight * item.family_component_coverage for item in self.contributions if item.available) / enabled if enabled else 0.0
+        if not math.isclose(self.confidence, confidence, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("confidence must match component coverage")
+        if available and not math.isclose(sum(item.renormalized_weight for item in self.contributions), 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("available renormalized weights must sum to one")
+        score = sum(item.weighted_contribution or 0 for item in self.contributions)
+        if (available == 0) != (self.intraday_score is None):
+            raise ValueError("intraday_score availability must match available family weight")
+        if self.intraday_score is not None and not math.isclose(self.intraday_score, score, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("intraday_score must match contributions")
+        if self.intraday_score is None and self.confidence_adjusted_score is not None:
+            raise ValueError("missing intraday_score requires missing adjusted score")
+        if self.intraday_score is not None and not math.isclose(self.confidence_adjusted_score or 0, self.intraday_score * self.confidence, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("confidence_adjusted_score must match intraday_score")
+        return self
+
+
+class RealtimeIntradayScoreDiagnostics(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    upstream_factor_ready: bool
+    upstream_blockers: tuple[RealtimeIntradayFactorBlocker, ...]
+    input_items: int = Field(ge=0)
+    output_items: int = Field(ge=0)
+    score_ready: bool
+    blockers: tuple[RealtimeIntradayScoreBlocker, ...]
+    intraday_score_available_items: int = Field(ge=0)
+    intraday_score_unavailable_items: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeIntradayScoreDiagnostics":
+        expected = () if self.upstream_factor_ready else (RealtimeIntradayScoreBlocker.INTRADAY_FACTORS_NOT_READY,)
+        if self.score_ready != self.upstream_factor_ready or self.blockers != expected:
+            raise ValueError("score readiness must follow intraday factors")
+        if self.score_ready and self.input_items != self.output_items:
+            raise ValueError("ready score result must retain all factor items")
+        if not self.score_ready and self.output_items:
+            raise ValueError("blocked score result must not expose items")
+        if self.intraday_score_available_items + self.intraday_score_unavailable_items != self.output_items:
+            raise ValueError("score availability counts must match output items")
+        return self
+
+
+class RealtimeIntradayScoreResult(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    policy: RealtimeIntradayScorePolicy
+    diagnostics: RealtimeIntradayScoreDiagnostics
+    items: tuple[RealtimeIntradayScoreItem, ...]
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeIntradayScoreResult":
+        if self.calculation_at != self.diagnostics.calculation_at or self.candidate_as_of != self.diagnostics.candidate_as_of:
+            raise ValueError("result timestamps must match diagnostics")
+        if self.diagnostics.output_items != len(self.items):
+            raise ValueError("output_items must match score items")
+        if self.diagnostics.score_ready and len(self.items) != self.diagnostics.input_items:
+            raise ValueError("ready result must retain every factor item")
+        for item in self.items:
+            for contribution in item.contributions:
+                group = getattr(self.policy, contribution.family.value)
+                if contribution.enabled != group.enabled or contribution.configured_weight != group.weight:
+                    raise ValueError("contributions must match result policy")
         return self
