@@ -208,7 +208,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 427 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 450 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (427 passed; one third-party TestClient deprecation warning).
+  (450 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (427 passed, 88% coverage).
+  — PASS (450 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -565,6 +565,22 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   ascending Task15 market ranks, empty blocked output, and exact Task19 family evidence in every
   contribution; each contribution must also match the declared result policy.
 - Canonical root validation — PASS (427 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
+## Task 20 Fix 2 Verification
+
+- Regression completion — PASS: normal ScoreResult construction rejects duplicate candidate
+  symbols; retained Task19 evidence linkage, custom/disabled policy families, full-five-family
+  composition, and ready/blocked result behavior are covered without changing score formulas.
+- Canonical root validation — PASS (430 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
+## Task 20 Fix 3 Verification
+
+- Final regression closure — PASS: normal result/item construction rejects blocked output,
+  duplicate symbols, rank reordering, policy/evidence mismatches and contribution audit defects;
+  multi-candidate ordering, mixed score diagnostics and distinct timestamp preservation are covered.
+- Canonical root validation — PASS (450 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
 ## Next Task
