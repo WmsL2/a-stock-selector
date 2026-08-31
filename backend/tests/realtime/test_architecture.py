@@ -75,3 +75,20 @@ def test_signal_normalizer_has_no_operational_dependencies_and_reuses_task10() -
         "time.sleep",
     ):
         assert forbidden not in normalizer
+
+
+def test_intraday_factors_have_no_operational_or_preprocessing_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    factors = (root / "realtime" / "intraday_factors.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "stock_selector.providers",
+        "RealtimeSnapshotCollector",
+        "LocalMarketRepository",
+        "stock_selector.storage",
+        "FastAPI",
+        "DataQualityEvaluator",
+        "FactorPreprocessingEngine",
+        "datetime.now",
+        "time.sleep",
+    ):
+        assert forbidden not in factors

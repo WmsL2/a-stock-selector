@@ -715,3 +715,202 @@ class RealtimeSignalNormalizationResult(DomainModel):
         if not self.diagnostics.normalization_ready and self.items:
             raise ValueError("blocked normalization must not expose items")
         return self
+
+
+class RealtimeIntradayFactorFamily(StrEnum):
+    RELATIVE_STRENGTH = "relative_strength"
+    ACTIVITY_LIQUIDITY = "activity_liquidity"
+    VWAP_TREND = "vwap_trend"
+    SHORT_MOMENTUM = "short_momentum"
+    RISK_STABILITY = "risk_stability"
+
+
+class RealtimeIntradayComponentTransformation(StrEnum):
+    IDENTITY = "identity"
+    ONE_HUNDRED_MINUS = "one_hundred_minus"
+
+
+class RealtimeIntradayComponentUnavailableReason(StrEnum):
+    MISSING_NORMALIZED_SIGNAL = "missing_normalized_signal"
+    MINUTE_DATA_NOT_AVAILABLE = "minute_data_not_available"
+
+
+class RealtimeIntradayComponentResult(DomainModel):
+    component_name: str
+    family: RealtimeIntradayFactorFamily
+    source_percentile_name: str | None
+    source_percentile: float | None
+    transformation: RealtimeIntradayComponentTransformation
+    score: float | None
+    available: bool
+    unavailable_reason: RealtimeIntradayComponentUnavailableReason | None
+
+    @field_validator("source_percentile", "score")
+    @classmethod
+    def finite_score(cls, value: float | None, info: ValidationInfo) -> float | None:
+        finite = ensure_finite_float(value, info.field_name)
+        if finite is not None and not 0 <= finite <= 100:
+            raise ValueError(f"{info.field_name} must be between 0 and 100")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_component(self) -> "RealtimeIntradayComponentResult":
+        if self.available != (self.score is not None):
+            raise ValueError("component availability must match score")
+        if self.available != (self.unavailable_reason is None):
+            raise ValueError("component availability must match unavailable reason")
+        if self.source_percentile is None and self.available:
+            raise ValueError("available component requires source percentile")
+        if self.source_percentile_name is None and (
+            self.unavailable_reason
+            is not RealtimeIntradayComponentUnavailableReason.MINUTE_DATA_NOT_AVAILABLE
+        ):
+            raise ValueError("only minute placeholders may omit source percentile name")
+        return self
+
+
+class RealtimeIntradayFamilyResult(DomainModel):
+    family: RealtimeIntradayFactorFamily
+    score: float | None
+    available: bool
+    available_components: int = Field(ge=0)
+    total_components: int = Field(gt=0)
+    component_coverage: float
+    components: tuple[RealtimeIntradayComponentResult, ...]
+
+    @field_validator("score", "component_coverage")
+    @classmethod
+    def finite_values(cls, value: float | None, info: ValidationInfo) -> float | None:
+        finite = ensure_finite_float(value, info.field_name)
+        upper_bound = 100 if info.field_name == "score" else 1
+        if finite is not None and not 0 <= finite <= upper_bound:
+            raise ValueError(f"{info.field_name} is out of range")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_family(self) -> "RealtimeIntradayFamilyResult":
+        if self.total_components != len(self.components):
+            raise ValueError("total_components must match components")
+        if self.available_components != sum(item.available for item in self.components):
+            raise ValueError("available_components must match components")
+        if self.component_coverage != self.available_components / self.total_components:
+            raise ValueError("component_coverage must match components")
+        if self.available != (self.available_components > 0) or self.available != (
+            self.score is not None
+        ):
+            raise ValueError("family availability must match components and score")
+        if any(item.family is not self.family for item in self.components):
+            raise ValueError("components must match family")
+        if len({item.component_name for item in self.components}) != len(self.components):
+            raise ValueError("component names must be unique")
+        if self.available and self.score != sum(
+            item.score for item in self.components if item.score is not None
+        ) / self.available_components:
+            raise ValueError("family score must mean available components")
+        return self
+
+
+class RealtimeIntradayFactorBlocker(StrEnum):
+    SIGNAL_NORMALIZATION_NOT_READY = "signal_normalization_not_ready"
+
+
+class RealtimeIntradayFactorItem(DomainModel):
+    normalization_item: RealtimeSignalNormalizationItem
+    relative_strength: RealtimeIntradayFamilyResult
+    activity_liquidity: RealtimeIntradayFamilyResult
+    vwap_trend: RealtimeIntradayFamilyResult
+    short_momentum: RealtimeIntradayFamilyResult
+    risk_stability: RealtimeIntradayFamilyResult
+    available_families: int = Field(ge=0, le=5)
+    total_families: int = Field(default=5, frozen=True)
+    family_coverage: float
+
+    @field_validator("family_coverage")
+    @classmethod
+    def finite_coverage(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "family_coverage")
+        assert finite is not None
+        if not 0 <= finite <= 1:
+            raise ValueError("family_coverage must be between 0 and 1")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_item(self) -> "RealtimeIntradayFactorItem":
+        families = (
+            self.relative_strength,
+            self.activity_liquidity,
+            self.vwap_trend,
+            self.short_momentum,
+            self.risk_stability,
+        )
+        expected = tuple(RealtimeIntradayFactorFamily)
+        if tuple(item.family for item in families) != expected:
+            raise ValueError("factor fields must use canonical family identities")
+        if self.available_families != sum(item.available for item in families):
+            raise ValueError("available_families must match families")
+        if self.family_coverage != self.available_families / self.total_families:
+            raise ValueError("family_coverage must match families")
+        return self
+
+
+class RealtimeIntradayFactorDiagnostics(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    upstream_normalization_ready: bool
+    upstream_blockers: tuple[RealtimeSignalNormalizationBlocker, ...]
+    input_items: int = Field(ge=0)
+    output_items: int = Field(ge=0)
+    factor_ready: bool
+    blockers: tuple[RealtimeIntradayFactorBlocker, ...]
+    relative_strength_available_items: int = Field(ge=0)
+    activity_liquidity_available_items: int = Field(ge=0)
+    vwap_trend_available_items: int = Field(ge=0)
+    short_momentum_available_items: int = Field(ge=0)
+    risk_stability_available_items: int = Field(ge=0)
+    available_family_values: int = Field(ge=0)
+    total_family_slots: int = Field(ge=0)
+    overall_family_coverage: float | None
+
+    @field_validator("calculation_at", "candidate_as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "timestamp")
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeIntradayFactorDiagnostics":
+        if self.total_family_slots != self.input_items * 5:
+            raise ValueError("total_family_slots must equal input_items times five")
+        if self.available_family_values > self.total_family_slots:
+            raise ValueError("available families must not exceed total slots")
+        if self.input_items == 0 and self.overall_family_coverage is not None:
+            raise ValueError("empty factors must not report coverage")
+        if self.input_items and self.overall_family_coverage != (
+            self.available_family_values / self.total_family_slots
+        ):
+            raise ValueError("overall_family_coverage must match availability")
+        expected = () if self.upstream_normalization_ready else (
+            RealtimeIntradayFactorBlocker.SIGNAL_NORMALIZATION_NOT_READY,
+        )
+        if self.blockers != expected or self.factor_ready != self.upstream_normalization_ready:
+            raise ValueError("factor readiness must follow normalization readiness")
+        return self
+
+
+class RealtimeIntradayFactorResult(DomainModel):
+    calculation_at: datetime
+    candidate_as_of: datetime
+    diagnostics: RealtimeIntradayFactorDiagnostics
+    items: tuple[RealtimeIntradayFactorItem, ...]
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeIntradayFactorResult":
+        if self.diagnostics.output_items != len(self.items):
+            raise ValueError("output_items must match factor items")
+        ranks = tuple(item.normalization_item.scan_item.snapshot_item.candidate.market_rank for item in self.items)
+        if ranks != tuple(sorted(ranks)):
+            raise ValueError("factor items must preserve candidate market rank")
+        if self.diagnostics.factor_ready and len(self.items) != self.diagnostics.input_items:
+            raise ValueError("ready factors must retain every input item")
+        if not self.diagnostics.factor_ready and self.items:
+            raise ValueError("blocked factors must not expose items")
+        return self
