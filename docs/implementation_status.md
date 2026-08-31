@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 17 - Realtime Light Scanner Foundation
+Task 18 - Realtime Cross-Sectional Signal Normalization
 
 ## Status
 
@@ -208,7 +208,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 405 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 412 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (405 passed; one third-party TestClient deprecation warning).
+  (412 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (405 passed, 88% coverage).
+  — PASS (412 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -330,7 +330,7 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Realtime cross-sectional scanner ranking / scoring
+- Realtime composite scanner ranking / scoring
 - Minute bars
 - Intraday factors
 - IntradayScore
@@ -463,6 +463,38 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (405 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build all pass.
 
+## Task 18 — Realtime Cross-Sectional Signal Normalization (complete)
+
+- `RealtimeSignalNormalizerEngine` consumes only a Task 17 `RealtimeLightScanResult` and adapts
+  each of its six signals independently through Task 10 `FactorPreprocessingEngine`. The fixed
+  preprocessing contract is `KEEP_MISSING`, `HIGHER_IS_BETTER`, no neutralization and no
+  winsorization; no duplicate percentile implementation, signal recomputation or data access was
+  added.
+- Output fields are `change_pct_percentile`, `price_vs_open_pct_percentile`,
+  `price_vs_prev_close_pct_percentile`, `session_range_pct_percentile`,
+  `turnover_rate_pct_percentile`, and `volume_ratio_percentile`. They are raw-value magnitude
+  percentiles, not investment desirability or a composite score. Each signal has its own
+  available-value denominator, with missing values retained as `None`.
+- Task 10 percentile behavior is retained: no available values yields `None`, one available value
+  yields `50`, and ties use average rank. Results retain the exact upstream scan item and preserve
+  candidate membership and Task 15 `market_rank` order.
+- The result preserves the distinct realtime `calculation_at` and slow-layer `candidate_as_of`
+  timestamps. A blocked scan produces only `LIGHT_SCAN_NOT_READY`; a ready-empty scan remains
+  normalization-ready with no artificial 100% coverage.
+- No intraday factor families, Relative Strength or Activity/Liquidity composite factors,
+  VWAP/Trend, Short Momentum, Risk/Stability factor, IntradayScore, RealTimeScore, realtime
+  composite ranking, Top100, Top20, minute bars, scheduler, polling, API, CLI, Vue scanner UI,
+  or persistence was added.
+
+## Task 18 Verification
+
+- `tests/realtime` — PASS (98 tests), covering independent magnitude percentiles, ties,
+  N=0/N=1 behavior, missingness isolation, Sina-style activity absence, six-field mapping,
+  rank/identity preservation, readiness, diagnostics, determinism, preprocessing reuse and error
+  translation.
+- Canonical root validation — PASS (412 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -484,3 +516,4 @@ No subsequent task has been started.
 - Task 15: Realtime Candidate Foundation (complete).
 - Task 16: Realtime Candidate Snapshot Join (complete).
 - Task 17: Realtime Light Scanner Foundation (complete).
+- Task 18: Realtime Cross-Sectional Signal Normalization (complete).

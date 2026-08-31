@@ -554,3 +554,164 @@ class RealtimeLightScanResult(DomainModel):
         if not self.diagnostics.scan_ready and self.items:
             raise ValueError("blocked scans must not expose items")
         return self
+
+
+class RealtimeSignalPercentiles(DomainModel):
+    """Independent raw-magnitude percentiles, never investment desirability scores."""
+
+    change_pct_percentile: float | None
+    price_vs_open_pct_percentile: float | None
+    price_vs_prev_close_pct_percentile: float | None
+    session_range_pct_percentile: float | None
+    turnover_rate_pct_percentile: float | None
+    volume_ratio_percentile: float | None
+
+    @field_validator(
+        "change_pct_percentile",
+        "price_vs_open_pct_percentile",
+        "price_vs_prev_close_pct_percentile",
+        "session_range_pct_percentile",
+        "turnover_rate_pct_percentile",
+        "volume_ratio_percentile",
+    )
+    @classmethod
+    def finite_range(cls, value: float | None, info: ValidationInfo) -> float | None:
+        finite = ensure_finite_float(value, info.field_name)
+        if finite is not None and not 0 <= finite <= 100:
+            raise ValueError(f"{info.field_name} must be between 0 and 100")
+        return finite
+
+
+class RealtimeSignalNormalizationBlocker(StrEnum):
+    LIGHT_SCAN_NOT_READY = "light_scan_not_ready"
+
+
+class RealtimeSignalNormalizationItem(DomainModel):
+    """One unchanged Task 17 item plus its six signal-local percentiles."""
+
+    scan_item: RealtimeLightScanItem
+    percentiles: RealtimeSignalPercentiles
+    available_percentiles: int = Field(ge=0, le=6)
+    percentile_completeness: float
+
+    @field_validator("percentile_completeness")
+    @classmethod
+    def finite_completeness(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "percentile_completeness")
+        assert finite is not None
+        if not 0 <= finite <= 1:
+            raise ValueError("percentile_completeness must be between 0 and 1")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_item(self) -> "RealtimeSignalNormalizationItem":
+        actual_available = sum(
+            value is not None for value in self.percentiles.model_dump().values()
+        )
+        if self.available_percentiles != actual_available:
+            raise ValueError("available_percentiles must match non-missing percentiles")
+        if self.percentile_completeness != self.available_percentiles / 6:
+            raise ValueError("percentile_completeness must match available_percentiles")
+        return self
+
+
+class RealtimeSignalNormalizationDiagnostics(DomainModel):
+    """Auditable signal-local cross-sectional availability and readiness."""
+
+    calculation_at: datetime
+    candidate_as_of: datetime
+    upstream_scan_ready: bool
+    upstream_blockers: tuple[RealtimeLightScanBlocker, ...]
+    input_items: int = Field(ge=0)
+    output_items: int = Field(ge=0)
+    normalization_ready: bool
+    blockers: tuple[RealtimeSignalNormalizationBlocker, ...]
+    change_pct_ranked_items: int = Field(ge=0)
+    price_vs_open_ranked_items: int = Field(ge=0)
+    price_vs_prev_close_ranked_items: int = Field(ge=0)
+    session_range_ranked_items: int = Field(ge=0)
+    turnover_rate_ranked_items: int = Field(ge=0)
+    volume_ratio_ranked_items: int = Field(ge=0)
+    available_percentile_values: int = Field(ge=0)
+    total_percentile_slots: int = Field(ge=0)
+    overall_percentile_coverage: float | None
+
+    @field_validator("calculation_at", "candidate_as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "timestamp")
+
+    @field_validator("overall_percentile_coverage")
+    @classmethod
+    def finite_coverage(cls, value: float | None) -> float | None:
+        finite = ensure_finite_float(value, "overall_percentile_coverage")
+        if finite is not None and not 0 <= finite <= 1:
+            raise ValueError("overall_percentile_coverage must be between 0 and 1")
+        return finite
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeSignalNormalizationDiagnostics":
+        if self.candidate_as_of > self.calculation_at:
+            raise ValueError("candidate_as_of must not follow calculation_at")
+        if len(set(self.upstream_blockers)) != len(self.upstream_blockers):
+            raise ValueError("upstream blockers must be unique")
+        if len(set(self.blockers)) != len(self.blockers):
+            raise ValueError("normalization blockers must be unique")
+        if self.total_percentile_slots != self.input_items * 6:
+            raise ValueError("total_percentile_slots must equal input_items times six")
+        if self.available_percentile_values > self.total_percentile_slots:
+            raise ValueError("available percentiles must not exceed total slots")
+        if self.input_items == 0 and self.overall_percentile_coverage is not None:
+            raise ValueError("empty normalization must not report coverage")
+        if self.input_items and self.overall_percentile_coverage != (
+            self.available_percentile_values / self.total_percentile_slots
+        ):
+            raise ValueError("overall_percentile_coverage must match availability")
+        expected_blockers = (
+            ()
+            if self.upstream_scan_ready
+            else (RealtimeSignalNormalizationBlocker.LIGHT_SCAN_NOT_READY,)
+        )
+        if (
+            self.blockers != expected_blockers
+            or self.normalization_ready != self.upstream_scan_ready
+        ):
+            raise ValueError("normalization readiness must follow light scan readiness")
+        if not self.normalization_ready and self.output_items:
+            raise ValueError("blocked normalization must not expose output items")
+        return self
+
+
+class RealtimeSignalNormalizationResult(DomainModel):
+    """Task 18 output retaining separate realtime and slow-layer timestamps."""
+
+    calculation_at: datetime
+    candidate_as_of: datetime
+    diagnostics: RealtimeSignalNormalizationDiagnostics
+    items: tuple[RealtimeSignalNormalizationItem, ...]
+
+    @field_validator("calculation_at", "candidate_as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "timestamp")
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeSignalNormalizationResult":
+        if (
+            self.calculation_at != self.diagnostics.calculation_at
+            or self.candidate_as_of != self.diagnostics.candidate_as_of
+        ):
+            raise ValueError("result timestamps must match diagnostics")
+        if self.diagnostics.output_items != len(self.items):
+            raise ValueError("output_items must match normalization items")
+        ranks = tuple(item.scan_item.snapshot_item.candidate.market_rank for item in self.items)
+        if ranks != tuple(sorted(ranks)):
+            raise ValueError("normalization items must preserve candidate market rank")
+        symbols = tuple(item.scan_item.snapshot_item.candidate.symbol for item in self.items)
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("normalization item symbols must be unique")
+        if self.diagnostics.normalization_ready and len(self.items) != self.diagnostics.input_items:
+            raise ValueError("ready normalization must retain every input item")
+        if not self.diagnostics.normalization_ready and self.items:
+            raise ValueError("blocked normalization must not expose items")
+        return self

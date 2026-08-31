@@ -58,3 +58,20 @@ def test_light_scanner_has_no_operational_dependencies() -> None:
         "time.sleep",
     ):
         assert forbidden not in scanner
+
+
+def test_signal_normalizer_has_no_operational_dependencies_and_reuses_task10() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    normalizer = (root / "realtime" / "signal_normalizer.py").read_text(encoding="utf-8")
+    assert "FactorPreprocessingEngine" in normalizer
+    for forbidden in (
+        "stock_selector.providers",
+        "RealtimeSnapshotCollector",
+        "LocalMarketRepository",
+        "stock_selector.storage",
+        "FastAPI",
+        "DataQualityEvaluator",
+        "datetime.now",
+        "time.sleep",
+    ):
+        assert forbidden not in normalizer
