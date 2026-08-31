@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 14 - Realtime Market Data Foundation
+Task 15 - Realtime Candidate Foundation
 
 ## Status
 
@@ -208,7 +208,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 351 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 369 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (351 passed; one third-party TestClient deprecation warning).
+  (369 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (351 passed, 88% coverage).
+  — PASS (369 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -330,7 +330,7 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Realtime scanner / engine
+- Realtime light scanner / engine
 - Minute bars
 - Intraday factors
 - IntradayScore
@@ -382,11 +382,34 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   the capture result / memory; runtime realtime snapshots remained 3 and realtime rows remained
   3. This subsequent Task 14 Fix performed no additional live call or runtime write.
 
+## Task 15 — Realtime Candidate Foundation (complete)
+
+- `RealtimeCandidateEngine` is a pure, deterministic slow-layer reduction over a complete
+  `BaseScoreCrossSectionResult` and an already-built exact-date `RiskEligibilitySnapshot`.
+  It has no provider, repository, persistence, API, CLI, frontend, network, or wall-clock
+  dependency.
+- The immutable default policy requires both `base_score >= 70.0` and membership in the top
+  `ceil(N * 0.20)` BaseScore ranks of the scoreable risk-eligible universe. Ranking is
+  BaseScore descending then symbol ascending; confidence-adjusted score, completeness and
+  confidence never affect membership or ordering.
+- Candidate diagnostics record structural/risk/scoreable counts, the policy cutoff, top bucket,
+  threshold-qualified members, final candidates and stable readiness blockers. Complete,
+  scoreable inputs can truthfully yield a ready empty result when no member meets the policy.
+- No realtime light scanner, realtime quote candidate integration, IntradayScore, RealTimeScore,
+  Top100, Top20, scheduler, polling loop, API endpoint, CLI command, persistence, or Vue
+  candidate table was added.
+
+## Task 15 Verification
+
+- `tests/realtime` — PASS (55 tests), including policy validation, BaseScore-only ranking,
+  ceil top-fraction boundaries, threshold intersection, risk gating, structural-symbol integrity,
+  ready-empty semantics, determinism and dependency boundaries.
+- Full backend validation — PASS (369 tests); Ruff and mypy pass. The canonical root validation
+  also covers backend coverage and the unchanged frontend checks.
+
 ## Next Task
 
-Task 15 - Realtime Candidate Foundation
-
-Task 15 NOT STARTED.
+No subsequent task has been started.
 
 ## Roadmap
 
@@ -402,3 +425,4 @@ Task 15 NOT STARTED.
 - Task 12A: Daily Selection API + Vue (complete).
 - Task 13: Deterministic Explanation & Risk (complete).
 - Task 14: Realtime Market Data Foundation (complete).
+- Task 15: Realtime Candidate Foundation (complete).
