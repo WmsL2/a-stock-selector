@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 15 - Realtime Candidate Foundation
+Task 16 - Realtime Candidate Snapshot Join
 
 ## Status
 
@@ -208,7 +208,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 369 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 388 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -239,10 +239,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (369 passed; one third-party TestClient deprecation warning).
+  (388 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (369 passed, 88% coverage).
+  — PASS (388 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -407,6 +407,31 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Full backend validation — PASS (369 tests); Ruff and mypy pass. The canonical root validation
   also covers backend coverage and the unchanged frontend checks.
 
+## Task 16 — Realtime Candidate Snapshot Join (complete)
+
+- `RealtimeCandidateSnapshotEngine` purely and deterministically joins an unchanged Task 15
+  candidate result with an optional Task 14 capture at an explicit calculation timestamp. It
+  preserves Task 15 candidate order and membership; quote fields remain observational only.
+- Non-empty candidate pools require temporal causality (`candidate as_of <= capture ingested_at
+  <= calculation_at`), existing ingestion-based freshness permission (fresh/warning only), and
+  100% candidate quote coverage. Incomplete coverage or disallowed freshness returns no partial
+  official items with stable diagnostics and blockers.
+- A candidate pool that is not ready is blocked without a realtime fallback. A ready-empty pool
+  is truthfully snapshot-ready without a capture. Both all-market and explicit capture scopes
+  are supported when candidate symbols are fully covered.
+- No realtime light scanner / engine, quote-derived ranking, Relative Strength, Activity /
+  Liquidity, VWAP / Trend, Short Momentum, IntradayScore, RealTimeScore, Top100, Top20, minute
+  bars, scheduler, polling loop, API, CLI, Vue candidate view, or candidate snapshot persistence
+  was added.
+
+## Task 16 Verification
+
+- `tests/realtime` — PASS (74 tests), covering all-market and explicit joins, rank preservation,
+  no quote-value filtering, ready/blocked/ready-empty semantics, coverage, freshness boundaries,
+  temporal causality, source timestamp semantics, capture identity and dependency boundaries.
+- Full backend validation — PASS (388 tests); Ruff and mypy pass. The canonical root validation
+  also covers backend coverage and the unchanged frontend checks.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -426,3 +451,4 @@ No subsequent task has been started.
 - Task 13: Deterministic Explanation & Risk (complete).
 - Task 14: Realtime Market Data Foundation (complete).
 - Task 15: Realtime Candidate Foundation (complete).
+- Task 16: Realtime Candidate Snapshot Join (complete).

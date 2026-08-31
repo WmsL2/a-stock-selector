@@ -25,3 +25,20 @@ def test_candidate_engine_has_no_operational_or_storage_dependencies() -> None:
         "FastAPI",
     ):
         assert forbidden not in candidates
+
+
+def test_candidate_snapshot_engine_has_no_operational_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    snapshot = (root / "realtime" / "candidate_snapshot.py").read_text(
+        encoding="utf-8"
+    )
+    for forbidden in (
+        "stock_selector.providers",
+        "RealtimeSnapshotCollector",
+        "LocalMarketRepository",
+        "stock_selector.storage",
+        "datetime.now",
+        "FastAPI",
+        "time.sleep",
+    ):
+        assert forbidden not in snapshot

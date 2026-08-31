@@ -1,5 +1,6 @@
 """One-shot realtime capture and local freshness foundation."""
 
+from .candidate_snapshot import RealtimeCandidateSnapshotEngine
 from .candidates import RealtimeCandidateEngine
 from .collector import RealtimeSnapshotCollector
 from .errors import RealtimeCollectionError, RealtimeDataError, RealtimeError
@@ -9,6 +10,10 @@ from .models import (
     RealtimeCandidateDiagnostics,
     RealtimeCandidatePolicy,
     RealtimeCandidateResult,
+    RealtimeCandidateSnapshotBlocker,
+    RealtimeCandidateSnapshotDiagnostics,
+    RealtimeCandidateSnapshotItem,
+    RealtimeCandidateSnapshotResult,
     RealtimeCaptureRequest,
     RealtimeCaptureResult,
     RealtimeCaptureScope,
@@ -23,6 +28,11 @@ __all__ = [
     "RealtimeCandidateEngine",
     "RealtimeCandidatePolicy",
     "RealtimeCandidateResult",
+    "RealtimeCandidateSnapshotBlocker",
+    "RealtimeCandidateSnapshotDiagnostics",
+    "RealtimeCandidateSnapshotEngine",
+    "RealtimeCandidateSnapshotItem",
+    "RealtimeCandidateSnapshotResult",
     "RealtimeCaptureRequest",
     "RealtimeCaptureResult",
     "RealtimeCaptureScope",

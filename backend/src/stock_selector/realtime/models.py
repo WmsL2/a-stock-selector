@@ -242,3 +242,112 @@ class RealtimeCandidateResult(DomainModel):
         if not self.diagnostics.candidate_ready and self.candidates:
             raise ValueError("blocked candidate result must be empty")
         return self
+
+
+class RealtimeCandidateSnapshotBlocker(StrEnum):
+    """Stable reasons a candidate-to-quote snapshot cannot be official."""
+
+    CANDIDATE_POOL_NOT_READY = "candidate_pool_not_ready"
+    REALTIME_SNAPSHOT_UNAVAILABLE = "realtime_snapshot_unavailable"
+    REALTIME_FRESHNESS_NOT_ALLOWED = "realtime_freshness_not_allowed"
+    CANDIDATE_QUOTE_COVERAGE_INCOMPLETE = "candidate_quote_coverage_incomplete"
+
+
+class RealtimeCandidateSnapshotItem(DomainModel):
+    """One unchanged candidate paired with the quote observed for that symbol."""
+
+    candidate: RealtimeCandidate
+    quote: RealtimeQuote
+
+    @model_validator(mode="after")
+    def validate_join(self) -> "RealtimeCandidateSnapshotItem":
+        if self.candidate.symbol != self.quote.symbol:
+            raise ValueError("candidate and quote symbols must match")
+        if self.candidate.as_of > self.quote.ingested_at:
+            raise ValueError("candidate as_of must not follow quote ingestion")
+        return self
+
+
+class RealtimeCandidateSnapshotDiagnostics(DomainModel):
+    """Auditable gating state for a candidate realtime snapshot join."""
+
+    calculation_at: datetime
+    candidate_as_of: datetime
+    candidate_ready: bool
+    candidate_members: int = Field(ge=0)
+    capture_available: bool
+    capture_scope: RealtimeCaptureScope | None
+    capture_source: str | None
+    capture_ingested_at: datetime | None
+    received_quotes: int = Field(ge=0)
+    freshness: RealtimeFreshness
+    age_seconds: float | None
+    freshness_allowed: bool
+    matched_candidate_quotes: int = Field(ge=0)
+    missing_candidate_quotes: int = Field(ge=0)
+    missing_candidate_symbols: tuple[str, ...]
+    snapshot_ready: bool
+    blockers: tuple[RealtimeCandidateSnapshotBlocker, ...]
+
+    @field_validator("calculation_at", "candidate_as_of", "capture_ingested_at")
+    @classmethod
+    def aware(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else ensure_aware_datetime(value, "timestamp")
+
+    @field_validator("missing_candidate_symbols")
+    @classmethod
+    def missing_symbols_are_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for symbol in value:
+            validate_symbol(symbol)
+        if len(set(value)) != len(value) or value != tuple(sorted(value)):
+            raise ValueError("missing candidate symbols must be unique and sorted")
+        return value
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeCandidateSnapshotDiagnostics":
+        if self.candidate_as_of > self.calculation_at:
+            raise ValueError("candidate_as_of must not follow calculation_at")
+        if len(set(self.blockers)) != len(self.blockers):
+            raise ValueError("snapshot blockers must be unique")
+        if self.capture_available != (self.capture_scope is not None):
+            raise ValueError("capture scope must match capture availability")
+        if self.capture_available != (self.capture_source is not None):
+            raise ValueError("capture source must match capture availability")
+        if self.capture_available != (self.capture_ingested_at is not None):
+            raise ValueError("capture ingestion must match capture availability")
+        if not self.capture_available and self.received_quotes:
+            raise ValueError("missing capture cannot have received quotes")
+        if self.matched_candidate_quotes + self.missing_candidate_quotes != self.candidate_members:
+            raise ValueError("candidate quote coverage counts must match candidate members")
+        if self.missing_candidate_quotes != len(self.missing_candidate_symbols):
+            raise ValueError("missing candidate symbol count must match diagnostics")
+        return self
+
+
+class RealtimeCandidateSnapshotResult(DomainModel):
+    """Official complete join result, or an auditable blocked/ready-empty state."""
+
+    as_of: datetime
+    diagnostics: RealtimeCandidateSnapshotDiagnostics
+    items: tuple[RealtimeCandidateSnapshotItem, ...]
+
+    @field_validator("as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "as_of")
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeCandidateSnapshotResult":
+        if self.as_of != self.diagnostics.candidate_as_of:
+            raise ValueError("result as_of must match candidate_as_of")
+        symbols = tuple(item.candidate.symbol for item in self.items)
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("snapshot item symbols must be unique")
+        ranks = tuple(item.candidate.market_rank for item in self.items)
+        if ranks != tuple(sorted(ranks)):
+            raise ValueError("snapshot items must preserve candidate market rank")
+        if not self.diagnostics.snapshot_ready and self.items:
+            raise ValueError("blocked snapshot result must not expose partial items")
+        if self.diagnostics.snapshot_ready and len(self.items) != self.diagnostics.candidate_members:
+            raise ValueError("ready snapshot items must cover all candidates")
+        return self
