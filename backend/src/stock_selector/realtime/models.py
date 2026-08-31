@@ -755,17 +755,36 @@ class RealtimeIntradayComponentResult(DomainModel):
 
     @model_validator(mode="after")
     def validate_component(self) -> "RealtimeIntradayComponentResult":
-        if self.available != (self.score is not None):
-            raise ValueError("component availability must match score")
-        if self.available != (self.unavailable_reason is None):
-            raise ValueError("component availability must match unavailable reason")
-        if self.source_percentile is None and self.available:
-            raise ValueError("available component requires source percentile")
-        if self.source_percentile_name is None and (
-            self.unavailable_reason
-            is not RealtimeIntradayComponentUnavailableReason.MINUTE_DATA_NOT_AVAILABLE
+        minute_reason = RealtimeIntradayComponentUnavailableReason.MINUTE_DATA_NOT_AVAILABLE
+        missing_reason = RealtimeIntradayComponentUnavailableReason.MISSING_NORMALIZED_SIGNAL
+        if self.source_percentile_name is None:
+            if (
+                self.source_percentile is not None
+                or self.score is not None
+                or self.available
+                or self.unavailable_reason is not minute_reason
+            ):
+                raise ValueError("minute placeholders must use minute-data unavailability")
+            return self
+        if self.source_percentile is None:
+            if (
+                self.score is not None
+                or self.available
+                or self.unavailable_reason is not missing_reason
+            ):
+                raise ValueError("missing Task18 signals must remain unavailable")
+            return self
+        expected_score = (
+            self.source_percentile
+            if self.transformation is RealtimeIntradayComponentTransformation.IDENTITY
+            else 100.0 - self.source_percentile
+        )
+        if (
+            not self.available
+            or self.unavailable_reason is not None
+            or self.score != expected_score
         ):
-            raise ValueError("only minute placeholders may omit source percentile name")
+            raise ValueError("available Task18 components must match transformation")
         return self
 
 
@@ -846,9 +865,11 @@ class RealtimeIntradayFactorItem(DomainModel):
         expected = tuple(RealtimeIntradayFactorFamily)
         if tuple(item.family for item in families) != expected:
             raise ValueError("factor fields must use canonical family identities")
+        if self.total_families != 5:
+            raise ValueError("total_families must equal five")
         if self.available_families != sum(item.available for item in families):
             raise ValueError("available_families must match families")
-        if self.family_coverage != self.available_families / self.total_families:
+        if self.family_coverage != self.available_families / 5:
             raise ValueError("family_coverage must match families")
         return self
 

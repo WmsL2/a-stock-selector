@@ -3,15 +3,19 @@
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from stock_selector.realtime import (
     RealtimeCandidate,
     RealtimeCandidateSnapshotItem,
+    RealtimeIntradayComponentResult,
     RealtimeIntradayComponentTransformation,
     RealtimeIntradayComponentUnavailableReason,
     RealtimeIntradayFactorBlocker,
     RealtimeIntradayFactorEngine,
     RealtimeIntradayFactorFamily,
+    RealtimeIntradayFactorItem,
+    RealtimeIntradayFamilyResult,
     RealtimeLightScanItem,
     RealtimeSignalNormalizationDiagnostics,
     RealtimeSignalNormalizationItem,
@@ -107,8 +111,81 @@ def test_rank_ready_empty_blocked_and_deterministic_semantics() -> None:
     )
 
 
+def test_component_contract_rejects_invalid_source_transformation_and_availability() -> None:
+    valid = _source_component()
+    assert valid.score == 80
+    invalid_updates = (
+        {"score": 101},
+        {"available": False},
+        {"unavailable_reason": RealtimeIntradayComponentUnavailableReason.MISSING_NORMALIZED_SIGNAL},
+        {"score": 79},
+        {"transformation": RealtimeIntradayComponentTransformation.ONE_HUNDRED_MINUS},
+        {"source_percentile": None},
+    )
+    for update in invalid_updates:
+        with pytest.raises(ValidationError):
+            RealtimeIntradayComponentResult(**(valid.model_dump() | update))
+    minute = RealtimeIntradayComponentResult(
+        component_name="vwap_position",
+        family=RealtimeIntradayFactorFamily.VWAP_TREND,
+        source_percentile_name=None,
+        source_percentile=None,
+        transformation=RealtimeIntradayComponentTransformation.IDENTITY,
+        score=None,
+        available=False,
+        unavailable_reason=RealtimeIntradayComponentUnavailableReason.MINUTE_DATA_NOT_AVAILABLE,
+    )
+    with pytest.raises(ValidationError):
+        RealtimeIntradayComponentResult(
+            **(minute.model_dump() | {"unavailable_reason": RealtimeIntradayComponentUnavailableReason.MISSING_NORMALIZED_SIGNAL})
+        )
+
+
+def test_family_and_stock_contracts_reject_incorrect_accounting_and_identities() -> None:
+    component = _source_component()
+    family = RealtimeIntradayFamilyResult(
+        family=RealtimeIntradayFactorFamily.RELATIVE_STRENGTH,
+        score=80,
+        available=True,
+        available_components=1,
+        total_components=1,
+        component_coverage=1,
+        components=(component,),
+    )
+    for update in (
+        {"available_components": 0},
+        {"component_coverage": 0.5},
+        {"components": (component, component), "total_components": 2, "available_components": 2, "component_coverage": 1},
+        {"components": (component.model_copy(update={"family": RealtimeIntradayFactorFamily.ACTIVITY_LIQUIDITY}),)},
+    ):
+        with pytest.raises(ValidationError):
+            RealtimeIntradayFamilyResult(**(family.model_dump() | update))
+    item = _compute(_normalized(price_vs_open_pct_percentile=50)).items[0]
+    for update in (
+        {"total_families": 4},
+        {"available_families": 0},
+        {"family_coverage": 1},
+        {"relative_strength": item.activity_liquidity.model_dump()},
+    ):
+        with pytest.raises(ValidationError):
+            RealtimeIntradayFactorItem(**(item.model_dump() | update))
+
+
 def _compute(normalized):
     return RealtimeIntradayFactorEngine().compute(normalized)
+
+
+def _source_component() -> RealtimeIntradayComponentResult:
+    return RealtimeIntradayComponentResult(
+        component_name="previous_close_strength",
+        family=RealtimeIntradayFactorFamily.RELATIVE_STRENGTH,
+        source_percentile_name="price_vs_prev_close_pct_percentile",
+        source_percentile=80,
+        transformation=RealtimeIntradayComponentTransformation.IDENTITY,
+        score=80,
+        available=True,
+        unavailable_reason=None,
+    )
 
 
 def _normalized(**percentile_values: float | None):
