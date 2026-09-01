@@ -138,6 +138,106 @@ class RealtimeStatusResponse(APIResponseModel):
     snapshot_scope: str
 
 
+class RealtimeSelectionFamilyPolicyResponse(APIResponseModel):
+    enabled: bool
+    weight: float
+
+
+class RealtimeSelectionPolicyResponse(APIResponseModel):
+    candidate_min_base_score: float
+    candidate_top_fraction: float
+    freshness_normal_max_seconds: int
+    freshness_warning_max_seconds: int
+    strong_move_pct: float
+    high_turnover_rate_pct: float
+    high_volume_ratio: float
+    relative_strength: RealtimeSelectionFamilyPolicyResponse
+    activity_liquidity: RealtimeSelectionFamilyPolicyResponse
+    vwap_trend: RealtimeSelectionFamilyPolicyResponse
+    short_momentum: RealtimeSelectionFamilyPolicyResponse
+    risk_stability: RealtimeSelectionFamilyPolicyResponse
+    realtime_base_weight: float
+    realtime_intraday_weight: float
+    min_intraday_score: float
+    top_n: int
+
+
+class RealtimeSelectionDiagnosticsResponse(APIResponseModel):
+    structural_members: int
+    risk_records: int
+    risk_complete_members: int
+    risk_coverage_ratio: float
+    risk_eligible_members: int
+    factor_input_members: int
+    base_score_available_members: int
+    price_factors_operational: bool
+    capture_scope: str | None
+    capture_source: str | None
+    capture_ingested_at: datetime | None
+    received_quotes: int
+    source_timestamp_available_quotes: int
+    persisted_quotes: int
+    freshness: str
+    age_seconds: float | None
+    freshness_allowed: bool
+    candidate_ready: bool
+    candidate_blockers: list[str]
+    candidate_members: int
+    snapshot_ready: bool
+    snapshot_blockers: list[str]
+    scan_ready: bool
+    scan_blockers: list[str]
+    normalization_ready: bool
+    normalization_blockers: list[str]
+    factor_ready: bool
+    factor_blockers: list[str]
+    intraday_score_ready: bool
+    intraday_score_blockers: list[str]
+    realtime_score_ready: bool
+    realtime_score_blockers: list[str]
+    selection_ready: bool
+    selection_blockers: list[str]
+    intraday_score_available_items: int
+    ranking_universe_items: int
+    selected_items: int
+
+
+class RealtimeSelectionItemResponse(APIResponseModel):
+    realtime_rank: int
+    market_rank: int
+    symbol: str
+    name: str
+    board: str
+    industry_key: str | None
+    quote: RealtimeQuoteResponse
+    base_score: float
+    base_data_completeness: float
+    base_confidence: float
+    intraday_score: float
+    intraday_data_completeness: float
+    intraday_confidence: float
+    intraday_confidence_adjusted_score: float
+    relative_strength_score: float | None
+    activity_liquidity_score: float | None
+    vwap_trend_score: float | None
+    short_momentum_score: float | None
+    risk_stability_score: float | None
+    realtime_score: float
+    realtime_data_completeness: float
+    realtime_confidence: float
+    realtime_confidence_adjusted_score: float
+
+
+class RealtimeSelectionResponse(APIResponseModel):
+    as_of: datetime
+    calculation_at: datetime
+    selection_ready: bool
+    blockers: list[str]
+    policy: RealtimeSelectionPolicyResponse
+    diagnostics: RealtimeSelectionDiagnosticsResponse
+    items: list[RealtimeSelectionItemResponse]
+
+
 class PublicAppConfigResponse(APIResponseModel):
     timezone: str
 

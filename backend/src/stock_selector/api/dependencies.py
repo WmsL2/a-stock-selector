@@ -6,6 +6,7 @@ from fastapi import HTTPException, Request, status
 
 from stock_selector.config import Settings
 from stock_selector.models.common import ensure_aware_datetime, validate_symbol
+from stock_selector.providers.base import RealtimeMarketDataProvider
 from stock_selector.storage import LocalMarketRepository
 
 
@@ -29,6 +30,17 @@ def get_settings(request: Request) -> Settings:
             detail="application settings unavailable",
         )
     return settings
+
+
+def get_realtime_provider(request: Request) -> RealtimeMarketDataProvider:
+    """Return the lifespan-provided realtime provider without constructing one."""
+    provider = getattr(request.app.state, "realtime_provider", None)
+    if not isinstance(provider, RealtimeMarketDataProvider):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="realtime provider unavailable",
+        )
+    return provider
 
 
 def canonical_symbol(symbol: str) -> str:

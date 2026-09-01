@@ -23,12 +23,18 @@ from stock_selector.api.routers import (
 )
 from stock_selector.config import Settings, load_settings
 from stock_selector.config.paths import AppPaths
+from stock_selector.providers.akshare_provider import AKShareProvider
+from stock_selector.providers.base import RealtimeMarketDataProvider
 from stock_selector.storage import LocalMarketRepository, StorageError
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(paths: AppPaths | None = None, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    paths: AppPaths | None = None,
+    settings: Settings | None = None,
+    realtime_provider: RealtimeMarketDataProvider | None = None,
+) -> FastAPI:
     """Create an application whose repository is initialized during lifespan."""
     resolved_paths = paths or AppPaths.from_project_root()
 
@@ -38,6 +44,9 @@ def create_app(paths: AppPaths | None = None, settings: Settings | None = None) 
         repository.initialize()
         app_instance.state.repository = repository
         app_instance.state.settings = settings or load_settings(resolved_paths.config_dir)
+        app_instance.state.realtime_provider = (
+            realtime_provider if realtime_provider is not None else AKShareProvider()
+        )
         yield
 
     application = FastAPI(

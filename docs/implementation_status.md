@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 25 - One-shot Runtime Realtime Selection Orchestration Foundation
+Task 26 - Realtime Top100 API Foundation
 
 ## Status
 
@@ -243,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (533 passed; one third-party TestClient deprecation warning).
+  (539 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (533 passed, 88% coverage).
+  — PASS (539 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -334,7 +334,7 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Realtime Top100 API/UI integration
+- Realtime Top100 Vue/UI integration
 - CLI runtime command
 - Recurring / polling realtime scanner execution
 - Minute bars
@@ -740,6 +740,25 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (533 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 26 — Realtime Top100 API Foundation (complete)
+
+- `GET /api/selection/realtime` resolves one aware point-in-time `as_of`, runs the injected
+  Task25 runtime once, and returns only compact Top100 selection evidence. It neither exposes
+  the full capture nor persists a snapshot.
+- The app lifespan owns optional injected realtime-provider composition. Route dependencies only
+  retrieve the configured provider; provider connection failures become a stable 503 response.
+- The response retains Task15–22 readiness, blockers, policy, diagnostics and selected-item audit
+  fields without adding scoring, ranking, filtering, polling or UI behavior.
+
+## Task 26 Verification
+
+- Focused offline API regressions — PASS (8 tests); the full API suite — PASS (29 tests), and the
+  realtime suite — PASS (219 tests). They use injected fake providers and isolated repositories
+  only, covering one runtime call, compact mapping, ready/blocked/empty behavior, errors, OpenAPI,
+  provider isolation and no snapshot writes.
+- Canonical root validation — PASS (539 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -769,3 +788,4 @@ No subsequent task has been started.
 - Task 23: Realtime Selection Application/Service Orchestration Foundation (complete).
 - Task 24: Realtime Slow-Input Assembly Foundation (complete).
 - Task 25: One-shot Runtime Realtime Selection Orchestration Foundation (complete).
+- Task 26: Realtime Top100 API Foundation (complete).
