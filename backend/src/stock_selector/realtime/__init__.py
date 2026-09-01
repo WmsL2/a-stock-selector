@@ -1,5 +1,6 @@
 """One-shot realtime capture and local freshness foundation."""
 
+from .application import RealtimeSelectionApplicationService
 from .candidate_snapshot import RealtimeCandidateSnapshotEngine
 from .candidates import RealtimeCandidateEngine
 from .collector import RealtimeSnapshotCollector
@@ -54,6 +55,8 @@ from .models import (
     RealtimeSelectionBlocker,
     RealtimeSelectionDiagnostics,
     RealtimeSelectionItem,
+    RealtimeSelectionPipelinePolicy,
+    RealtimeSelectionPipelineResult,
     RealtimeSelectionPolicy,
     RealtimeSelectionResult,
     RealtimeSignalNormalizationBlocker,
@@ -120,10 +123,13 @@ __all__ = [
     "RealtimeScoreLayerContribution",
     "RealtimeScorePolicy",
     "RealtimeScoreResult",
+    "RealtimeSelectionApplicationService",
     "RealtimeSelectionBlocker",
     "RealtimeSelectionDiagnostics",
     "RealtimeSelectionEngine",
     "RealtimeSelectionItem",
+    "RealtimeSelectionPipelinePolicy",
+    "RealtimeSelectionPipelineResult",
     "RealtimeSelectionPolicy",
     "RealtimeSelectionResult",
     "RealtimeSignalNormalizationBlocker",

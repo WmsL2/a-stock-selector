@@ -130,3 +130,15 @@ def test_realtime_selection_has_only_policy_dependencies() -> None:
         "Settings", "stock_selector.config", "yaml",
     ):
         assert forbidden not in selection
+
+
+def test_realtime_application_has_no_operational_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    application = (root / "realtime" / "application.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "stock_selector.providers", "AKShareProvider", "RealtimeSnapshotCollector",
+        "LocalMarketRepository", "stock_selector.storage", "FastAPI", "HTTPException",
+        "stock_selector.api", "Settings", "stock_selector.config", "yaml", "datetime.now",
+        "time.sleep",
+    ):
+        assert forbidden not in application

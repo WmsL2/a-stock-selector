@@ -1479,3 +1479,145 @@ class RealtimeSelectionResult(DomainModel):
         if self.items != ordered:
             raise ValueError("selection items must be ordered by realtime score then symbol")
         return self
+
+
+class RealtimeSelectionPipelinePolicy(DomainModel):
+    """Explicit immutable policy bundle for the Task15-to-Task22 pipeline."""
+
+    candidate_policy: RealtimeCandidatePolicy = Field(default_factory=RealtimeCandidatePolicy)
+    freshness_normal_max_seconds: int = 60
+    freshness_warning_max_seconds: int = 120
+    light_scan_policy: RealtimeLightScanPolicy = Field(default_factory=RealtimeLightScanPolicy)
+    intraday_score_policy: RealtimeIntradayScorePolicy = Field(default_factory=RealtimeIntradayScorePolicy)
+    realtime_score_policy: RealtimeScorePolicy = Field(default_factory=RealtimeScorePolicy)
+    selection_policy: RealtimeSelectionPolicy = Field(default_factory=RealtimeSelectionPolicy)
+
+    @model_validator(mode="after")
+    def validate_freshness_policy(self) -> "RealtimeSelectionPipelinePolicy":
+        if self.freshness_normal_max_seconds <= 0 or self.freshness_warning_max_seconds <= 0:
+            raise ValueError("freshness thresholds must be greater than zero")
+        if self.freshness_warning_max_seconds < self.freshness_normal_max_seconds:
+            raise ValueError("warning freshness threshold must not precede normal threshold")
+        return self
+
+
+class RealtimeSelectionPipelineResult(DomainModel):
+    """Full auditable output of the canonical Task15-to-Task22 orchestration."""
+
+    calculation_at: datetime
+    candidate_as_of: datetime
+    policy: RealtimeSelectionPipelinePolicy
+    candidates: RealtimeCandidateResult
+    snapshot: RealtimeCandidateSnapshotResult
+    scan: RealtimeLightScanResult
+    normalization: RealtimeSignalNormalizationResult
+    factors: RealtimeIntradayFactorResult
+    intraday_score: RealtimeIntradayScoreResult
+    realtime_score: RealtimeScoreResult
+    selection: RealtimeSelectionResult
+
+    @field_validator("calculation_at", "candidate_as_of")
+    @classmethod
+    def aware(cls, value: datetime, info: ValidationInfo) -> datetime:
+        return ensure_aware_datetime(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_pipeline(self) -> "RealtimeSelectionPipelineResult":
+        if self.candidate_as_of != self.candidates.as_of:
+            raise ValueError("pipeline candidate_as_of must match candidates")
+        candidate_as_of_values = (
+            self.snapshot.as_of,
+            self.scan.as_of,
+            self.normalization.candidate_as_of,
+            self.factors.candidate_as_of,
+            self.intraday_score.candidate_as_of,
+            self.realtime_score.candidate_as_of,
+            self.selection.candidate_as_of,
+        )
+        if any(value != self.candidate_as_of for value in candidate_as_of_values):
+            raise ValueError("pipeline candidate_as_of must match every stage")
+        calculation_values = (
+            self.snapshot.diagnostics.calculation_at,
+            self.scan.diagnostics.calculation_at,
+            self.normalization.calculation_at,
+            self.normalization.diagnostics.calculation_at,
+            self.factors.calculation_at,
+            self.factors.diagnostics.calculation_at,
+            self.intraday_score.calculation_at,
+            self.intraday_score.diagnostics.calculation_at,
+            self.realtime_score.calculation_at,
+            self.realtime_score.diagnostics.calculation_at,
+            self.selection.calculation_at,
+            self.selection.diagnostics.calculation_at,
+        )
+        if any(value != self.calculation_at for value in calculation_values):
+            raise ValueError("pipeline calculation_at must match every downstream stage")
+        if (
+            self.candidates.policy != self.policy.candidate_policy
+            or self.scan.policy != self.policy.light_scan_policy
+            or self.intraday_score.policy != self.policy.intraday_score_policy
+            or self.realtime_score.policy != self.policy.realtime_score_policy
+            or self.selection.policy != self.policy.selection_policy
+        ):
+            raise ValueError("pipeline stages must match bundled policies")
+        adjacency = (
+            (
+                self.scan.diagnostics.upstream_snapshot_ready,
+                self.snapshot.diagnostics.snapshot_ready,
+                self.scan.diagnostics.upstream_blockers,
+                self.snapshot.diagnostics.blockers,
+            ),
+            (
+                self.normalization.diagnostics.upstream_scan_ready,
+                self.scan.diagnostics.scan_ready,
+                self.normalization.diagnostics.upstream_blockers,
+                self.scan.diagnostics.blockers,
+            ),
+            (
+                self.factors.diagnostics.upstream_normalization_ready,
+                self.normalization.diagnostics.normalization_ready,
+                self.factors.diagnostics.upstream_blockers,
+                self.normalization.diagnostics.blockers,
+            ),
+            (
+                self.intraday_score.diagnostics.upstream_factor_ready,
+                self.factors.diagnostics.factor_ready,
+                self.intraday_score.diagnostics.upstream_blockers,
+                self.factors.diagnostics.blockers,
+            ),
+            (
+                self.realtime_score.diagnostics.upstream_intraday_score_ready,
+                self.intraday_score.diagnostics.score_ready,
+                self.realtime_score.diagnostics.upstream_blockers,
+                self.intraday_score.diagnostics.blockers,
+            ),
+            (
+                self.selection.diagnostics.upstream_realtime_score_ready,
+                self.realtime_score.diagnostics.realtime_score_ready,
+                self.selection.diagnostics.upstream_blockers,
+                self.realtime_score.diagnostics.blockers,
+            ),
+        )
+        if any(ready != upstream_ready or blockers != upstream_blockers for ready, upstream_ready, blockers, upstream_blockers in adjacency):
+            raise ValueError("pipeline adjacent stage readiness and blockers must agree")
+        if self.snapshot.diagnostics.snapshot_ready and tuple(item.candidate for item in self.snapshot.items) != self.candidates.candidates:
+            raise ValueError("ready snapshot items must retain pipeline candidates")
+        if self.scan.diagnostics.scan_ready and tuple(item.snapshot_item for item in self.scan.items) != self.snapshot.items:
+            raise ValueError("scan items must retain snapshot items")
+        if self.normalization.diagnostics.normalization_ready and tuple(item.scan_item for item in self.normalization.items) != self.scan.items:
+            raise ValueError("normalization items must retain scan items")
+        if self.factors.diagnostics.factor_ready and tuple(item.normalization_item for item in self.factors.items) != self.normalization.items:
+            raise ValueError("factor items must retain normalization items")
+        if self.intraday_score.diagnostics.score_ready and tuple(item.factor_item for item in self.intraday_score.items) != self.factors.items:
+            raise ValueError("intraday score items must retain factor items")
+        if self.realtime_score.diagnostics.realtime_score_ready and tuple(item.intraday_score_item for item in self.realtime_score.items) != self.intraday_score.items:
+            raise ValueError("realtime score items must retain intraday score items")
+        upstream_scores = {
+            item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol: item
+            for item in self.realtime_score.items
+        }
+        for item in self.selection.items:
+            symbol = item.score_item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol
+            if upstream_scores.get(symbol) != item.score_item:
+                raise ValueError("selection items must retain matching realtime score items")
+        return self
