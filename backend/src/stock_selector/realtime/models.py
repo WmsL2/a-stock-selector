@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
+from stock_selector.factors import StockFactorInput
 from stock_selector.models import RealtimeQuote
 from stock_selector.models.common import (
     DomainModel,
@@ -12,6 +13,9 @@ from stock_selector.models.common import (
     validate_symbol,
 )
 from stock_selector.quality.models import RealtimeFreshness
+from stock_selector.risk import RiskEligibilitySnapshot
+from stock_selector.scoring import BaseScoreCrossSectionResult
+from stock_selector.universe import UniverseSnapshot
 
 
 class RealtimeCaptureScope(StrEnum):
@@ -1620,4 +1624,160 @@ class RealtimeSelectionPipelineResult(DomainModel):
             symbol = item.score_item.intraday_score_item.factor_item.normalization_item.scan_item.snapshot_item.candidate.symbol
             if upstream_scores.get(symbol) != item.score_item:
                 raise ValueError("selection items must retain matching realtime score items")
+        return self
+
+
+class RealtimeSlowInputDiagnostics(DomainModel):
+    """Auditable local PIT coverage for one realtime slow-input assembly."""
+
+    as_of: datetime
+    input_instruments: int = Field(ge=0)
+    structural_members: int = Field(ge=0)
+    risk_records: int = Field(ge=0)
+    risk_complete_members: int = Field(ge=0)
+    risk_eligible_members: int = Field(ge=0)
+    risk_coverage_ratio: float
+    risk_ready: bool
+    factor_input_members: int = Field(ge=0)
+    financial_current_available_members: int = Field(ge=0)
+    financial_prior_year_available_members: int = Field(ge=0)
+    valuation_available_members: int = Field(ge=0)
+    industry_available_members: int = Field(ge=0)
+    base_score_input_members: int = Field(ge=0)
+    base_score_available_members: int = Field(ge=0)
+    price_factors_operational: bool
+
+    @field_validator("as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "as_of")
+
+    @field_validator("risk_coverage_ratio")
+    @classmethod
+    def finite(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "risk_coverage_ratio")
+        assert finite is not None
+        return finite
+
+    @model_validator(mode="after")
+    def validate_diagnostics(self) -> "RealtimeSlowInputDiagnostics":
+        if self.input_instruments < self.structural_members:
+            raise ValueError("input_instruments must cover structural_members")
+        if self.risk_complete_members > self.structural_members:
+            raise ValueError("risk_complete_members must not exceed structural_members")
+        if self.risk_eligible_members > self.risk_complete_members:
+            raise ValueError("risk_eligible_members must not exceed risk_complete_members")
+        expected_coverage = (
+            self.risk_complete_members / self.structural_members
+            if self.structural_members
+            else 0.0
+        )
+        if not math.isclose(
+            self.risk_coverage_ratio, expected_coverage, rel_tol=1e-9, abs_tol=1e-9
+        ):
+            raise ValueError("risk_coverage_ratio must match risk counts")
+        expected_ready = (
+            self.structural_members > 0
+            and self.risk_complete_members == self.structural_members
+        )
+        if self.risk_ready != expected_ready:
+            raise ValueError("risk_ready must match complete structural risk coverage")
+        if self.factor_input_members > self.risk_eligible_members:
+            raise ValueError("factor_input_members must not exceed risk_eligible_members")
+        for field_name in (
+            "financial_current_available_members",
+            "financial_prior_year_available_members",
+            "valuation_available_members",
+            "industry_available_members",
+        ):
+            if getattr(self, field_name) > self.factor_input_members:
+                raise ValueError(f"{field_name} must not exceed factor_input_members")
+        if self.base_score_input_members != self.factor_input_members:
+            raise ValueError("base_score_input_members must equal factor_input_members")
+        if self.base_score_available_members > self.base_score_input_members:
+            raise ValueError("base_score_available_members must not exceed base_score_input_members")
+        if self.price_factors_operational:
+            raise ValueError("Task24 price factors must remain unavailable")
+        if not self.risk_ready and any(
+            (
+                self.factor_input_members,
+                self.base_score_input_members,
+                self.base_score_available_members,
+            )
+        ):
+            raise ValueError("risk-incomplete assembly must not contain factor or score inputs")
+        return self
+
+
+class RealtimeSlowInputResult(DomainModel):
+    """Read-only PIT slow inputs retained for the Task23 realtime application."""
+
+    as_of: datetime
+    structural: UniverseSnapshot
+    risk: RiskEligibilitySnapshot
+    factor_inputs: tuple[StockFactorInput, ...]
+    base_scores: BaseScoreCrossSectionResult
+    diagnostics: RealtimeSlowInputDiagnostics
+
+    @field_validator("as_of")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "as_of")
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "RealtimeSlowInputResult":
+        if self.diagnostics.as_of != self.as_of or self.base_scores.as_of != self.as_of:
+            raise ValueError("slow-input timestamps must match result as_of")
+        if self.structural.as_of != self.as_of.date():
+            raise ValueError("structural as_of must match result date")
+        if self.risk.as_of != self.as_of.date():
+            raise ValueError("risk as_of must match result date")
+        if self.structural.input_count != self.diagnostics.input_instruments:
+            raise ValueError("structural input_count must match diagnostics")
+        if len(self.structural.members) != self.diagnostics.structural_members:
+            raise ValueError("structural member count must match diagnostics")
+        if self.risk.structural_members != self.diagnostics.structural_members:
+            raise ValueError("risk structural count must match diagnostics")
+        if self.risk.risk_records != self.diagnostics.risk_records:
+            raise ValueError("risk record count must match diagnostics")
+        if self.risk.risk_complete_members != self.diagnostics.risk_complete_members:
+            raise ValueError("risk complete count must match diagnostics")
+        if len(self.risk.eligible_members) != self.diagnostics.risk_eligible_members:
+            raise ValueError("risk eligible count must match diagnostics")
+        if tuple(item.symbol for item in self.risk.decisions) != self.structural.members:
+            raise ValueError("risk decisions must match structural members")
+        factor_symbols = tuple(item.symbol for item in self.factor_inputs)
+        if len(set(factor_symbols)) != len(factor_symbols) or factor_symbols != tuple(
+            sorted(factor_symbols)
+        ):
+            raise ValueError("factor input symbols must be unique and sorted")
+        if not set(factor_symbols).issubset(self.risk.eligible_members):
+            raise ValueError("factor input symbols must be risk eligible")
+        if any(item.as_of != self.as_of for item in self.factor_inputs):
+            raise ValueError("factor input timestamps must match result as_of")
+        if any(item.price_series is not None for item in self.factor_inputs):
+            raise ValueError("Task24 factor inputs must not include price series")
+        if len(self.factor_inputs) != self.diagnostics.factor_input_members:
+            raise ValueError("factor input count must match diagnostics")
+        availability_counts = (
+            sum(item.financial_current is not None for item in self.factor_inputs),
+            sum(item.financial_prior_year is not None for item in self.factor_inputs),
+            sum(item.valuation is not None for item in self.factor_inputs),
+            sum(item.industry_key is not None for item in self.factor_inputs),
+        )
+        if availability_counts != (
+            self.diagnostics.financial_current_available_members,
+            self.diagnostics.financial_prior_year_available_members,
+            self.diagnostics.valuation_available_members,
+            self.diagnostics.industry_available_members,
+        ):
+            raise ValueError("factor availability counts must match retained inputs")
+        if self.base_scores.input_count != len(self.factor_inputs):
+            raise ValueError("base score input_count must match factor inputs")
+        if tuple(item.symbol for item in self.base_scores.stocks) != factor_symbols:
+            raise ValueError("base score symbols must match factor input symbols")
+        if self.diagnostics.base_score_available_members != sum(
+            item.base_score is not None for item in self.base_scores.stocks
+        ):
+            raise ValueError("base score availability count must match score results")
         return self

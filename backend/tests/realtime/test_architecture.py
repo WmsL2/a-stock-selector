@@ -142,3 +142,36 @@ def test_realtime_application_has_no_operational_dependencies() -> None:
         "time.sleep",
     ):
         assert forbidden not in application
+
+
+def test_slow_input_assembly_has_only_local_pit_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    slow_inputs = (root / "realtime" / "slow_inputs.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "stock_selector.providers",
+        "AKShareProvider",
+        "RealtimeSnapshotCollector",
+        "RealtimeCaptureResult",
+        "RealtimeSelectionApplicationService",
+        "RealtimeCandidateEngine",
+        "RealtimeCandidateSnapshotEngine",
+        "RealtimeLightScannerEngine",
+        "RealtimeSignalNormalizerEngine",
+        "RealtimeIntradayFactorEngine",
+        "RealtimeIntradayScoreEngine",
+        "RealtimeScoreEngine",
+        "RealtimeSelectionEngine",
+        "FastAPI",
+        "HTTPException",
+        "stock_selector.api",
+        "stock_selector.cli",
+        "datetime.now",
+        "time.sleep",
+        "yaml",
+        "load_daily_bars",
+        "load_latest_realtime_snapshot",
+        "save_",
+        "upsert_",
+        ".initialize(",
+    ):
+        assert forbidden not in slow_inputs

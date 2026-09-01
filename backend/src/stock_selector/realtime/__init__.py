@@ -64,10 +64,13 @@ from .models import (
     RealtimeSignalNormalizationItem,
     RealtimeSignalNormalizationResult,
     RealtimeSignalPercentiles,
+    RealtimeSlowInputDiagnostics,
+    RealtimeSlowInputResult,
 )
 from .realtime_score import RealtimeScoreEngine
 from .realtime_selection import RealtimeSelectionEngine
 from .signal_normalizer import RealtimeSignalNormalizerEngine
+from .slow_inputs import RealtimeSlowInputService
 from .status import RealtimeStatusService
 
 __all__ = [
@@ -138,6 +141,9 @@ __all__ = [
     "RealtimeSignalNormalizationResult",
     "RealtimeSignalNormalizerEngine",
     "RealtimeSignalPercentiles",
+    "RealtimeSlowInputDiagnostics",
+    "RealtimeSlowInputResult",
+    "RealtimeSlowInputService",
     "RealtimeSnapshotCollector",
     "RealtimeStatusService",
 ]

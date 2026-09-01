@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 23 - Realtime Selection Application/Service Orchestration Foundation
+Task 24 - Realtime Slow-Input Assembly Foundation
 
 ## Status
 
@@ -199,6 +199,9 @@ Completed
 - Vue expandable explanation display
 - no-LLM evidence boundary
 - explanation-does-not-change-ranking regression
+- read-only realtime slow-input assembly from local PIT data
+- explicit aware slow-input `as_of` contract
+- realtime-compatible BaseScore and risk assembly audit trail
 
 ## Task 12A Verification
 
@@ -208,7 +211,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 450 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 519 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -239,10 +242,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (506 passed; one third-party TestClient deprecation warning).
+  (519 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (506 passed, 88% coverage).
+  — PASS (519 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -331,7 +334,6 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Corporate-action-adjusted return series
 - Full historical research dataset
 - Realtime Top100 API/UI integration
-- Slow-layer realtime input assembly from local PIT data
 - Runtime provider capture + pipeline invocation
 - Runtime realtime scanner/orchestration
 - Minute bars
@@ -668,6 +670,35 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (506 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 24 — Realtime Slow-Input Assembly Foundation (complete)
+
+- `RealtimeSlowInputService` reads an already initialized `LocalMarketRepository` at one
+  caller-supplied timezone-aware `as_of`, then returns an auditable structural universe, exact-date
+  risk snapshot, factor inputs and `BaseScoreCrossSectionResult`. It has no provider, capture,
+  Task15–23 application, API, UI, CLI, scheduler, clock or persistence dependency.
+- It reuses `AshareUniverseBuilder`, `RiskEligibilityEvaluator`, `FiveFactorEngine` and
+  `BaseScoreEngine` with caller-supplied universe, factor and selected industry-classification
+  settings. Structural membership never consults current instrument status; factor scope is exactly
+  risk-eligible members intersected with locally covered factor-input symbols.
+- Incomplete exact-date risk coverage returns the real risk audit but deliberately skips factor and
+  BaseScore calculation. Complete risk with no eligible member, or eligible members without local
+  factor coverage, remains a valid empty slow-input result; Task24 introduces no second blocker.
+- Financial and valuation inputs use their revision-safe PIT repository accessors. The prior
+  financial input is only the exact matching prior-year report period. Historical selected-class
+  industry intervals are retained, while missing configured classifications remain missing.
+- Every `StockFactorInput` sets `price_series=None`; RAW daily bars are deliberately ignored, so
+  Momentum and LowVol remain unavailable until a dedicated PIT-safe adjusted-return capability.
+  The output is compatible with `RealtimeSelectionApplicationService`, but Task24 does not invoke it.
+
+## Task 24 Verification
+
+- Focused Task24 contracts cover structural/risk scope, exact-date and unknown-risk semantics,
+  PIT financial revisions and valuation, historical/selected industry classification, RAW-daily
+  exclusion, custom Settings propagation, DailySelection parity, Task23 compatibility,
+  determinism, read-only behavior, architecture boundaries and normal Pydantic rejection paths.
+- Canonical root validation — PASS (519 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -695,3 +726,4 @@ No subsequent task has been started.
 - Task 21: RealTimeScore Composition Foundation (complete).
 - Task 22: Realtime Selection Policy Foundation (complete).
 - Task 23: Realtime Selection Application/Service Orchestration Foundation (complete).
+- Task 24: Realtime Slow-Input Assembly Foundation (complete).
