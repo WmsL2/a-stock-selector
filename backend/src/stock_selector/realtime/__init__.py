@@ -59,6 +59,7 @@ from .models import (
     RealtimeSelectionPipelineResult,
     RealtimeSelectionPolicy,
     RealtimeSelectionResult,
+    RealtimeSelectionRuntimeResult,
     RealtimeSignalNormalizationBlocker,
     RealtimeSignalNormalizationDiagnostics,
     RealtimeSignalNormalizationItem,
@@ -69,6 +70,7 @@ from .models import (
 )
 from .realtime_score import RealtimeScoreEngine
 from .realtime_selection import RealtimeSelectionEngine
+from .runtime import RealtimeSelectionRuntimeService
 from .signal_normalizer import RealtimeSignalNormalizerEngine
 from .slow_inputs import RealtimeSlowInputService
 from .status import RealtimeStatusService
@@ -135,6 +137,8 @@ __all__ = [
     "RealtimeSelectionPipelineResult",
     "RealtimeSelectionPolicy",
     "RealtimeSelectionResult",
+    "RealtimeSelectionRuntimeResult",
+    "RealtimeSelectionRuntimeService",
     "RealtimeSignalNormalizationBlocker",
     "RealtimeSignalNormalizationDiagnostics",
     "RealtimeSignalNormalizationItem",

@@ -175,3 +175,36 @@ def test_slow_input_assembly_has_only_local_pit_dependencies() -> None:
         ".initialize(",
     ):
         assert forbidden not in slow_inputs
+
+
+def test_runtime_has_only_one_shot_orchestration_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "stock_selector"
+    runtime = (root / "realtime" / "runtime.py").read_text(encoding="utf-8")
+    for forbidden in (
+        "AKShareProvider",
+        "stock_selector.providers.akshare_provider",
+        "get_realtime_quotes(",
+        "RealtimeCandidateEngine",
+        "RealtimeCandidateSnapshotEngine",
+        "RealtimeLightScannerEngine",
+        "RealtimeSignalNormalizerEngine",
+        "RealtimeIntradayFactorEngine",
+        "RealtimeIntradayScoreEngine",
+        "RealtimeScoreEngine",
+        "RealtimeSelectionEngine",
+        "FastAPI",
+        "HTTPException",
+        "stock_selector.api",
+        "stock_selector.cli",
+        "time.sleep",
+        "asyncio.sleep",
+        "while True",
+        "scheduler",
+        ".initialize(",
+        "save_",
+        "upsert_",
+        "load_daily_bars",
+        "load_latest_realtime_snapshot",
+        "load_settings",
+    ):
+        assert forbidden not in runtime

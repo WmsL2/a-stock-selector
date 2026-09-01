@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 24 - Realtime Slow-Input Assembly Foundation
+Task 25 - One-shot Runtime Realtime Selection Orchestration Foundation
 
 ## Status
 
@@ -202,6 +202,7 @@ Completed
 - read-only realtime slow-input assembly from local PIT data
 - explicit aware slow-input `as_of` contract
 - realtime-compatible BaseScore and risk assembly audit trail
+- one-shot runtime slow/capture/pipeline orchestration
 
 ## Task 12A Verification
 
@@ -211,7 +212,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 522 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 533 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -242,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (522 passed; one third-party TestClient deprecation warning).
+  (533 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (522 passed, 88% coverage).
+  — PASS (533 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -334,8 +335,8 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Corporate-action-adjusted return series
 - Full historical research dataset
 - Realtime Top100 API/UI integration
-- Runtime provider capture + pipeline invocation
-- Runtime realtime scanner/orchestration
+- CLI runtime command
+- Recurring / polling realtime scanner execution
 - Minute bars
 - Minute-backed VWAP/Trend factor inputs
 - Minute-backed Short Momentum factor inputs
@@ -712,6 +713,33 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (522 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 25 — One-shot Runtime Realtime Selection Orchestration Foundation (complete)
+
+- `RealtimeSelectionRuntimeService` is dependency injected with an already initialized local
+  repository, Settings and a `RealtimeMarketDataProvider`. Each run calls Task24 slow-input
+  assembly first, one Task14 all-market capture without a repository, and Task23 exactly once.
+- Capture is always `symbols=None` and `persist_symbols=()`: no runtime realtime persistence is
+  possible. The complete runtime result retains slow inputs, full all-market capture, resolved
+  pipeline policy and the full Task23 pipeline result.
+- Caller-supplied aware `as_of` remains the slow PIT instant. An explicit aware `calculation_at`
+  is retained exactly; an omitted calculation time is read once, after capture, in the configured
+  application timezone. Default runtime policy freshness thresholds come from Settings, while a
+  caller policy is passed through unchanged.
+- Result contracts link runtime timestamps and policy, fixed capture metadata and snapshot quotes,
+  Task15 diagnostics and retained slow evidence. Existing provider, Task24 and Task23 errors
+  propagate unchanged. No new blocker, score, rank or filter is introduced.
+- No concrete provider construction, API, UI, CLI, scheduler, polling, minute data, Top20 or
+  RiskPenalty was added.
+
+## Task 25 Verification
+
+- Focused offline fake-provider regressions cover one-call/fixed-order execution, no persistence,
+  all-market extra quotes, explicit and system calculation times, Settings freshness, custom policy,
+  blocked and ready-empty flows, error propagation, deterministic explicit-time runs, normal
+  runtime-result rejection and cross-run capture/slow-evidence linkage.
+- Canonical root validation — PASS (533 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -740,3 +768,4 @@ No subsequent task has been started.
 - Task 22: Realtime Selection Policy Foundation (complete).
 - Task 23: Realtime Selection Application/Service Orchestration Foundation (complete).
 - Task 24: Realtime Slow-Input Assembly Foundation (complete).
+- Task 25: One-shot Runtime Realtime Selection Orchestration Foundation (complete).

@@ -1824,3 +1824,75 @@ class RealtimeSlowInputResult(DomainModel):
                     if contribution.configured_weight != group.weight:
                         raise ValueError("base score weight must match factor configuration")
         return self
+
+
+class RealtimeSelectionRuntimeResult(DomainModel):
+    """Auditable output of one Task24-to-Task23 runtime invocation."""
+
+    as_of: datetime
+    calculation_at: datetime
+    slow_inputs: RealtimeSlowInputResult
+    capture: RealtimeCaptureResult
+    pipeline_policy: RealtimeSelectionPipelinePolicy
+    pipeline: RealtimeSelectionPipelineResult
+
+    @field_validator("as_of", "calculation_at")
+    @classmethod
+    def aware(cls, value: datetime, info: ValidationInfo) -> datetime:
+        return ensure_aware_datetime(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_runtime_result(self) -> "RealtimeSelectionRuntimeResult":
+        if self.slow_inputs.as_of != self.as_of:
+            raise ValueError("runtime as_of must match slow inputs")
+        if self.pipeline.candidate_as_of != self.as_of:
+            raise ValueError("runtime as_of must match pipeline candidates")
+        if self.pipeline.calculation_at != self.calculation_at:
+            raise ValueError("runtime calculation_at must match pipeline")
+        if self.pipeline.policy != self.pipeline_policy:
+            raise ValueError("runtime policy must match pipeline")
+        if (
+            self.capture.scope is not RealtimeCaptureScope.ALL_MARKET
+            or self.capture.requested_symbols is not None
+            or self.capture.persist_requested_symbols
+            or self.capture.persisted_quotes
+            or self.capture.persisted_symbols
+            or self.capture.persistence_performed
+        ):
+            raise ValueError("runtime capture must be non-persistent all-market")
+        snapshot_diagnostics = self.pipeline.snapshot.diagnostics
+        if (
+            not snapshot_diagnostics.capture_available
+            or snapshot_diagnostics.capture_scope is not self.capture.scope
+            or snapshot_diagnostics.capture_source != self.capture.source
+            or snapshot_diagnostics.capture_ingested_at != self.capture.ingested_at
+            or snapshot_diagnostics.received_quotes != self.capture.received_quotes
+        ):
+            raise ValueError("pipeline snapshot diagnostics must match runtime capture")
+        capture_quotes = {quote.symbol: quote for quote in self.capture.quotes}
+        for item in self.pipeline.snapshot.items:
+            if capture_quotes.get(item.quote.symbol) != item.quote:
+                raise ValueError("pipeline snapshot quotes must match runtime capture")
+        candidate_diagnostics = self.pipeline.candidates.diagnostics
+        if (
+            candidate_diagnostics.structural_members
+            != self.slow_inputs.risk.structural_members
+            or candidate_diagnostics.risk_complete_members
+            != self.slow_inputs.risk.risk_complete_members
+            or candidate_diagnostics.risk_eligible_members
+            != len(self.slow_inputs.risk.eligible_members)
+            or candidate_diagnostics.base_score_input_members
+            != self.slow_inputs.base_scores.input_count
+        ):
+            raise ValueError("pipeline candidate diagnostics must match slow inputs")
+        slow_scores = {item.symbol: item for item in self.slow_inputs.base_scores.stocks}
+        for candidate in self.pipeline.candidates.candidates:
+            score = slow_scores.get(candidate.symbol)
+            if score is None or (
+                candidate.as_of != score.as_of
+                or candidate.base_score != score.base_score
+                or candidate.data_completeness != score.data_completeness
+                or candidate.confidence != score.confidence
+            ):
+                raise ValueError("pipeline candidates must match slow base score evidence")
+        return self
