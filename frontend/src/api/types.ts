@@ -325,3 +325,103 @@ export interface DailySelectionResponse {
   diagnostics: DailySelectionDiagnosticsResponse
   items: DailySelectionItemResponse[]
 }
+
+export interface RealtimeSelectionFamilyPolicyResponse {
+  enabled: boolean
+  weight: number
+}
+
+export interface RealtimeSelectionPolicyResponse {
+  candidate_min_base_score: number
+  candidate_top_fraction: number
+  freshness_normal_max_seconds: number
+  freshness_warning_max_seconds: number
+  strong_move_pct: number
+  high_turnover_rate_pct: number
+  high_volume_ratio: number
+  relative_strength: RealtimeSelectionFamilyPolicyResponse
+  activity_liquidity: RealtimeSelectionFamilyPolicyResponse
+  vwap_trend: RealtimeSelectionFamilyPolicyResponse
+  short_momentum: RealtimeSelectionFamilyPolicyResponse
+  risk_stability: RealtimeSelectionFamilyPolicyResponse
+  realtime_base_weight: number
+  realtime_intraday_weight: number
+  min_intraday_score: number
+  top_n: number
+}
+
+export interface RealtimeSelectionDiagnosticsResponse {
+  structural_members: number
+  risk_records: number
+  risk_complete_members: number
+  risk_coverage_ratio: number
+  risk_eligible_members: number
+  factor_input_members: number
+  base_score_available_members: number
+  price_factors_operational: boolean
+  capture_scope: string | null
+  capture_source: string | null
+  capture_ingested_at: string | null
+  received_quotes: number
+  source_timestamp_available_quotes: number
+  persisted_quotes: number
+  freshness: RealtimeFreshness
+  age_seconds: number | null
+  freshness_allowed: boolean
+  candidate_ready: boolean
+  candidate_blockers: string[]
+  candidate_members: number
+  snapshot_ready: boolean
+  snapshot_blockers: string[]
+  scan_ready: boolean
+  scan_blockers: string[]
+  normalization_ready: boolean
+  normalization_blockers: string[]
+  factor_ready: boolean
+  factor_blockers: string[]
+  intraday_score_ready: boolean
+  intraday_score_blockers: string[]
+  realtime_score_ready: boolean
+  realtime_score_blockers: string[]
+  selection_ready: boolean
+  selection_blockers: string[]
+  intraday_score_available_items: number
+  ranking_universe_items: number
+  selected_items: number
+}
+
+export interface RealtimeSelectionItemResponse {
+  realtime_rank: number
+  market_rank: number
+  symbol: string
+  name: string
+  board: string
+  industry_key: string | null
+  quote: RealtimeQuoteResponse
+  base_score: number
+  base_data_completeness: number
+  base_confidence: number
+  intraday_score: number
+  intraday_data_completeness: number
+  intraday_confidence: number
+  intraday_confidence_adjusted_score: number
+  relative_strength_score: number | null
+  activity_liquidity_score: number | null
+  vwap_trend_score: number | null
+  short_momentum_score: number | null
+  risk_stability_score: number | null
+  realtime_score: number
+  realtime_data_completeness: number
+  realtime_confidence: number
+  realtime_confidence_adjusted_score: number
+}
+
+export interface RealtimeSelectionResponse {
+  as_of: string
+  calculation_at: string
+  selection_ready: boolean
+  blockers: string[]
+  policy: RealtimeSelectionPolicyResponse
+  diagnostics: RealtimeSelectionDiagnosticsResponse
+  items: RealtimeSelectionItemResponse[]
+}

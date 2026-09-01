@@ -5,7 +5,7 @@ import { getDailyBars, getInstrument, getLatestRealtime, listInstruments } from 
 import { getUniverseStatus } from '@/api/universe'
 import { getQualityStatus } from '@/api/quality'
 import { getDailyStatus } from '@/api/daily'
-import { getDailySelection } from '@/api/selection'
+import { getDailySelection, getRealtimeSelection } from '@/api/selection'
 
 describe('local API client', () => {
   it('uses the relative API base URL', () => {
@@ -23,6 +23,7 @@ describe('local API client', () => {
     await getQualityStatus()
     await getDailyStatus()
     await getDailySelection()
+    await getRealtimeSelection()
     expect(get).toHaveBeenNthCalledWith(1, '/instruments', {
       params: { q: '茅台', limit: 50, offset: 0 },
     })
@@ -35,5 +36,6 @@ describe('local API client', () => {
     expect(get).toHaveBeenNthCalledWith(6, '/quality/status')
     expect(get).toHaveBeenNthCalledWith(7, '/daily/status')
     expect(get).toHaveBeenNthCalledWith(8, '/selection/daily')
+    expect(get).toHaveBeenNthCalledWith(9, '/selection/realtime', { timeout: 60_000 })
   })
 })

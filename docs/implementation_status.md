@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 26 - Realtime Top100 API Foundation
+Task 27 - Realtime Top100 Vue/UI Integration
 
 ## Status
 
@@ -250,7 +250,7 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
-  `npm run test` — PASS (34 passed), and `npm run build` — PASS.
+  `npm run test` — PASS (37 passed), and `npm run build` — PASS.
 - `git diff --check` — PASS.
 
 ## Live Smoke
@@ -334,20 +334,18 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
 - Full historical research dataset
-- Realtime Top100 Vue/UI integration
 - CLI runtime command
 - Recurring / polling realtime scanner execution
 - Minute bars
 - Minute-backed VWAP/Trend factor inputs
 - Minute-backed Short Momentum factor inputs
-- IntradayScore realtime API/UI integration
-- RealTimeScore realtime API/UI integration
 - Top20 final selection policy
 - RiskPenalty / separate realtime risk deduction
 - Replay engine
 - Backtest
 - Factor research
 - Scheduler
+- Result caching / single-flight protection
 
 ## Task 14 — Realtime Market Data Foundation (complete)
 
@@ -759,6 +757,27 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (539 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
+## Task 27 — Realtime Top100 Vue/UI Integration (complete)
+
+- The existing `/realtime-selection` route now consumes the Task26 compact API only after an
+  explicit manual click. It has no request on mount, polling, cache, browser persistence or
+  frontend scoring, filtering, ranking, freshness or policy computation.
+- The one-shot request has a dedicated 60-second timeout while the global API timeout remains
+  10 seconds. The view displays returned PIT/capture/calculation timestamps, capture and freshness
+  diagnostics, exact pipeline blocker codes, read-only policy audit, and the retained Task22 order.
+- Selected rows expose quote provenance, family scores, evidence quality and metadata, preserve
+  null evidence as “—”, and navigate to the existing instrument detail route. Blocked, ready-empty
+  and HTTP-error outcomes remain distinct. The page is quantitative research only, not investment
+  advice or exchange-direct market data.
+
+## Task 27 Verification
+
+- Focused frontend regressions — PASS (11 tests): idle/manual one-shot behavior, loading,
+  backend-order rendering, supplied-score display, audit expansion, quote units, blocked and
+  ready-empty states, failed rerun clearing, navigation, policy and capture diagnostics.
+- Canonical root validation — PASS (539 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -789,3 +808,4 @@ No subsequent task has been started.
 - Task 24: Realtime Slow-Input Assembly Foundation (complete).
 - Task 25: One-shot Runtime Realtime Selection Orchestration Foundation (complete).
 - Task 26: Realtime Top100 API Foundation (complete).
+- Task 27: Realtime Top100 Vue/UI Integration (complete).
