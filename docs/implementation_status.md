@@ -211,7 +211,7 @@ Completed
   resolves under `backend/config`, while data, logs and snapshots resolve under `runtime/`.
 - `python -m stock_selector storage status` — PASS offline after the migration: 5,551
   instruments, 5 daily rows, 3 realtime rows and 909.4 KB retained.
-- `scripts/test-all.ps1` — PASS: 519 backend tests, 88% coverage, Ruff, mypy,
+- `scripts/test-all.ps1` — PASS: 522 backend tests, 88% coverage, Ruff, mypy,
   frontend type check, lint, 34 Vitest tests and production build all completed.
 - Task 12A Fix regressions — PASS offline: BaseScore-descending ranking, symbol-ascending
   ties, market ranks, service-side TopN, no-score exclusion and low-completeness ranking are
@@ -242,10 +242,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (519 passed; one third-party TestClient deprecation warning).
+  (522 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (519 passed, 88% coverage).
+  — PASS (522 passed, 88% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -697,6 +697,19 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   exclusion, custom Settings propagation, DailySelection parity, Task23 compatibility,
   determinism, read-only behavior, architecture boundaries and normal Pydantic rejection paths.
 - Canonical root validation — PASS (519 backend tests; 88% coverage); Ruff, mypy, frontend type
+  check, lint, 34 Vitest tests and production build pass.
+
+## Task 24 Fix Verification
+
+- Audit-linkage closure — PASS: Task24 now retains the exact `FiveFactorCrossSectionResult` and
+  `FactorsConfig` used for composition. Normal result construction verifies each BaseScore family
+  contribution against the retained factor score, component coverage, configured enablement and
+  weight, rejecting same-symbol/same-as-of BaseScore evidence from another valid run.
+- Regressions independently reject an incorrect `risk_ready`, operational price factors, mismatched
+  factor-input timestamp, unsorted factor inputs, cross-run factor configuration/evidence and
+  cross-run BaseScore evidence. DailySelection parity additionally checks retained family evidence
+  and configured weights without changing DailySelection.
+- Canonical root validation — PASS (522 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 34 Vitest tests and production build pass.
 
 ## Next Task

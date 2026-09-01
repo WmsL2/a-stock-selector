@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from stock_selector.config import AppPaths, Settings
-from stock_selector.factors import PriceSeriesInput, StockFactorInput
+from stock_selector.factors import FactorFamily, PriceSeriesInput, StockFactorInput
 from stock_selector.models import (
     AdjustmentType,
     Board,
@@ -146,6 +146,11 @@ def test_complete_pit_assembly_is_deterministic_read_only_and_qvg_only(tmp_path)
     assert first.diagnostics.base_score_available_members == 3
     assert first.diagnostics.price_factors_operational is False
     assert all(item.price_series is None for item in first.factor_inputs)
+    assert first.factors is not None
+    assert tuple(item.symbol for item in first.factors.stocks) == tuple(
+        item.symbol for item in first.factor_inputs
+    )
+    assert first.factor_config == Settings().factors
     assert all(item.base_score is not None for item in first.base_scores.stocks)
     assert all(item.available_families == 3 for item in first.base_scores.stocks)
 
@@ -162,6 +167,7 @@ def test_risk_incomplete_and_unknown_short_circuit_without_factor_loading(tmp_pa
     assert result.diagnostics.risk_ready is False
     assert result.diagnostics.risk_complete_members == 1
     assert result.factor_inputs == ()
+    assert result.factors is None
     assert result.base_scores.input_count == 0
     assert result.base_scores.stocks == ()
 
@@ -190,6 +196,7 @@ def test_complete_but_zero_eligible_and_eligible_without_local_inputs_are_empty(
     assert no_eligible.diagnostics.risk_ready is True
     assert no_eligible.diagnostics.risk_eligible_members == 0
     assert no_eligible.factor_inputs == ()
+    assert no_eligible.factors is None
 
     missing = _repository(tmp_path / "missing", ("600519.SH",))
     _complete(missing, ("600519.SH",))
@@ -197,6 +204,7 @@ def test_complete_but_zero_eligible_and_eligible_without_local_inputs_are_empty(
     assert no_inputs.diagnostics.risk_ready is True
     assert no_inputs.diagnostics.risk_eligible_members == 1
     assert no_inputs.factor_inputs == ()
+    assert no_inputs.factors is None
     assert no_inputs.base_scores.stocks == ()
 
 
@@ -337,6 +345,24 @@ def test_daily_selection_parity_and_task23_compatibility(tmp_path) -> None:  # t
             item.data_completeness,
             item.confidence,
         )
+        assert slow.factors is not None
+        factor_item = next(factor for factor in slow.factors.stocks if factor.symbol == item.symbol)
+        for contribution, family, evidence in zip(
+            score.contributions,
+            FactorFamily,
+            (
+                factor_item.quality,
+                factor_item.value,
+                factor_item.growth,
+                factor_item.momentum,
+                factor_item.low_volatility,
+            ),
+            strict=True,
+        ):
+            assert contribution.family is family
+            assert contribution.family_score == evidence.score
+            assert contribution.available is (contribution.enabled and evidence.score is not None)
+            assert contribution.configured_weight == getattr(settings.factors, family.value).weight
     pipeline = RealtimeSelectionApplicationService().run(
         slow.base_scores, slow.risk, None, _AS_OF + timedelta(minutes=1)
     )
@@ -367,11 +393,14 @@ def test_result_models_reject_corrupted_cross_section_contracts(tmp_path) -> Non
     _complete(repository, ("600519.SH",))
     result = RealtimeSlowInputService(repository, Settings()).build(_AS_OF)
     valid = result.model_dump()
-    invalid_diagnostics = result.diagnostics.model_copy(
-        update={"risk_ready": False, "price_factors_operational": True}
-    )
-    with pytest.raises(ValidationError):
-        RealtimeSlowInputDiagnostics(**invalid_diagnostics.model_dump())
+    for update in (
+        {"risk_ready": False},
+        {"price_factors_operational": True},
+    ):
+        with pytest.raises(ValidationError):
+            RealtimeSlowInputDiagnostics(
+                **result.diagnostics.model_copy(update=update).model_dump()
+            )
     non_eligible_input = StockFactorInput.model_construct(
         symbol="000001.SZ",
         as_of=_AS_OF,
@@ -393,7 +422,10 @@ def test_result_models_reject_corrupted_cross_section_contracts(tmp_path) -> Non
         {"diagnostics": result.diagnostics.model_copy(update={"risk_coverage_ratio": 0.0})},
         {"factor_inputs": (result.factor_inputs[0], result.factor_inputs[0])},
         {"factor_inputs": (non_eligible_input,)},
+        {"factor_inputs": (result.factor_inputs[0].model_copy(update={"as_of": _AS_OF + timedelta(days=1)}),)},
         {"factor_inputs": (result.factor_inputs[0].model_copy(update={"price_series": PriceSeriesInput(symbol="600519.SH", as_of=_AS_OF, points=(), corporate_action_adjusted=True)}),)},
+        {"factors": None},
+        {"factors": result.factors.model_copy(update={"as_of": _AS_OF + timedelta(days=1)})},
         {"base_scores": result.base_scores.model_copy(update={"input_count": 0})},
         {"base_scores": result.base_scores.model_copy(update={"as_of": _AS_OF + timedelta(days=1)})},
         {"base_scores": result.base_scores.model_copy(update={"stocks": (wrong_score_symbol,)})},
@@ -401,3 +433,73 @@ def test_result_models_reject_corrupted_cross_section_contracts(tmp_path) -> Non
     ):
         with pytest.raises(ValidationError):
             RealtimeSlowInputResult(**(valid | update))
+
+
+def test_empty_factor_inputs_reject_retained_factor_evidence(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path, ("600519.SH",))
+    _complete(repository, ("600519.SH",))
+    empty = RealtimeSlowInputService(repository, Settings()).build(_AS_OF)
+    populated_repository = _repository(tmp_path / "populated", ("600519.SH",))
+    _seed_factor_inputs(populated_repository, ("600519.SH",))
+    _complete(populated_repository, ("600519.SH",))
+    populated = RealtimeSlowInputService(populated_repository, Settings()).build(_AS_OF)
+
+    with pytest.raises(ValidationError):
+        RealtimeSlowInputResult(**(empty.model_dump() | {"factors": populated.factors}))
+
+
+def test_unsorted_factor_inputs_are_rejected_with_normal_result_construction(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "600519.SH")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols)
+    _complete(repository, symbols)
+    result = RealtimeSlowInputService(repository, Settings()).build(_AS_OF)
+
+    with pytest.raises(ValidationError, match="unique and sorted"):
+        RealtimeSlowInputResult(
+            **(result.model_dump() | {"factor_inputs": tuple(reversed(result.factor_inputs))})
+        )
+
+
+def test_cross_run_base_score_and_config_linkage_are_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "600519.SH")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols)
+    _complete(repository, symbols)
+    settings_a = Settings()
+    settings_b = Settings(
+        factors={
+            "quality": {"weight": 0.4},
+            "value": {"weight": 0.3},
+            "growth": {"weight": 0.2},
+            "momentum": {"weight": 0.05},
+            "low_volatility": {"weight": 0.05},
+        }
+    )
+    result_a = RealtimeSlowInputService(repository, settings_a).build(_AS_OF)
+    result_b = RealtimeSlowInputService(repository, settings_b).build(_AS_OF)
+
+    assert result_a.base_scores != result_b.base_scores
+    for update in (
+        {"base_scores": result_b.base_scores},
+        {"factor_config": result_b.factor_config},
+    ):
+        with pytest.raises(ValidationError):
+            RealtimeSlowInputResult(**(result_a.model_dump() | update))
+
+    repository.upsert_financial_records(
+        (
+            _financial(
+                "600519.SH",
+                date(2025, 12, 31),
+                80,
+                _AS_OF - timedelta(hours=1),
+            ),
+        )
+    )
+    evidence_run = RealtimeSlowInputService(repository, settings_a).build(_AS_OF)
+    assert evidence_run.factors != result_a.factors
+    with pytest.raises(ValidationError):
+        RealtimeSlowInputResult(
+            **(result_a.model_dump() | {"factors": evidence_run.factors})
+        )

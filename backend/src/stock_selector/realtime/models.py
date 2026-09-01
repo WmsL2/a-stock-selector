@@ -4,7 +4,12 @@ from enum import StrEnum
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from stock_selector.factors import StockFactorInput
+from stock_selector.config.models import FactorsConfig
+from stock_selector.factors import (
+    FactorFamily,
+    FiveFactorCrossSectionResult,
+    StockFactorInput,
+)
 from stock_selector.models import RealtimeQuote
 from stock_selector.models.common import (
     DomainModel,
@@ -1716,6 +1721,8 @@ class RealtimeSlowInputResult(DomainModel):
     structural: UniverseSnapshot
     risk: RiskEligibilitySnapshot
     factor_inputs: tuple[StockFactorInput, ...]
+    factors: FiveFactorCrossSectionResult | None
+    factor_config: FactorsConfig
     base_scores: BaseScoreCrossSectionResult
     diagnostics: RealtimeSlowInputDiagnostics
 
@@ -1772,6 +1779,17 @@ class RealtimeSlowInputResult(DomainModel):
             self.diagnostics.industry_available_members,
         ):
             raise ValueError("factor availability counts must match retained inputs")
+        if not self.factor_inputs and self.factors is not None:
+            raise ValueError("empty factor inputs require missing factor evidence")
+        if self.factor_inputs and self.factors is None:
+            raise ValueError("factor inputs require retained factor evidence")
+        if self.factors is not None:
+            if self.factors.as_of != self.as_of:
+                raise ValueError("factor evidence timestamp must match result as_of")
+            if self.factors.input_count != len(self.factor_inputs):
+                raise ValueError("factor evidence input_count must match factor inputs")
+            if tuple(item.symbol for item in self.factors.stocks) != factor_symbols:
+                raise ValueError("factor evidence symbols must match factor input symbols")
         if self.base_scores.input_count != len(self.factor_inputs):
             raise ValueError("base score input_count must match factor inputs")
         if tuple(item.symbol for item in self.base_scores.stocks) != factor_symbols:
@@ -1780,4 +1798,29 @@ class RealtimeSlowInputResult(DomainModel):
             item.base_score is not None for item in self.base_scores.stocks
         ):
             raise ValueError("base score availability count must match score results")
+        if self.factors is not None:
+            factors_by_symbol = {item.symbol: item for item in self.factors.stocks}
+            for score_item in self.base_scores.stocks:
+                factor_item = factors_by_symbol[score_item.symbol]
+                factor_families = (
+                    factor_item.quality,
+                    factor_item.value,
+                    factor_item.growth,
+                    factor_item.momentum,
+                    factor_item.low_volatility,
+                )
+                for contribution, family, evidence in zip(
+                    score_item.contributions, FactorFamily, factor_families, strict=True
+                ):
+                    group = getattr(self.factor_config, family.value)
+                    if contribution.family is not family:
+                        raise ValueError("base score contribution family must match factor evidence")
+                    if contribution.family_score != evidence.score:
+                        raise ValueError("base score family score must match factor evidence")
+                    if contribution.family_component_coverage != evidence.component_coverage:
+                        raise ValueError("base score coverage must match factor evidence")
+                    if contribution.enabled != group.enabled:
+                        raise ValueError("base score enablement must match factor configuration")
+                    if contribution.configured_weight != group.weight:
+                        raise ValueError("base score weight must match factor configuration")
         return self

@@ -3,7 +3,12 @@
 from datetime import datetime
 
 from stock_selector.config.models import Settings
-from stock_selector.factors import FiveFactorEngine, FiveFactorRequest, StockFactorInput
+from stock_selector.factors import (
+    FiveFactorCrossSectionResult,
+    FiveFactorEngine,
+    FiveFactorRequest,
+    StockFactorInput,
+)
 from stock_selector.models.common import ensure_aware_datetime
 from stock_selector.risk import RiskEligibilitySnapshot
 from stock_selector.risk.evaluator import RiskEligibilityEvaluator
@@ -47,7 +52,7 @@ class RealtimeSlowInputService:
             and risk.risk_complete_members == risk.structural_members
         )
         factor_inputs = self._factor_inputs(risk, as_of) if risk_ready else ()
-        base_scores = self._base_scores(factor_inputs, as_of)
+        factors, base_scores = self._factor_and_base_scores(factor_inputs, as_of)
         diagnostics = RealtimeSlowInputDiagnostics(
             as_of=as_of,
             input_instruments=len(instruments),
@@ -81,6 +86,8 @@ class RealtimeSlowInputService:
             structural=structural,
             risk=risk,
             factor_inputs=factor_inputs,
+            factors=factors,
+            factor_config=self._settings.factors,
             base_scores=base_scores,
             diagnostics=diagnostics,
         )
@@ -141,12 +148,14 @@ class RealtimeSlowInputService:
             price_series=None,
         )
 
-    def _base_scores(
+    def _factor_and_base_scores(
         self, factor_inputs: tuple[StockFactorInput, ...], as_of: datetime
-    ) -> BaseScoreCrossSectionResult:
+    ) -> tuple[FiveFactorCrossSectionResult | None, BaseScoreCrossSectionResult]:
         if not factor_inputs:
-            return BaseScoreCrossSectionResult(as_of=as_of, input_count=0, stocks=())
+            return None, BaseScoreCrossSectionResult(
+                as_of=as_of, input_count=0, stocks=()
+            )
         factors = self._factor_engine.compute(FiveFactorRequest(stocks=factor_inputs))
-        return self._score_engine.compute(
+        return factors, self._score_engine.compute(
             BaseScoreRequest(factors=factors, config=self._settings.factors)
         )
