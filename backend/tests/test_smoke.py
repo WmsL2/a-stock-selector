@@ -299,6 +299,247 @@ def test_risk_cli_expected_failure_and_missing_subcommand(
     assert "risk subcommand is required" in capsys.readouterr().err
 
 
+def test_structural_core_batch_selection_validates_limit_and_exact_cursor_position() -> None:
+    members = ("000001.SZ", "000002.SZ", "000004.SZ", "600000.SH")
+    assert cli_module._select_structural_core_batch(members, 1, None) == (
+        ("000001.SZ",),
+        True,
+    )
+    assert cli_module._select_structural_core_batch(members, 2, "000002.SZ") == (
+        ("000004.SZ", "600000.SH"),
+        False,
+    )
+    assert cli_module._select_structural_core_batch(members, 500, "000004.SZ") == (
+        ("600000.SH",),
+        False,
+    )
+    assert cli_module._select_structural_core_batch(members, 1, "600000.SH") == ((), False)
+    for limit in (0, -1, 501):
+        with pytest.raises(ValueError, match="--limit"):
+            cli_module._select_structural_core_batch(members, limit, None)
+    for cursor in ("600000", "600001.SH"):
+        with pytest.raises(ValueError):
+            cli_module._select_structural_core_batch(members, 1, cursor)
+
+
+def test_structural_core_cli_parser_is_bounded_and_current_only() -> None:
+    arguments = build_parser().parse_args(
+        [
+            "fundamentals",
+            "collect-structural-core",
+            "--limit",
+            "100",
+            "--start-after",
+            "000002.SZ",
+        ]
+    )
+    assert arguments.limit == 100
+    assert arguments.start_after == "000002.SZ"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["fundamentals", "collect-structural-core", "--limit", "1", "--as-of", "2026-09-02"]
+        )
+
+
+def test_structural_core_cli_uses_bounded_structural_scope_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    current_at = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    captured: dict[str, object] = {}
+    original_from_project_root = AppPaths.from_project_root
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            captured["initialized"] = True
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["as_of"] = as_of
+            return SimpleNamespace(
+                members=("000001.SZ", "000002.SZ", "600000.SH", "600519.SH")
+            )
+
+    class FakeCoreCollector:
+        def __init__(self, *dependencies: object) -> None:
+            captured["collector_dependencies"] = dependencies
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=current_at.date(),
+                requested_symbols=("000002.SZ", "600000.SH"),
+                financial_start_period=date(2024, 1, 1),
+                financial_end_period=current_at.date(),
+                financial_success=2,
+                financial_empty=0,
+                financial_failed=0,
+                financial_rows_persisted=2,
+                industry_success=2,
+                industry_empty=0,
+                industry_failed=0,
+                industry_rows_persisted=2,
+                fully_successful_symbols=2,
+                core_covered_after_run=2,
+                results=(),
+                batch_first_symbol="000002.SZ",
+                batch_last_symbol="600000.SH",
+                has_more_structural_members=True,
+                next_start_after="600000.SH",
+            )
+
+    provider_calls = 0
+
+    def provider_factory() -> str:
+        nonlocal provider_calls
+        provider_calls += 1
+        return "provider"
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralCoreFundamentalsCollector", FakeCoreCollector
+    )
+
+    assert main(
+        [
+            "fundamentals",
+            "collect-structural-core",
+            "--limit",
+            "2",
+            "--start-after",
+            "000001.SZ",
+        ]
+    ) == 0
+    assert provider_calls == 1
+    assert captured["as_of"] == current_at.date()
+    assert captured["request"].symbols == ("000002.SZ", "600000.SH")
+    assert captured["request"].has_more_structural_members is True
+    assert "Next start-after: 600000.SH" in capsys.readouterr().out
+
+
+def test_structural_core_cli_reports_domain_failure_and_skips_end_or_bad_cursor_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original_from_project_root = AppPaths.from_project_root
+    captured: dict[str, object] = {}
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            return SimpleNamespace(members=("688001.SH",))
+
+    class FailingCoreCollector:
+        def __init__(self, *_dependencies: object) -> None:
+            return None
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=date(2026, 9, 2),
+                requested_symbols=("688001.SH",),
+                financial_start_period=date(2024, 1, 1),
+                financial_end_period=date(2026, 9, 2),
+                financial_success=0,
+                financial_empty=0,
+                financial_failed=1,
+                financial_rows_persisted=0,
+                industry_success=1,
+                industry_empty=0,
+                industry_failed=0,
+                industry_rows_persisted=1,
+                fully_successful_symbols=0,
+                core_covered_after_run=0,
+                results=(
+                    SimpleNamespace(
+                        symbol="688001.SH",
+                        financial_status=SimpleNamespace(value="failed"),
+                        industry_status=SimpleNamespace(value="success"),
+                    ),
+                ),
+                batch_first_symbol="688001.SH",
+                batch_last_symbol="688001.SH",
+                has_more_structural_members=False,
+                next_start_after=None,
+            )
+
+    provider_calls = 0
+
+    def provider_factory() -> str:
+        nonlocal provider_calls
+        provider_calls += 1
+        return "provider"
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralCoreFundamentalsCollector", FailingCoreCollector
+    )
+
+    assert main(["fundamentals", "collect-structural-core", "--limit", "1"]) == 1
+    assert provider_calls == 1
+    assert "Financial failed: 688001.SH" in capsys.readouterr().out
+    assert main(
+        [
+            "fundamentals",
+            "collect-structural-core",
+            "--limit",
+            "1",
+            "--start-after",
+            "688001.SH",
+        ]
+    ) == 0
+    assert "No remaining structural members." in capsys.readouterr().out
+    assert provider_calls == 1
+    assert main(
+        [
+            "fundamentals",
+            "collect-structural-core",
+            "--limit",
+            "1",
+            "--start-after",
+            "600000.SH",
+        ]
+    ) == 1
+    assert "current structural member" in capsys.readouterr().err
+    assert provider_calls == 1
+
+
 def test_config_check() -> None:
     """The CLI validates the default project configuration."""
     result = run_module("config", "check")

@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 29 - Full-Market Current-Day Risk State Collection & Persistence
+Task 30 - Structural Financial + Industry Bounded Batch Refresh Foundation
 
 ## Status
 
@@ -243,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (588 passed; one third-party TestClient deprecation warning).
+  (599 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (588 passed, 89% coverage).
+  — PASS (599 passed, 89% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -328,11 +328,14 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 ## Not Implemented Yet
 
 - Full historical risk-state collection / backfill
+- Full structural valuation batching
+- Full historical / scheduled fundamentals refresh
 - Full-market daily data quality
 - Long-no-trade detection
 - Full-market scheduled daily refresh
 - Trading-calendar gap detection
 - Corporate-action-adjusted return series
+- PIT-safe adjusted price-series ingestion
 - Full historical research dataset
 - CLI runtime command
 - Recurring / polling realtime scanner execution
@@ -859,6 +862,37 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   check, lint, 37 Vitest tests and production build pass. No live provider call or real project
   market-data write was performed.
 
+## Task 30 — Structural Financial + Industry Bounded Batch Refresh Foundation (complete)
+
+- `python -m stock_selector fundamentals collect-structural-core --limit N` adds a bounded,
+  current structural-universe refresh for Financial and Industry evidence only. `--limit` is
+  mandatory (1–500); optional `--start-after SYMBOL` resumes immediately after that exact
+  structural-member position, never by lexical comparison.
+- The CLI takes the configured-timezone date once, builds `CurrentUniverseService` at that date,
+  and uses its ordered structural members. It therefore inherits the Task29 STAR `689xxx` CDR
+  exclusion without adding any Task30-specific symbol filtering.
+- Each selected symbol runs the existing Financial collector for 1 January of `as_of.year - 2`
+  through `as_of`, then the existing Industry collector through `as_of`, sequentially. Valuation,
+  daily bars, realtime, risk states, APIs, frontend, scheduling, concurrency and scoring remain
+  outside this command.
+- One provider is constructed only after bounded cursor selection finds work. At the end cursor
+  the command is a zero-work success and constructs no provider. Provider or data failures are
+  isolated per domain and symbol so later work continues; storage failures remain fatal.
+- The typed report retains per-symbol Financial/Industry `success`, `empty` or `failed` status,
+  row counts, bounded-batch cursors and the partial factor-input coverage result. It loads factor
+  input coverage once after the run; repeated successful batches rely on the existing idempotent
+  collectors and repository upserts.
+
+## Task 30 Verification
+
+- Focused offline regressions — PASS: 7 structural-core collector tests, 37 collection tests,
+  4 fundamentals-repository tests, 13 universe tests, 22 CLI smoke tests and 28 relevant provider
+  tests verify ordering, exact cursor behavior, CDR inheritance, isolation, storage aborts,
+  idempotence and zero-work completion without live calls or project runtime writes.
+- Canonical root validation — PASS (599 backend tests; 89% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass. No live provider call or real project
+  market-data write was performed.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -892,3 +926,4 @@ No subsequent task has been started.
 - Task 27: Realtime Top100 Vue/UI Integration (complete).
 - Task 28: Realtime Partial Quote Mapping Hardening (complete).
 - Task 29: Full-Market Current-Day Risk State Collection & Persistence (complete).
+- Task 30: Structural Financial + Industry Bounded Batch Refresh Foundation (complete).

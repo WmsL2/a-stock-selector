@@ -17,6 +17,7 @@ from stock_selector.config.loader import ConfigurationError, load_settings
 from stock_selector.config.paths import AppPaths
 
 if TYPE_CHECKING:
+    from stock_selector.collection import StructuralCoreCollectionReport
     from stock_selector.providers.akshare_provider import AKShareProvider
     from stock_selector.providers.requests import (
         DailyBarsRequest,
@@ -168,6 +169,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     industry_collect.add_argument("--symbols", nargs="+", required=True)
     industry_collect.add_argument("--as-of", required=True)
+    structural_core_collect = fundamentals_subparsers.add_parser(
+        "collect-structural-core",
+        help="Refresh one bounded current structural financial and industry batch.",
+    )
+    structural_core_collect.add_argument("--limit", type=int, required=True)
+    structural_core_collect.add_argument("--start-after")
     return parser
 
 
@@ -483,6 +490,10 @@ def _run_risk_command(command: str | None) -> int:
 
 def _run_fundamentals_command(arguments: argparse.Namespace) -> int:
     """Run an offline status read or an explicit bounded Task 09 collection."""
+    if arguments.fundamentals_command == "collect-structural-core":
+        return _run_structural_core_fundamentals_command(
+            arguments.limit, arguments.start_after
+        )
     from stock_selector.collection import (
         FinancialCollector,
         IndustryCollector,
@@ -529,6 +540,86 @@ def _run_fundamentals_command(arguments: argparse.Namespace) -> int:
     return 1 if report.failed_symbols else 0
 
 
+def _run_structural_core_fundamentals_command(
+    limit: int, start_after: str | None
+) -> int:
+    """Refresh one current structural batch without making unbounded provider calls."""
+    from stock_selector.collection import (
+        CollectionDataError,
+        CollectionError,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralCoreCollectionRequest,
+        StructuralCoreFundamentalsCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        if not 1 <= limit <= 500:
+            raise ValueError("--limit must be between 1 and 500")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        symbols, has_more = _select_structural_core_batch(
+            structural.members, limit, start_after
+        )
+        if not symbols:
+            print("No remaining structural members.")
+            print("Next start-after: complete")
+            return 0
+        provider = AKShareProvider()
+        report = StructuralCoreFundamentalsCollector(
+            FinancialCollector(provider, repository),
+            IndustryCollector(provider, repository),
+            repository,
+        ).collect(
+            StructuralCoreCollectionRequest(
+                symbols=symbols,
+                as_of=current_at.date(),
+                has_more_structural_members=has_more,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural core collection error: {exc}", file=sys.stderr)
+        return 1
+    _print_structural_core_collection_report(report, len(structural.members))
+    return 1 if report.financial_failed or report.industry_failed else 0
+
+
+def _select_structural_core_batch(
+    members: tuple[str, ...], limit: int, start_after: str | None
+) -> tuple[tuple[str, ...], bool]:
+    """Select a bounded continuation batch by exact structural-tuple position."""
+    from stock_selector.models.common import validate_symbol
+
+    if not 1 <= limit <= 500:
+        raise ValueError("--limit must be between 1 and 500")
+    start_index = 0
+    if start_after is not None:
+        validate_symbol(start_after)
+        try:
+            start_index = members.index(start_after) + 1
+        except ValueError as exc:
+            raise ValueError("--start-after must be a current structural member") from exc
+    symbols = members[start_index : start_index + limit]
+    return symbols, start_index + len(symbols) < len(members)
+
+
 def _print_fundamentals_status(repository) -> None:  # type: ignore[no-untyped-def]
     """Print only local coverage and conservative capability declarations."""
     stats = repository.get_stats()
@@ -545,6 +636,47 @@ def _print_fundamentals_status(repository) -> None:  # type: ignore[no-untyped-d
     print("Financial point-in-time safe: YES")
     print("Valuation history supported: YES (PE/PB/PCF/total market cap only)")
     print("Industry history supported: YES (CNInfo change history only)")
+
+
+def _print_structural_core_collection_report(
+    report: StructuralCoreCollectionReport, structural_members: int
+) -> None:
+    """Print compact sequential core-refresh audit data without success-row spam."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {structural_members}")
+    print(f"Batch requested: {len(report.requested_symbols)}")
+    print(f"Batch first: {report.batch_first_symbol}")
+    print(f"Batch last: {report.batch_last_symbol}")
+    print(
+        "Financial period: "
+        f"{report.financial_start_period.isoformat()} to {report.financial_end_period.isoformat()}"
+    )
+    print(
+        "Financial success / empty / failed: "
+        f"{report.financial_success} / {report.financial_empty} / {report.financial_failed}"
+    )
+    print(f"Financial rows persisted: {report.financial_rows_persisted}")
+    print(
+        "Industry success / empty / failed: "
+        f"{report.industry_success} / {report.industry_empty} / {report.industry_failed}"
+    )
+    print(f"Industry rows persisted: {report.industry_rows_persisted}")
+    print(f"Fully successful: {report.fully_successful_symbols}")
+    print(f"Core covered after run: {report.core_covered_after_run}")
+    print(f"Has more: {'YES' if report.has_more_structural_members else 'NO'}")
+    print(f"Next start-after: {report.next_start_after or 'complete'}")
+    financial_failed = ", ".join(
+        result.symbol
+        for result in report.results
+        if result.financial_status.value == "failed"
+    )
+    industry_failed = ", ".join(
+        result.symbol
+        for result in report.results
+        if result.industry_status.value == "failed"
+    )
+    print(f"Financial failed: {financial_failed or 'none'}")
+    print(f"Industry failed: {industry_failed or 'none'}")
 
 
 def _provider_label(provider: AKShareProvider) -> str:

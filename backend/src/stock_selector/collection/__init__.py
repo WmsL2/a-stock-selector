@@ -23,6 +23,13 @@ from stock_selector.collection.risk import (
     CurrentRiskCollectionResult,
     CurrentRiskStateCollector,
 )
+from stock_selector.collection.structural_fundamentals import (
+    StructuralCoreCollectionReport,
+    StructuralCoreCollectionRequest,
+    StructuralCoreDomainStatus,
+    StructuralCoreFundamentalsCollector,
+    StructuralCoreSymbolResult,
+)
 
 __all__ = [
     "CollectionDataError",
@@ -39,5 +46,10 @@ __all__ = [
     "FinancialCollector",
     "FundamentalsCollectionReport",
     "IndustryCollector",
+    "StructuralCoreCollectionReport",
+    "StructuralCoreCollectionRequest",
+    "StructuralCoreDomainStatus",
+    "StructuralCoreFundamentalsCollector",
+    "StructuralCoreSymbolResult",
     "ValuationCollector",
 ]
