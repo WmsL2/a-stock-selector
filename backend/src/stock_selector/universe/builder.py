@@ -50,6 +50,8 @@ class AshareUniverseBuilder:
         self, instrument: Instrument, config: UniverseConfig, as_of: date
     ) -> UniverseDecision:
         reasons: list[UniverseExclusionReason] = []
+        if _is_non_a_share_security(instrument):
+            reasons.append(UniverseExclusionReason.NON_A_SHARE_SECURITY)
         enabled_field = _BOARD_ENABLED.get(instrument.board)
         if enabled_field is None:
             raise UniverseDataError("instrument board is not supported by universe policy")
@@ -75,3 +77,9 @@ def _require_unique_symbols(instruments: tuple[Instrument, ...]) -> None:
     symbols = tuple(instrument.symbol for instrument in instruments)
     if len(set(symbols)) != len(symbols):
         raise UniverseDataError("universe input contains duplicate symbols")
+
+
+def _is_non_a_share_security(instrument: Instrument) -> bool:
+    """Identify the verified STAR depositary-receipt code range from identity only."""
+    code, _exchange = instrument.symbol.rsplit(".", maxsplit=1)
+    return instrument.board is Board.STAR and code.startswith("689")

@@ -18,9 +18,10 @@ def _instrument(
     listing_date: date = date(2020, 1, 1),
     delisting_date: date | None = None,
     status: SecurityStatus = SecurityStatus.ACTIVE,
+    board: Board | None = None,
 ) -> Instrument:
     exchange = Exchange(symbol.rsplit(".", maxsplit=1)[1])
-    board = {
+    resolved_board = board or {
         Exchange.SSE: Board.SH_MAIN,
         Exchange.SZSE: Board.SZ_MAIN,
         Exchange.BSE: Board.BSE,
@@ -29,7 +30,7 @@ def _instrument(
         symbol=symbol,
         name=symbol,
         exchange=exchange,
-        board=board,
+        board=resolved_board,
         listing_date=listing_date,
         delisting_date=delisting_date,
         status=status,
@@ -101,3 +102,44 @@ def test_current_status_never_changes_structural_membership() -> None:
     expected = builder.build((active,), UniverseConfig(), as_of)
     for candidate in (st, suspended, delisting):
         assert builder.build((candidate,), UniverseConfig(), as_of) == expected
+
+
+def test_star_cdr_code_range_is_audited_but_excluded_from_a_share_members() -> None:
+    instruments = (
+        _instrument("688001.SH", board=Board.STAR),
+        _instrument("689009.SH", board=Board.STAR),
+        _instrument("689123.SH", board=Board.STAR),
+        _instrument("600519.SH"),
+        _instrument("000001.SZ"),
+        _instrument("300750.SZ", board=Board.CHINEXT),
+        _instrument("430047.BJ"),
+    )
+    snapshot = AshareUniverseBuilder().build(instruments, UniverseConfig(), date(2024, 1, 1))
+
+    assert snapshot.input_count == 7
+    assert len(snapshot.decisions) == 7
+    assert snapshot.members == (
+        "000001.SZ",
+        "300750.SZ",
+        "430047.BJ",
+        "600519.SH",
+        "688001.SH",
+    )
+    assert _decision(snapshot, "688001.SH").included is True
+    assert _decision(snapshot, "689009.SH").reasons == (
+        UniverseExclusionReason.NON_A_SHARE_SECURITY,
+    )
+    assert _decision(snapshot, "689123.SH").reasons == (
+        UniverseExclusionReason.NON_A_SHARE_SECURITY,
+    )
+
+
+def test_star_cdr_identity_reason_precedes_other_structural_exclusions() -> None:
+    cdr = _instrument("689009.SH", board=Board.STAR)
+    snapshot = AshareUniverseBuilder().build(
+        (cdr,), UniverseConfig(include_star_market=False), date(2024, 1, 1)
+    )
+    assert _decision(snapshot, "689009.SH").reasons == (
+        UniverseExclusionReason.NON_A_SHARE_SECURITY,
+        UniverseExclusionReason.BOARD_DISABLED,
+    )

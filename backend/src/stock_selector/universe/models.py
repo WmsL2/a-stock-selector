@@ -11,6 +11,7 @@ from stock_selector.models.common import DomainModel, validate_symbol
 class UniverseExclusionReason(str, Enum):
     """Deterministic structural reasons an instrument is outside the universe."""
 
+    NON_A_SHARE_SECURITY = "non_a_share_security"
     BOARD_DISABLED = "board_disabled"
     NOT_YET_LISTED = "not_yet_listed"
     DELISTED = "delisted"

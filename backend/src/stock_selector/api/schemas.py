@@ -45,6 +45,7 @@ class UniverseBoardCountsResponse(APIResponseModel):
 
 
 class UniverseExclusionCountsResponse(APIResponseModel):
+    non_a_share_security: int
     board_disabled: int
     not_yet_listed: int
     delisted: int

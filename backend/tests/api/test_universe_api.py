@@ -33,6 +33,7 @@ def test_universe_status_reports_structural_counts_and_explicit_limits(
         "bse": 0,
     }
     assert body["exclusions"] == {
+        "non_a_share_security": 0,
         "board_disabled": 0,
         "not_yet_listed": 0,
         "delisted": 0,

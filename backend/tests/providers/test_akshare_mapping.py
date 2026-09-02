@@ -1,6 +1,6 @@
 """Offline tests for strict AKShare-to-domain mapping helpers."""
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -11,8 +11,10 @@ from stock_selector.providers.akshare_mapping import (
     canonical_symbol_from_akshare_code,
     canonical_symbol_from_sina_code,
     lots_to_shares,
+    map_current_risk_states,
     map_realtime_quotes,
     map_sh_instruments,
+    map_sina_current_risk_states,
     map_sina_daily_bars,
     map_sina_realtime_quotes,
     sina_symbol_from_canonical,
@@ -259,6 +261,96 @@ def test_realtime_mapping_rejects_negative_optional_quote_price() -> None:
     frame.loc[0, "今开"] = -1
     with pytest.raises(ProviderDataError):
         map_sina_realtime_quotes(frame, datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai")))
+
+
+def _risk_frame(*, sina: bool = False) -> pd.DataFrame:
+    codes = ["sh600519", "sz000001", "sh600929"] if sina else ["600519", "000001", "600929"]
+    return pd.DataFrame(
+        {
+            "代码": codes,
+            "名称": ["贵州茅台", " *ST 测试 ", "退市测试退"],
+            "最新价": [10, 10, 0],
+            "今开": [9, 9, 0], "最高": [11, 11, 0], "最低": [8, 8, 0],
+            "昨收": [9, 9, 6], "成交量": [100, 100, 0], "成交额": [1000, 1000, 0],
+            "涨跌幅": [1, 1, 0],
+        }
+    )
+
+
+def test_current_risk_mapping_uses_raw_rows_and_complete_current_evidence() -> None:
+    as_of = date(2026, 9, 2)
+    observed_at = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    states = map_current_risk_states(
+        _risk_frame(), ("600929.SH", "000001.SZ", "600519.SH"), as_of, observed_at
+    )
+    assert [state.symbol for state in states] == ["000001.SZ", "600519.SH", "600929.SH"]
+    active, st, suspended = states[1], states[0], states[2]
+    assert (active.is_st, active.is_suspended, active.is_delisting_period) == (False, False, False)
+    assert st.is_st is True
+    assert (suspended.is_suspended, suspended.is_delisting_period) == (True, True)
+    assert all(state.as_of == as_of and state.observed_at == observed_at for state in states)
+    assert all(state.source == "akshare:stock_zh_a_spot_em" for state in states)
+
+
+@pytest.mark.parametrize("name", ["ST测试", "*ST测试", "S*ST测试", "SST测试"])
+def test_current_risk_mapping_recognizes_st_name_forms(name: str) -> None:
+    frame = _risk_frame().iloc[:1].copy()
+    frame.loc[0, "名称"] = name
+    state = map_current_risk_states(
+        frame, ("600519.SH",), date(2026, 9, 2), datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )[0]
+    assert state.is_st is True and state.is_delisting_period is False
+
+
+@pytest.mark.parametrize("name", ["退市测试", "测试退"])
+def test_current_risk_mapping_recognizes_delisting_prefix_and_suffix(name: str) -> None:
+    frame = _risk_frame().iloc[:1].copy()
+    frame.loc[0, "名称"] = name
+    state = map_current_risk_states(
+        frame, ("600519.SH",), date(2026, 9, 2), datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )[0]
+    assert state.is_delisting_period is True and state.is_st is False
+
+
+@pytest.mark.parametrize("column,value", [("成交量", -1), ("成交额", "bad")])
+def test_current_risk_mapping_rejects_unreliable_suspension_evidence(column: str, value: object) -> None:
+    frame = _risk_frame().iloc[:1].copy()
+    frame[column] = frame[column].astype(object)
+    frame.loc[0, column] = value
+    with pytest.raises(ProviderDataError):
+        map_current_risk_states(frame, ("600519.SH",), date(2026, 9, 2), datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai")))
+
+
+def test_current_risk_mapping_requires_exact_requested_raw_membership() -> None:
+    frame = _risk_frame().iloc[:1].copy()
+    at = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    with pytest.raises(ProviderDataError):
+        map_current_risk_states(frame, ("600519.SH", "000001.SZ"), date(2026, 9, 2), at)
+    duplicate = pd.concat([frame, frame], ignore_index=True)
+    with pytest.raises(ProviderDataError):
+        map_current_risk_states(duplicate, ("600519.SH",), date(2026, 9, 2), at)
+    extra = _risk_frame()
+    states = map_current_risk_states(extra, ("600519.SH",), date(2026, 9, 2), at)
+    assert [state.symbol for state in states] == ["600519.SH"]
+
+
+def test_current_risk_mapping_requires_every_raw_evidence_column() -> None:
+    frame = _risk_frame().drop(columns=["成交额"])
+    with pytest.raises(ProviderDataError):
+        map_current_risk_states(
+            frame,
+            ("600519.SH",),
+            date(2026, 9, 2),
+            datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+        )
+
+
+def test_sina_current_risk_mapping_retains_zero_latest_price_row() -> None:
+    states = map_sina_current_risk_states(
+        _risk_frame(sina=True), ("600929.SH",), date(2026, 9, 2), datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    assert states[0].is_suspended is True
+    assert states[0].source == "akshare:stock_zh_a_spot"
 
 
 def test_sina_daily_mapping_preserves_share_volume_and_raw_adjustment() -> None:

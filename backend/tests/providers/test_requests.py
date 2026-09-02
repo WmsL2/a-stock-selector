@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from stock_selector.models import AdjustmentType
 from stock_selector.providers import (
+    CurrentRiskStatesRequest,
     DailyBarsRequest,
     FinancialRecordsRequest,
     IndustryRecordsRequest,
@@ -70,6 +71,16 @@ def test_realtime_quotes_request_distinguishes_none_from_empty_batch() -> None:
     for symbols in ((), ("600519",), ("600519.SH", "600519.SH")):
         with pytest.raises(ValidationError):
             RealtimeQuotesRequest(symbols=symbols)
+
+
+def test_current_risk_states_request_requires_sorted_complete_symbol_batch() -> None:
+    request = CurrentRiskStatesRequest(
+        symbols=("600519.SH", "000001.SZ"), as_of=date(2026, 9, 2)
+    )
+    assert request.symbols == ("000001.SZ", "600519.SH")
+    for symbols in ((), ("600519",), ("600519.SH", "600519.SH")):
+        with pytest.raises(ValidationError):
+            CurrentRiskStatesRequest(symbols=symbols, as_of=date(2026, 9, 2))
 
 
 def test_financial_records_request_validates_batch_and_period_range() -> None:

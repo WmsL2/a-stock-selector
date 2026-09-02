@@ -88,6 +88,18 @@ class RealtimeQuotesRequest(DomainModel):
         return _validate_symbols(value, allow_empty=False)
 
 
+class CurrentRiskStatesRequest(DomainModel):
+    """Request one current-date complete risk batch for structural symbols only."""
+
+    symbols: tuple[str, ...]
+    as_of: date
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbol_batch(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(sorted(_validate_symbols(value, allow_empty=False)))
+
+
 class FinancialRecordsRequest(DomainModel):
     """Request financial records for one or more symbols and optional periods."""
 

@@ -26,15 +26,18 @@ from stock_selector.providers.akshare_fundamentals_mapping import (
 )
 from stock_selector.providers.akshare_mapping import (
     map_bj_instruments,
+    map_current_risk_states,
     map_daily_bars,
     map_realtime_quotes,
     map_sh_instruments,
+    map_sina_current_risk_states,
     map_sina_daily_bars,
     map_sina_realtime_quotes,
     map_sz_instruments,
     sina_symbol_from_canonical,
 )
 from stock_selector.providers.base import (
+    CurrentRiskStateProvider,
     DailyMarketDataProvider,
     FundamentalDataProvider,
     IndustryDataProvider,
@@ -48,15 +51,22 @@ from stock_selector.providers.errors import (
     ProviderNotSupportedError,
 )
 from stock_selector.providers.requests import (
+    CurrentRiskStatesRequest,
     DailyBarsRequest,
     FinancialRecordsRequest,
     IndustryRecordsRequest,
     RealtimeQuotesRequest,
     ValuationRecordsRequest,
 )
+from stock_selector.risk import DatedRiskState
 
 _LOGGER = logging.getLogger("stock_selector.providers.akshare")
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _system_shanghai_now() -> datetime:
+    """Read the concrete provider-boundary current instant once per risk request."""
+    return datetime.now(tz=_SHANGHAI)
 
 
 class AKShareProvider(
@@ -65,6 +75,7 @@ class AKShareProvider(
     RealtimeMarketDataProvider,
     FundamentalDataProvider,
     IndustryDataProvider,
+    CurrentRiskStateProvider,
 ):
     """AKShare adapter that exposes only normalized domain-model batches."""
 
@@ -197,6 +208,36 @@ class AKShareProvider(
                 f"requested symbols unavailable or invalid: {', '.join(missing)}",
             )
         return tuple(quotes_by_symbol[symbol] for symbol in request.symbols)
+
+    def get_current_risk_states(
+        self, request: CurrentRiskStatesRequest
+    ) -> tuple[DatedRiskState, ...]:
+        """Fetch one raw current-market snapshot for complete structural risk evidence."""
+        observed_at = _system_shanghai_now()
+        if request.as_of != observed_at.date():
+            raise ProviderNotSupportedError(
+                "akshare",
+                "get_current_risk_states",
+                "current-risk collection does not support historical as_of dates",
+            )
+        try:
+            frame = self._fetch_realtime_em()
+        except ProviderConnectionError:
+            _LOGGER.warning(
+                "Eastmoney current-risk snapshot unavailable; falling back to Sina"
+            )
+            try:
+                frame = self._fetch_realtime_sina()
+            except ProviderConnectionError as fallback_error:
+                raise ProviderConnectionError(
+                    "akshare",
+                    "get_current_risk_states",
+                    "primary and fallback unavailable",
+                ) from fallback_error
+            return map_sina_current_risk_states(
+                frame, request.symbols, request.as_of, observed_at
+            )
+        return map_current_risk_states(frame, request.symbols, request.as_of, observed_at)
 
     def _fetch_realtime_em(self) -> pd.DataFrame:
         """Call the primary Eastmoney realtime endpoint at the provider boundary."""

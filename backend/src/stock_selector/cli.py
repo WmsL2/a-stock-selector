@@ -125,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Persist the explicit requested symbols only.",
     )
+    risk_parser = subparsers.add_parser(
+        "risk", help="Collect one current-day full-market structural risk snapshot."
+    )
+    risk_subparsers = risk_parser.add_subparsers(dest="risk_command")
+    risk_subparsers.add_parser(
+        "collect-current",
+        help="Collect and persist complete current-day risk states for structural members.",
+    )
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
@@ -181,6 +189,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_daily_command(arguments)
     elif arguments.command == "realtime":
         return _run_realtime_command(arguments)
+    elif arguments.command == "risk":
+        return _run_risk_command(arguments.risk_command)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
     elif arguments.command == "fundamentals":
@@ -425,6 +435,52 @@ def _run_realtime_command(arguments: argparse.Namespace) -> int:
     return 2
 
 
+def _run_risk_command(command: str | None) -> int:
+    """Collect one explicit current-day full structural risk snapshot."""
+    from stock_selector.collection import (
+        CollectionDataError,
+        CollectionError,
+        CurrentRiskCollectionRequest,
+        CurrentRiskStateCollector,
+    )
+    from stock_selector.providers import AKShareProvider, ProviderError
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    if command != "collect-current":
+        print("A risk subcommand is required: collect-current.", file=sys.stderr)
+        return 2
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        report = CurrentRiskStateCollector(AKShareProvider(), repository).collect(
+            CurrentRiskCollectionRequest(
+                symbols=structural.members,
+                as_of=current_at.date(),
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        ProviderError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Risk collection error: {exc}", file=sys.stderr)
+        return 1
+    _print_current_risk_collection_report(report)
+    return 0
+
+
 def _run_fundamentals_command(arguments: argparse.Namespace) -> int:
     """Run an offline status read or an explicit bounded Task 09 collection."""
     from stock_selector.collection import (
@@ -548,6 +604,20 @@ def _print_realtime_status(status) -> None:  # type: ignore[no-untyped-def]
     )
     print(f"Ranking allowed: {'YES' if status.ranking_allowed else 'NO'}")
     print("Snapshot scope: selective_persisted")
+
+
+def _print_current_risk_collection_report(report) -> None:  # type: ignore[no-untyped-def]
+    """Print a compact, full-batch current-risk persistence audit."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural/requested members: {len(report.requested_symbols)}")
+    print(f"Received states: {report.states_received}")
+    print(f"Persisted states: {report.states_persisted}")
+    print(f"ST members: {report.st_members}")
+    print(f"Suspended members: {report.suspended_members}")
+    print(f"Delisting-period members: {report.delisting_period_members}")
+    print(f"Source: {report.source}")
+    print(f"Observed at: {report.observed_at.isoformat()}")
+    print("Risk coverage: 100%")
 
 
 def _print_realtime_capture_result(result) -> None:  # type: ignore[no-untyped-def]
@@ -680,6 +750,7 @@ def _print_universe_status(snapshot, instruments) -> None:  # type: ignore[no-un
         print(f"{label}: {boards[board]}")
     print("Structural exclusions:")
     for reason, label in (
+        (UniverseExclusionReason.NON_A_SHARE_SECURITY, "Non-A-share security"),
         (UniverseExclusionReason.BOARD_DISABLED, "Board disabled"),
         (UniverseExclusionReason.NOT_YET_LISTED, "Not yet listed"),
         (UniverseExclusionReason.DELISTED, "Delisted"),

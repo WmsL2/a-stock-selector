@@ -1,6 +1,7 @@
 """Strict conversion from AKShare DataFrames to internal domain models."""
 
 import math
+from collections.abc import Callable
 from datetime import date, datetime
 from numbers import Integral, Real
 from typing import Final
@@ -19,6 +20,7 @@ from stock_selector.models import (
 )
 from stock_selector.models.common import validate_symbol
 from stock_selector.providers.errors import ProviderDataError
+from stock_selector.risk import DatedRiskState
 
 _MISSING_TEXT: Final[frozenset[str]] = frozenset({"", "-", "--"})
 _DAILY_COLUMNS: Final[tuple[str, ...]] = (
@@ -346,6 +348,83 @@ def map_sina_realtime_quotes(
     return tuple(sorted(quotes, key=lambda quote: quote.symbol)), skipped_without_price
 
 
+def map_current_risk_states(
+    frame: pd.DataFrame,
+    requested_symbols: tuple[str, ...],
+    as_of: date,
+    observed_at: datetime,
+) -> tuple[DatedRiskState, ...]:
+    """Map raw Eastmoney rows without applying realtime latest-price filtering."""
+    return _map_current_risk_states(
+        frame,
+        requested_symbols,
+        as_of,
+        observed_at,
+        "akshare:stock_zh_a_spot_em",
+        canonical_symbol_from_akshare_code,
+    )
+
+
+def map_sina_current_risk_states(
+    frame: pd.DataFrame,
+    requested_symbols: tuple[str, ...],
+    as_of: date,
+    observed_at: datetime,
+) -> tuple[DatedRiskState, ...]:
+    """Map raw Sina rows without applying realtime latest-price filtering."""
+    return _map_current_risk_states(
+        frame,
+        requested_symbols,
+        as_of,
+        observed_at,
+        "akshare:stock_zh_a_spot",
+        canonical_symbol_from_sina_code,
+    )
+
+
+def _map_current_risk_states(
+    frame: pd.DataFrame,
+    requested_symbols: tuple[str, ...],
+    as_of: date,
+    observed_at: datetime,
+    source: str,
+    symbol_mapper: Callable[[object], str],
+) -> tuple[DatedRiskState, ...]:
+    """Build exact requested current-risk evidence from one raw full-market frame."""
+    _require_nonempty_columns(
+        frame, ("代码", "名称", "今开", "最高", "最低", "成交量", "成交额"), "current_risk_states"
+    )
+    requested = set(requested_symbols)
+    states: dict[str, DatedRiskState] = {}
+    for _, row in frame.iterrows():
+        symbol = symbol_mapper(row["代码"])
+        if symbol not in requested:
+            continue
+        if symbol in states:
+            raise _data_error("current_risk_states", "duplicate requested raw symbol")
+        name = _require_text(row["名称"], "current risk name")
+        activity = tuple(
+            _required_nonnegative_float(row[column], column)
+            for column in ("今开", "最高", "最低", "成交量", "成交额")
+        )
+        normalized_name = "".join(name.split())
+        states[symbol] = DatedRiskState(
+            symbol=symbol,
+            as_of=as_of,
+            is_st=_status_from_name(normalized_name) is SecurityStatus.ST,
+            is_suspended=all(value == 0 for value in activity),
+            is_delisting_period=(
+                normalized_name.startswith("退市") or normalized_name.endswith("退")
+            ),
+            observed_at=observed_at,
+            source=source,
+        )
+    missing = tuple(sorted(requested.difference(states)))
+    if missing:
+        raise _data_error("current_risk_states", f"requested symbols missing: {', '.join(missing)}")
+    return tuple(states[symbol] for symbol in sorted(states))
+
+
 def _map_instrument_rows(
     frame: pd.DataFrame,
     *,
@@ -390,7 +469,7 @@ def _build_instrument(
 
 def _status_from_name(name: str) -> SecurityStatus:
     """Classify explicit ST-style name prefixes without filtering instruments."""
-    normalized = name.upper().replace(" ", "")
+    normalized = "".join(name.split()).upper()
     prefixes = ("ST", "*ST", "S*ST", "SST")
     return SecurityStatus.ST if normalized.startswith(prefixes) else SecurityStatus.ACTIVE
 
@@ -413,6 +492,16 @@ def _required_float(value: object, field_name: str) -> float:
     converted = to_optional_float(value)
     if converted is None:
         raise _data_error("numeric_mapping", f"required {field_name} is missing")
+    return converted
+
+
+def _required_nonnegative_float(value: object, field_name: str) -> float:
+    """Require reliable raw current-risk suspension evidence."""
+    converted = to_optional_float(value)
+    if converted is None:
+        raise _data_error("current_risk_states", f"required {field_name} is missing")
+    if converted < 0:
+        raise _data_error("current_risk_states", f"required {field_name} must not be negative")
     return converted
 
 

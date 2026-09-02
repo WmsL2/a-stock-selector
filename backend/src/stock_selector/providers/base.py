@@ -15,6 +15,7 @@ from stock_selector.models import (
 )
 from stock_selector.models.common import DomainModel, ensure_nonempty_string
 from stock_selector.providers.requests import (
+    CurrentRiskStatesRequest,
     DailyBarsRequest,
     FinancialRecordsRequest,
     IndustryRecordsRequest,
@@ -22,6 +23,7 @@ from stock_selector.providers.requests import (
     RealtimeQuotesRequest,
     ValuationRecordsRequest,
 )
+from stock_selector.risk import DatedRiskState
 
 
 class ProviderInfo(DomainModel):
@@ -79,6 +81,21 @@ class RealtimeMarketDataProvider(ABC):
         self, request: RealtimeQuotesRequest
     ) -> tuple[RealtimeQuote, ...]:
         """Return requested quotes; ``None`` symbols requests all supported quotes."""
+
+
+class CurrentRiskStateProvider(ABC):
+    """Capability for a complete current-day structural risk observation batch."""
+
+    @property
+    @abstractmethod
+    def info(self) -> ProviderInfo:
+        """Return non-sensitive provider identity."""
+
+    @abstractmethod
+    def get_current_risk_states(
+        self, request: CurrentRiskStatesRequest
+    ) -> tuple[DatedRiskState, ...]:
+        """Return one complete current-date risk state for every requested symbol."""
 
 
 class MinuteMarketDataProvider(ABC):

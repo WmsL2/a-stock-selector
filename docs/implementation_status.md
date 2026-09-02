@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 28 - Realtime Partial Quote Mapping Hardening
+Task 29 - Full-Market Current-Day Risk State Collection & Persistence
 
 ## Status
 
@@ -243,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (555 passed; one third-party TestClient deprecation warning).
+  (588 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (555 passed, 88% coverage).
+  — PASS (588 passed, 89% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -327,7 +327,7 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 ## Not Implemented Yet
 
-- Full historical risk-state collector
+- Full historical risk-state collection / backfill
 - Full-market daily data quality
 - Long-no-trade detection
 - Full-market scheduled daily refresh
@@ -798,6 +798,67 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (555 backend tests; 88% coverage); Ruff, mypy, frontend type
   check, lint, 37 Vitest tests and production build pass.
 
+## Task 29 — Full-Market Current-Day Risk State Collection & Persistence (complete)
+
+- `risk collect-current` explicitly collects only the current date in the configured application
+  timezone. It builds the exact structural-universe member set, requests one complete raw
+  full-market current-risk batch, persists it at that exact date, and prints a compact audit
+  report. It exposes no symbols, dates, historical-backfill parameters or scheduler behavior.
+- `CurrentRiskStateProvider` and `CurrentRiskStatesRequest` keep collection provider-abstract.
+  The concrete AKShare boundary rejects every non-current Asia/Shanghai `as_of` before network
+  access, takes one raw Eastmoney full-market frame, and uses exactly one raw Sina fallback only
+  after an Eastmoney connection failure.
+- Raw provider evidence requires one requested row with current name, open, high, low, volume and
+  amount for every structural symbol. Extra provider rows are ignored; a missing or duplicate
+  requested row, missing schema, or unreliable activity field fails the entire batch. Risk mapping
+  intentionally retains latest-price-zero rows rather than applying `RealtimeQuote` filtering.
+- Current raw-name whitespace is normalized before classifying `ST`, `*ST`, `S*ST` and `SST`, and
+  delisting-period name forms `退市...` and `...退`. Suspension is true only when all five required
+  activity values are finite, non-negative and zero. Every emitted state has three known booleans,
+  the requested exact date, one provider-boundary observation time and one source.
+- `CurrentRiskStateCollector` validates exact membership, date, known booleans, observation time
+  and source before exactly one `upsert_risk_states` call. It has no partial-success path: provider,
+  mapping or validation failures write nothing, while storage failures surface as `CollectionError`.
+  There are no API/UI automatic writes, selection changes, factor collection or historical backfill.
+- The current operational snapshot is intended for an active trading session; Task29 does not add
+  trading-calendar or holiday validation. Historical risk-state collection/backfill remains an
+  explicit future capability.
+
+## Task 29 Verification
+
+- Focused offline current-risk regressions — PASS: provider requests/mapping/provider, collection
+  and isolated CLI smoke tests cover current-day guarding, one primary/fallback snapshot, raw
+  latest-price-zero retention, exact batch persistence and all-or-nothing failures.
+- Offline risk-readiness integration — PASS: a complete temporary current-date Task29 batch loads
+  through the unchanged exact-date risk evaluator with every structural member risk-complete.
+- Canonical root validation — PASS (583 backend tests; 89% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass. No live provider call or real project
+  market-data write was performed.
+
+## Task 29 Fix Verification
+
+- The 2026-09-02 operator live current-risk smoke correctly failed atomically after Sina fallback:
+  5,553 raw canonical Sina symbols versus 5,551 structural members left exactly one missing
+  structural symbol, `689009.SH` (九号公司, STAR). The collector's missing-symbol failure,
+  exact-set validation and no-write behavior were preserved.
+- The root cause was structural scope, not risk mapping: STAR `688xxx` codes are ordinary A-share
+  securities, while STAR `689xxx` codes are depositary receipts. The instrument master remains
+  unchanged for audit input, but the pure universe builder now records each `689xxx` STAR item as
+  `non_a_share_security` and excludes it from structural A-share members. Decisions retain the CDR
+  and maintain deterministic identity-first reason ordering.
+- The existing universe-status exclusion-count presentation now includes the generic
+  `non_a_share_security` count so the added reason remains visible and the status response remains
+  valid. No endpoint, frontend, selection score/rank, risk, historical-backfill, scheduler or
+  provider behavior was added or changed. There is no missing-symbol default and no per-symbol
+  provider fallback or supplemental request.
+- Offline regressions prove generic `689123.SH` behavior without a `689009` hard-code, ordinary
+  `688xxx` STAR inclusion, unchanged other boards, current-universe inheritance, and that the
+  Task29 CLI receives only corrected `structural.members`. A raw snapshot without the CDR then
+  succeeds only because the structural request excludes it, not because provider strictness changed.
+- Canonical root validation — PASS (588 backend tests; 89% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass. No live provider call or real project
+  market-data write was performed.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -830,3 +891,4 @@ No subsequent task has been started.
 - Task 26: Realtime Top100 API Foundation (complete).
 - Task 27: Realtime Top100 Vue/UI Integration (complete).
 - Task 28: Realtime Partial Quote Mapping Hardening (complete).
+- Task 29: Full-Market Current-Day Risk State Collection & Persistence (complete).

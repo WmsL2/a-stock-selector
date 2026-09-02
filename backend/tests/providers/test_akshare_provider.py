@@ -1,7 +1,8 @@
 """Offline contract tests for the concrete AKShare provider."""
 
 import logging
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from stock_selector.models import AdjustmentType, Board, Exchange
 from stock_selector.providers import (
     AKShareProvider,
+    CurrentRiskStatesRequest,
     DailyBarsRequest,
     ProviderConnectionError,
     ProviderDataError,
@@ -87,6 +89,7 @@ def _realtime_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "代码": ["600519", "000001"],
+            "名称": ["贵州茅台", "平安银行"],
             "最新价": [10.0, 20.0],
             "今开": [9.0, 19.0],
             "最高": [11.0, 21.0],
@@ -425,3 +428,88 @@ def test_get_realtime_quotes_does_not_fallback_for_primary_data_errors(
     )
     with pytest.raises(ProviderDataError):
         AKShareProvider().get_realtime_quotes(RealtimeQuotesRequest())
+
+
+def test_current_risk_provider_uses_one_primary_raw_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(provider_module, "_system_shanghai_now", lambda: now)
+    calls = {"em": 0, "sina": 0}
+    frame = _realtime_frame()
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot_em",
+        lambda: calls.__setitem__("em", calls["em"] + 1) or frame,
+    )
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot",
+        lambda: calls.__setitem__("sina", calls["sina"] + 1) or frame,
+    )
+    states = AKShareProvider().get_current_risk_states(
+        CurrentRiskStatesRequest(symbols=("600519.SH", "000001.SZ"), as_of=now.date())
+    )
+    assert calls == {"em": 1, "sina": 0}
+    assert [state.symbol for state in states] == ["000001.SZ", "600519.SH"]
+    assert {state.observed_at for state in states} == {now}
+
+
+def test_current_risk_provider_falls_back_only_on_connection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(provider_module, "_system_shanghai_now", lambda: now)
+    calls = {"em": 0, "sina": 0}
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot_em",
+        lambda: calls.__setitem__("em", calls["em"] + 1) or (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot",
+        lambda: calls.__setitem__("sina", calls["sina"] + 1) or _sina_realtime_frame(),
+    )
+    states = AKShareProvider().get_current_risk_states(
+        CurrentRiskStatesRequest(symbols=("600519.SH", "000001.SZ"), as_of=now.date())
+    )
+    assert calls == {"em": 1, "sina": 1}
+    assert {state.source for state in states} == {"akshare:stock_zh_a_spot"}
+
+
+def test_current_risk_provider_rejects_historical_request_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(provider_module, "_system_shanghai_now", lambda: now)
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot_em",
+        lambda: (_ for _ in ()).throw(AssertionError("network must not run")),
+    )
+    with pytest.raises(ProviderNotSupportedError):
+        AKShareProvider().get_current_risk_states(
+            CurrentRiskStatesRequest(symbols=("600519.SH",), as_of=date(2026, 9, 1))
+        )
+
+
+def test_current_risk_provider_does_not_fallback_for_primary_data_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(provider_module, "_system_shanghai_now", lambda: now)
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot_em",
+        lambda: _realtime_frame().drop(columns=["名称"]),
+    )
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot",
+        lambda: (_ for _ in ()).throw(AssertionError("fallback must not run")),
+    )
+    with pytest.raises(ProviderDataError):
+        AKShareProvider().get_current_risk_states(
+            CurrentRiskStatesRequest(symbols=("600519.SH",), as_of=now.date())
+        )

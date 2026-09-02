@@ -24,6 +24,8 @@ def test_collection_has_no_concrete_network_or_ui_dependencies() -> None:
 
 
 def test_collector_has_no_hidden_clock() -> None:
-    content = (Path(__file__).parents[2] / "src" / "stock_selector" / "collection" / "daily.py").read_text(encoding="utf-8")
-    assert "date.today" not in content
-    assert "datetime.now" not in content
+    root = Path(__file__).parents[2] / "src" / "stock_selector" / "collection"
+    for path in (root / "daily.py", root / "risk.py"):
+        content = path.read_text(encoding="utf-8")
+        assert "date.today" not in content
+        assert "datetime.now" not in content

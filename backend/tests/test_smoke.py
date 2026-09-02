@@ -2,10 +2,20 @@
 
 import subprocess
 import sys
+from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+import pytest
 
 import stock_selector
+import stock_selector.cli as cli_module
 from stock_selector.cli import build_parser, main
+from stock_selector.collection import CollectionError
+from stock_selector.config import AppPaths, Settings
+from stock_selector.models import Board, Exchange, Instrument
+from stock_selector.storage import LocalMarketRepository
 
 
 def run_module(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -115,6 +125,178 @@ def test_realtime_cli_rejects_full_market_persistence_before_runtime_access(
 ) -> None:  # type: ignore[no-untyped-def]
     assert main(["realtime", "capture", "--all-market", "--persist"]) == 2
     assert "--persist requires one or more --symbol" in capsys.readouterr().err
+
+
+def test_risk_cli_parser_is_current_day_only() -> None:
+    arguments = build_parser().parse_args(["risk", "collect-current"])
+    assert arguments.risk_command == "collect-current"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["risk", "collect-current", "--as-of", "2026-09-02"])
+
+
+def test_risk_cli_composes_structural_scope_and_collects_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    current_at = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    captured: dict[str, object] = {}
+    original_from_project_root = AppPaths.from_project_root
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            captured["initialized"] = True
+
+    class FakeUniverseService:
+        def __init__(self, repository: object, settings: object) -> None:
+            captured["universe_dependencies"] = (repository, settings)
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["structural_as_of"] = as_of
+            return SimpleNamespace(members=("000001.SZ", "600519.SH"))
+
+    class FakeCollector:
+        def __init__(self, provider: object, repository: object) -> None:
+            captured["collector_dependencies"] = (provider, repository)
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=current_at.date(),
+                requested_symbols=("000001.SZ", "600519.SH"),
+                states_received=2,
+                states_persisted=2,
+                st_members=0,
+                suspended_members=1,
+                delisting_period_members=0,
+                source="fake:risk",
+                observed_at=current_at,
+            )
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
+    monkeypatch.setattr("stock_selector.collection.CurrentRiskStateCollector", FakeCollector)
+
+    assert main(["risk", "collect-current"]) == 0
+    assert captured["initialized"] is True
+    assert captured["structural_as_of"] == current_at.date()
+    assert captured["request"].symbols == ("000001.SZ", "600519.SH")
+    assert captured["request"].as_of == current_at.date()
+    assert "Risk coverage: 100%" in capsys.readouterr().out
+
+
+def test_risk_cli_uses_cdr_filtered_members_from_real_structural_universe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    current_at = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    captured: dict[str, object] = {}
+    original_from_project_root = AppPaths.from_project_root
+
+    class SeededRepository(LocalMarketRepository):
+        def initialize(self) -> None:
+            super().initialize()
+            self.save_instruments(
+                (
+                    Instrument(
+                        symbol="688001.SH",
+                        name="STAR A 股",
+                        exchange=Exchange.SSE,
+                        board=Board.STAR,
+                        listing_date=date(2020, 1, 1),
+                    ),
+                    Instrument(
+                        symbol="689009.SH",
+                        name="STAR CDR",
+                        exchange=Exchange.SSE,
+                        board=Board.STAR,
+                        listing_date=date(2020, 1, 1),
+                    ),
+                )
+            )
+
+    class FakeCollector:
+        def __init__(self, _provider: object, _repository: object) -> None:
+            return None
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=current_at.date(),
+                requested_symbols=("688001.SH",),
+                states_received=1,
+                states_persisted=1,
+                st_members=0,
+                suspended_members=0,
+                delisting_period_members=0,
+                source="fake:risk",
+                observed_at=current_at,
+            )
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
+    )
+    monkeypatch.setattr(
+        "stock_selector.storage.LocalMarketRepository", SeededRepository
+    )
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
+    monkeypatch.setattr("stock_selector.collection.CurrentRiskStateCollector", FakeCollector)
+
+    assert main(["risk", "collect-current"]) == 0
+    assert captured["request"].symbols == ("688001.SH",)
+
+
+def test_risk_cli_expected_failure_and_missing_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original_from_project_root = AppPaths.from_project_root
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+    class FailingUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            raise CollectionError("expected offline failure")
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FailingUniverseService)
+
+    assert main(["risk", "collect-current"]) == 1
+    assert "Risk collection error: expected offline failure" in capsys.readouterr().err
+    assert main(["risk"]) == 2
+    assert "risk subcommand is required" in capsys.readouterr().err
 
 
 def test_config_check() -> None:
