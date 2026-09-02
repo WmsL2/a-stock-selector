@@ -385,6 +385,30 @@ def test_get_realtime_quotes_falls_back_to_sina_on_connection_failure(
     ]
 
 
+def test_realtime_sina_fallback_retains_partial_optional_ohlc_quotes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live-like zero-sentinel row must not invalidate the entire fallback snapshot."""
+    partial = _sina_realtime_frame()
+    partial.loc[0, "代码"] = "sh600929"
+    partial.loc[0, "最新价"] = 6.04
+    partial.loc[0, ["今开", "最高", "最低"]] = 0
+    partial.loc[0, "昨收"] = 6.04
+    monkeypatch.setattr(
+        provider_module.ak,
+        "stock_zh_a_spot_em",
+        lambda: (_ for _ in ()).throw(RuntimeError("Eastmoney offline")),
+    )
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot", lambda: partial)
+
+    quotes = AKShareProvider().get_realtime_quotes(RealtimeQuotesRequest())
+
+    assert [quote.symbol for quote in quotes] == ["000001.SZ", "600929.SH"]
+    quote = next(quote for quote in quotes if quote.symbol == "600929.SH")
+    assert quote.source == "akshare:stock_zh_a_spot"
+    assert quote.open is quote.high is quote.low is None
+
+
 def test_get_realtime_quotes_does_not_fallback_for_primary_data_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

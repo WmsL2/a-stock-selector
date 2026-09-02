@@ -146,6 +146,16 @@ def to_optional_float(value: object) -> float | None:
     return numeric
 
 
+def to_optional_positive_quote_price(value: object) -> float | None:
+    """Normalize provider zero sentinels for optional realtime price fields only."""
+    numeric = to_optional_float(value)
+    if numeric is None or numeric == 0:
+        return None
+    if numeric < 0:
+        raise _data_error("realtime_quote_price", "optional quote price must be positive")
+    return numeric
+
+
 def lots_to_shares(value: object, *, required: bool) -> float | None:
     """Convert AKShare lot volume to internal shares using one lot equals 100 shares."""
     lots = to_optional_float(value)
@@ -280,10 +290,10 @@ def map_realtime_quotes(
                 RealtimeQuote(
                     symbol=symbol,
                     price=price,
-                    open=to_optional_float(row["今开"]),
-                    high=to_optional_float(row["最高"]),
-                    low=to_optional_float(row["最低"]),
-                    prev_close=to_optional_float(row["昨收"]),
+                    open=to_optional_positive_quote_price(row["今开"]),
+                    high=to_optional_positive_quote_price(row["最高"]),
+                    low=to_optional_positive_quote_price(row["最低"]),
+                    prev_close=to_optional_positive_quote_price(row["昨收"]),
                     volume=lots_to_shares(row["成交量"], required=False),
                     amount=to_optional_float(row["成交额"]),
                     change_pct=to_optional_float(row["涨跌幅"]),
@@ -317,10 +327,10 @@ def map_sina_realtime_quotes(
                 RealtimeQuote(
                     symbol=symbol,
                     price=price,
-                    open=to_optional_float(row["今开"]),
-                    high=to_optional_float(row["最高"]),
-                    low=to_optional_float(row["最低"]),
-                    prev_close=to_optional_float(row["昨收"]),
+                    open=to_optional_positive_quote_price(row["今开"]),
+                    high=to_optional_positive_quote_price(row["最高"]),
+                    low=to_optional_positive_quote_price(row["最低"]),
+                    prev_close=to_optional_positive_quote_price(row["昨收"]),
                     volume=to_optional_float(row["成交量"]),
                     amount=to_optional_float(row["成交额"]),
                     change_pct=to_optional_float(row["涨跌幅"]),

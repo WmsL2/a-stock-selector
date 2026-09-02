@@ -17,6 +17,7 @@ from stock_selector.providers.akshare_mapping import (
     map_sina_realtime_quotes,
     sina_symbol_from_canonical,
     to_optional_float,
+    to_optional_positive_quote_price,
 )
 from stock_selector.providers.errors import ProviderDataError
 
@@ -101,6 +102,23 @@ def test_optional_float_rejects_invalid_nonmissing_values(value: object) -> None
     """Invalid nonmissing cells are provider data errors, not missing values."""
     with pytest.raises(ProviderDataError):
         to_optional_float(value)
+
+
+@pytest.mark.parametrize("value", [None, float("nan"), "-", 0, "0"])
+def test_optional_quote_price_normalizes_only_missing_and_zero_sentinels(value: object) -> None:
+    """Provider zero sentinels become missing before strict RealtimeQuote construction."""
+    assert to_optional_positive_quote_price(value) is None
+
+
+@pytest.mark.parametrize(("value", "expected"), [(12.3, 12.3), ("12.3", 12.3)])
+def test_optional_quote_price_preserves_positive_values(value: object, expected: float) -> None:
+    assert to_optional_positive_quote_price(value) == expected
+
+
+@pytest.mark.parametrize("value", [-1, "-1", "abc", float("inf"), float("-inf")])
+def test_optional_quote_price_rejects_negative_and_malformed_values(value: object) -> None:
+    with pytest.raises(ProviderDataError):
+        to_optional_positive_quote_price(value)
 
 
 def test_lot_volume_converts_to_shares() -> None:
@@ -199,6 +217,48 @@ def test_sina_realtime_mapping_rejects_invalid_values_and_skips_invalid_prices()
     quotes, skipped = map_sina_realtime_quotes(invalid_price, ingested_at)
     assert skipped == 1
     assert [quote.symbol for quote in quotes] == ["000001.SZ"]
+
+
+def test_sina_realtime_mapping_retains_live_partial_ohlc_quote() -> None:
+    """A positive Sina latest price survives zero optional OHLC sentinels."""
+    frame = _sina_frame().iloc[:1].copy()
+    frame.loc[0, "代码"] = "sh600929"
+    frame.loc[0, "最新价"] = 6.04
+    frame.loc[0, ["今开", "最高", "最低"]] = 0
+    frame.loc[0, "昨收"] = 6.04
+    quotes, skipped = map_sina_realtime_quotes(
+        frame, datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    assert skipped == 0
+    assert len(quotes) == 1
+    quote = quotes[0]
+    assert quote.symbol == "600929.SH"
+    assert quote.price == quote.prev_close == 6.04
+    assert quote.open is quote.high is quote.low is None
+
+
+def test_eastmoney_realtime_mapping_normalizes_zero_optional_prices() -> None:
+    """Eastmoney uses the same optional OHLC sentinel mapping as Sina."""
+    frame = pd.DataFrame(
+        {
+            "代码": ["688432"], "最新价": [12.3], "今开": [0], "最高": [0], "最低": [0],
+            "昨收": [0], "成交量": [100], "成交额": [1000], "涨跌幅": [1], "换手率": [1], "量比": [1],
+        }
+    )
+    quotes, skipped = map_realtime_quotes(
+        frame, datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    assert skipped == 0
+    quote = quotes[0]
+    assert quote.price == 12.3
+    assert quote.open is quote.high is quote.low is quote.prev_close is None
+
+
+def test_realtime_mapping_rejects_negative_optional_quote_price() -> None:
+    frame = _sina_frame().copy()
+    frame.loc[0, "今开"] = -1
+    with pytest.raises(ProviderDataError):
+        map_sina_realtime_quotes(frame, datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai")))
 
 
 def test_sina_daily_mapping_preserves_share_volume_and_raw_adjustment() -> None:
