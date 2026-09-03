@@ -61,6 +61,10 @@ class DuckDBCatalog:
         """Return independent coverage aggregates for the Task 09 data domains."""
         return self._run(self._fundamental_count_connection)
 
+    def adjusted_return_counts(self) -> tuple[int, int, date | None, date | None, datetime | None]:
+        """Return PIT return-evidence coverage from its separate view."""
+        return self._run(self._adjusted_return_count_connection)
+
     def _run(self, operation: Callable[[Any], "CatalogResult"]) -> "CatalogResult":
         """Execute one operation with a connection that is always closed."""
         connection = None
@@ -86,6 +90,7 @@ class DuckDBCatalog:
         """Install all external views with typed empty views where no data exists."""
         instrument_path = self._processed_data_dir / "instruments" / "instruments.parquet"
         daily_glob = self._processed_data_dir / "daily_bars" / "*.parquet"
+        adjusted_returns_glob = self._processed_data_dir / "adjusted_returns" / "*.parquet"
         realtime_glob = self._processed_data_dir / "realtime_quotes" / "**" / "*.parquet"
         risk_glob = self._processed_data_dir / "risk_states" / "**" / "*.parquet"
         financial_glob = self._processed_data_dir / "fundamentals" / "*.parquet"
@@ -106,6 +111,14 @@ class DuckDBCatalog:
             _duckdb_path(daily_glob),
             "symbol VARCHAR, trade_date DATE, adjustment VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, "
             "close DOUBLE, volume DOUBLE, amount DOUBLE, source VARCHAR",
+        )
+        self._replace_view(
+            connection,
+            "adjusted_daily_returns",
+            any((self._processed_data_dir / "adjusted_returns").glob("*.parquet")),
+            _duckdb_path(adjusted_returns_glob),
+            "symbol VARCHAR, trade_date DATE, previous_trade_date DATE, return_fraction DOUBLE, "
+            "adjustment VARCHAR, observed_at TIMESTAMPTZ, source VARCHAR",
         )
         self._replace_view(
             connection,
@@ -240,6 +253,23 @@ class DuckDBCatalog:
             datetime.fromisoformat(latest_valuation) if latest_valuation is not None else None,
             int(industry_rows),
             int(industry_symbols),
+        )
+
+    @staticmethod
+    def _adjusted_return_count_connection(
+        connection: Any,
+    ) -> tuple[int, int, date | None, date | None, datetime | None]:
+        rows, symbols, earliest, latest, observed_at = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT symbol), CAST(MIN(trade_date) AS VARCHAR), "
+            "CAST(MAX(trade_date) AS VARCHAR), CAST(MAX(observed_at) AS VARCHAR) "
+            "FROM adjusted_daily_returns"
+        ).fetchone()
+        return (
+            int(rows),
+            int(symbols),
+            date.fromisoformat(earliest) if earliest is not None else None,
+            date.fromisoformat(latest) if latest is not None else None,
+            datetime.fromisoformat(observed_at) if observed_at is not None else None,
         )
 
 

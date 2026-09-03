@@ -1,14 +1,14 @@
 """Realtime snapshot and architecture-boundary tests for the repository."""
 
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from stock_selector.config.paths import AppPaths
-from stock_selector.models import RealtimeQuote
+from stock_selector.models import AdjustedDailyReturn, AdjustmentType, RealtimeQuote
 from stock_selector.storage import LocalMarketRepository, StorageDataError
 
 
@@ -72,3 +72,30 @@ def test_storage_package_never_imports_network_or_ui_clients() -> None:
     for path in storage_root.glob("*.py"):
         content = path.read_text(encoding="utf-8")
         assert not any(token in content for token in forbidden), path
+
+
+def test_adjusted_returns_are_revision_safe_and_pit_selected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    at = datetime(2026, 8, 30, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    original = AdjustedDailyReturn(
+        symbol="600519.SH", trade_date=date(2026, 8, 28), previous_trade_date=date(2026, 8, 27),
+        return_fraction=0.01, adjustment=AdjustmentType.HFQ, observed_at=at, source="test"
+    )
+    revision = original.model_copy(update={"return_fraction": 0.02, "observed_at": at + timedelta(days=1)})
+    repository.upsert_adjusted_daily_returns((original, revision))
+    assert repository.load_latest_adjusted_daily_returns_as_of("600519.SH", at) == (original,)
+    assert repository.load_latest_adjusted_daily_returns_as_of("600519.SH", at + timedelta(days=1)) == (revision,)
+    assert repository.get_adjusted_return_stats().rows == 2
+
+
+def test_adjusted_return_pit_blocks_future_backfill_and_is_idempotent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    observed = datetime(2026, 9, 3, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    historical = AdjustedDailyReturn(
+        symbol="600519.SH", trade_date=date(2025, 1, 2), previous_trade_date=date(2025, 1, 1),
+        return_fraction=0.01, adjustment=AdjustmentType.HFQ, observed_at=observed, source="test"
+    )
+    repository.upsert_adjusted_daily_returns((historical,))
+    repository.upsert_adjusted_daily_returns((historical,))
+    assert repository.load_latest_adjusted_daily_returns_as_of("600519.SH", datetime(2025, 1, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai"))) == ()
+    assert len(repository.load_adjusted_daily_returns("600519.SH")) == 1

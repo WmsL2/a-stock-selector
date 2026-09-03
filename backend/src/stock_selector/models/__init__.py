@@ -13,6 +13,7 @@ from stock_selector.models.instruments import (
     SecurityStatus,
 )
 from stock_selector.models.market import (
+    AdjustedDailyReturn,
     AdjustmentType,
     DailyBar,
     MinuteBar,
@@ -27,6 +28,7 @@ from stock_selector.models.selection import (
 )
 
 __all__ = [
+    "AdjustedDailyReturn",
     "AdjustmentType",
     "Board",
     "DailyBar",

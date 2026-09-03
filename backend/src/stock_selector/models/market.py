@@ -77,6 +77,50 @@ class DailyBar(DomainModel):
         return self
 
 
+class AdjustedDailyReturn(DomainModel):
+    """One HFQ-derived daily return revision observed at a concrete provider instant."""
+
+    symbol: str
+    trade_date: date
+    previous_trade_date: date
+    return_fraction: float
+    adjustment: AdjustmentType
+    observed_at: datetime
+    source: str
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_canonical_symbol(cls, value: str) -> str:
+        return validate_symbol(value)
+
+    @field_validator("return_fraction")
+    @classmethod
+    def validate_return_fraction(cls, value: float) -> float:
+        finite = ensure_finite_float(value, "return_fraction")
+        assert finite is not None
+        if finite <= -1:
+            raise ValueError("return_fraction must be greater than -1")
+        return finite
+
+    @field_validator("observed_at")
+    @classmethod
+    def validate_observed_at(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "observed_at")
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        return ensure_nonempty_string(value, "source")
+
+    @model_validator(mode="after")
+    def validate_return_evidence(self) -> "AdjustedDailyReturn":
+        if self.previous_trade_date >= self.trade_date:
+            raise ValueError("previous_trade_date must precede trade_date")
+        if self.adjustment is not AdjustmentType.HFQ:
+            raise ValueError("adjusted daily returns require HFQ adjustment")
+        return self
+
+
 class MinuteBar(DomainModel):
     """One timezone-aware intraday OHLCV record."""
 

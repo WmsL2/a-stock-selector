@@ -2,6 +2,7 @@
 
 from stock_selector.providers.akshare_provider import AKShareProvider
 from stock_selector.providers.base import (
+    AdjustedDailyReturnProvider,
     CurrentRiskStateProvider,
     DailyMarketDataProvider,
     FundamentalDataProvider,
@@ -18,6 +19,7 @@ from stock_selector.providers.errors import (
     ProviderNotSupportedError,
 )
 from stock_selector.providers.requests import (
+    AdjustedDailyReturnsRequest,
     CurrentRiskStatesRequest,
     DailyBarsRequest,
     FinancialRecordsRequest,
@@ -29,6 +31,8 @@ from stock_selector.providers.requests import (
 
 __all__ = [
     "AKShareProvider",
+    "AdjustedDailyReturnProvider",
+    "AdjustedDailyReturnsRequest",
     "CurrentRiskStateProvider",
     "CurrentRiskStatesRequest",
     "DailyBarsRequest",

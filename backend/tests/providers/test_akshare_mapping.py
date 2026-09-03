@@ -11,9 +11,11 @@ from stock_selector.providers.akshare_mapping import (
     canonical_symbol_from_akshare_code,
     canonical_symbol_from_sina_code,
     lots_to_shares,
+    map_adjusted_daily_returns,
     map_current_risk_states,
     map_realtime_quotes,
     map_sh_instruments,
+    map_sina_adjusted_daily_returns,
     map_sina_current_risk_states,
     map_sina_daily_bars,
     map_sina_realtime_quotes,
@@ -22,6 +24,42 @@ from stock_selector.providers.akshare_mapping import (
     to_optional_positive_quote_price,
 )
 from stock_selector.providers.errors import ProviderDataError
+
+
+def test_hfq_return_mapping_uses_only_supplied_hfq_closes() -> None:
+    observed_at = datetime(2026, 9, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    frame = pd.DataFrame({"日期": ["2026-09-01", "2026-09-02", "2026-09-03"], "收盘": [100, 102, 99.96]})
+    records = map_adjusted_daily_returns(frame, "600519.SH", observed_at, source="test:hfq")
+    assert [item.previous_trade_date for item in records] == [date(2026, 9, 1), date(2026, 9, 2)]
+    assert [item.return_fraction for item in records] == pytest.approx([0.02, -0.02])
+    assert all(item.adjustment is AdjustmentType.HFQ and item.observed_at == observed_at for item in records)
+
+
+@pytest.mark.parametrize("frame", [
+    pd.DataFrame({"日期": ["2026-09-01"]}), pd.DataFrame({"收盘": [1]}),
+    pd.DataFrame({"日期": ["2026-09-01", "2026-09-01"], "收盘": [1, 2]}),
+    pd.DataFrame({"日期": ["2026-09-01"], "收盘": [0]}),
+    pd.DataFrame({"日期": ["2026-09-01"], "收盘": [float("nan")]}),
+])
+def test_hfq_mapping_rejects_bad_data(frame: pd.DataFrame) -> None:
+    with pytest.raises(ProviderDataError):
+        map_adjusted_daily_returns(frame, "600519.SH", datetime(2026, 9, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai")), source="test:hfq")
+
+
+def test_hfq_mapping_accepts_empty_primary_and_sina_frames() -> None:
+    observed_at = datetime(2026, 9, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert map_adjusted_daily_returns(pd.DataFrame(), "600519.SH", observed_at, source="test:hfq") == ()
+    assert map_sina_adjusted_daily_returns(pd.DataFrame(), "600519.SH", observed_at, source="test:hfq") == ()
+
+
+def test_hfq_mapping_applies_completed_day_and_future_guards() -> None:
+    frame = pd.DataFrame({"日期": ["2026-09-02", "2026-09-03"], "收盘": [100, 102]})
+    before = map_adjusted_daily_returns(frame, "600519.SH", datetime(2026, 9, 3, 14, 59, 59, tzinfo=ZoneInfo("Asia/Shanghai")), source="test:hfq")
+    after = map_adjusted_daily_returns(frame, "600519.SH", datetime(2026, 9, 3, 15, 30, tzinfo=ZoneInfo("Asia/Shanghai")), source="test:hfq")
+    assert before == ()
+    assert after[0].trade_date == date(2026, 9, 3)
+    with pytest.raises(ProviderDataError):
+        map_adjusted_daily_returns(pd.DataFrame({"日期": ["2026-09-04"], "收盘": [1]}), "600519.SH", datetime(2026, 9, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai")), source="test:hfq")
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 """Immutable requests and auditable outcomes for bounded daily collection."""
 
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import Field, field_validator, model_validator
@@ -45,6 +45,97 @@ class DailyCollectionStatus(str, Enum):
     SUCCESS = "success"
     EMPTY = "empty"
     FAILED = "failed"
+
+
+class AdjustedReturnCollectionRequest(DomainModel):
+    """Explicit bounded request for separate HFQ daily-return evidence."""
+
+    symbols: tuple[str, ...]
+    start_date: date
+    end_date: date
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value or len(value) > 20:
+            raise ValueError("symbols must contain between 1 and 20 entries")
+        for symbol in value:
+            validate_symbol(symbol)
+        if len(set(value)) != len(value):
+            raise ValueError("symbols must not contain duplicates")
+        return tuple(sorted(value))
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "AdjustedReturnCollectionRequest":
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must not precede start_date")
+        if (self.end_date - self.start_date).days + 1 > 180:
+            raise ValueError("requested range must not exceed 180 calendar days")
+        return self
+
+
+class AdjustedReturnCollectionStatus(str, Enum):
+    SUCCESS = "success"
+    EMPTY = "empty"
+    FAILED = "failed"
+
+
+class AdjustedReturnSymbolResult(DomainModel):
+    symbol: str
+    status: AdjustedReturnCollectionStatus
+    rows_received: int = Field(ge=0)
+    rows_persisted: int = Field(ge=0)
+    source: str | None = None
+    observed_at: datetime | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol_field(cls, value: str) -> str:
+        return validate_symbol(value)
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> "AdjustedReturnSymbolResult":
+        if self.status is AdjustedReturnCollectionStatus.SUCCESS:
+            if not self.rows_received or self.rows_persisted != self.rows_received:
+                raise ValueError("success must persist every received row")
+            if self.error_type is not None or self.error_message is not None:
+                raise ValueError("success cannot contain errors")
+        elif self.status is AdjustedReturnCollectionStatus.EMPTY:
+            if self.rows_received or self.rows_persisted or self.error_type or self.error_message:
+                raise ValueError("empty cannot contain rows or errors")
+        elif self.rows_received or self.rows_persisted or self.error_type is None:
+            raise ValueError("failed requires error type and no persisted rows")
+        return self
+
+
+class AdjustedReturnCollectionReport(DomainModel):
+    requested_symbols: tuple[str, ...]
+    start_date: date
+    end_date: date
+    success_symbols: int = Field(ge=0)
+    empty_symbols: int = Field(ge=0)
+    failed_symbols: int = Field(ge=0)
+    rows_received: int = Field(ge=0)
+    rows_persisted: int = Field(ge=0)
+    results: tuple[AdjustedReturnSymbolResult, ...]
+
+    @model_validator(mode="after")
+    def validate_report(self) -> "AdjustedReturnCollectionReport":
+        if tuple(item.symbol for item in self.results) != self.requested_symbols:
+            raise ValueError("results must preserve requested symbol order")
+        if self.success_symbols != sum(item.status is AdjustedReturnCollectionStatus.SUCCESS for item in self.results):
+            raise ValueError("success count must match results")
+        if self.empty_symbols != sum(item.status is AdjustedReturnCollectionStatus.EMPTY for item in self.results):
+            raise ValueError("empty count must match results")
+        if self.failed_symbols != sum(item.status is AdjustedReturnCollectionStatus.FAILED for item in self.results):
+            raise ValueError("failure count must match results")
+        if self.rows_received != sum(item.rows_received for item in self.results):
+            raise ValueError("received rows must match results")
+        if self.rows_persisted != sum(item.rows_persisted for item in self.results):
+            raise ValueError("persisted rows must match results")
+        return self
 
 
 class DailySymbolCollectionResult(DomainModel):

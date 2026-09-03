@@ -11,6 +11,7 @@ import pyarrow.parquet as pq
 
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import (
+    AdjustedDailyReturn,
     DailyBar,
     FinancialRecord,
     IndustryRecord,
@@ -41,6 +42,11 @@ class ParquetStore:
     def daily_bars_dir(self) -> Path:
         """Return the selective per-symbol daily-bar directory."""
         return self._paths.processed_data_dir / "daily_bars"
+
+    @property
+    def adjusted_returns_dir(self) -> Path:
+        """Return the separate per-symbol HFQ return-evidence directory."""
+        return self._paths.processed_data_dir / "adjusted_returns"
 
     @property
     def realtime_quotes_dir(self) -> Path:
@@ -75,6 +81,9 @@ class ParquetStore:
     def daily_bars_path(self, symbol: str) -> Path:
         """Return the one-file-per-symbol daily path after prior symbol validation."""
         return self.daily_bars_dir / f"{symbol}.parquet"
+
+    def adjusted_returns_path(self, symbol: str) -> Path:
+        return self.adjusted_returns_dir / f"{symbol}.parquet"
 
     def realtime_snapshot_path(self, ingested_at: datetime) -> Path:
         """Return a Shanghai-date partition and Windows-safe UTC timestamp filename."""
@@ -115,6 +124,17 @@ class ParquetStore:
         if not path.exists():
             return ()
         return codec.table_to_daily_bars(self._read_table(path))
+
+    def write_adjusted_daily_returns(
+        self, symbol: str, records: tuple[AdjustedDailyReturn, ...]
+    ) -> None:
+        self._write_table(
+            codec.adjusted_daily_returns_to_table(records), self.adjusted_returns_path(symbol)
+        )
+
+    def read_adjusted_daily_returns(self, symbol: str) -> tuple[AdjustedDailyReturn, ...]:
+        path = self.adjusted_returns_path(symbol)
+        return () if not path.exists() else codec.table_to_adjusted_daily_returns(self._read_table(path))
 
     def write_realtime_snapshot(self, quotes: tuple[RealtimeQuote, ...]) -> Path:
         """Atomically save one selected snapshot at its deterministic timestamp path."""

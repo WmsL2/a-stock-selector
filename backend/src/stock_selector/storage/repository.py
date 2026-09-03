@@ -7,6 +7,8 @@ from pathlib import Path
 
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
     DailyBar,
     FinancialRecord,
     IndustryRecord,
@@ -48,6 +50,17 @@ class StorageStats:
     disk_usage_bytes: int
 
 
+@dataclass(frozen=True)
+class AdjustedReturnStorageStats:
+    """Offline coverage summary for separate HFQ daily-return evidence."""
+
+    rows: int
+    symbols: int
+    earliest_trade_date: date | None
+    latest_trade_date: date | None
+    latest_observed_at: datetime | None
+
+
 class LocalMarketRepository:
     """Persist only explicit domain batches; never fetches or selects market data."""
 
@@ -69,6 +82,7 @@ class LocalMarketRepository:
             for directory in (
                 self._parquet.instruments_dir,
                 self._parquet.daily_bars_dir,
+                self._parquet.adjusted_returns_dir,
                 self._parquet.realtime_quotes_dir,
                 self._parquet.risk_states_dir,
                 self._parquet.financials_dir,
@@ -145,6 +159,79 @@ class LocalMarketRepository:
             if (start_date is None or bar.trade_date >= start_date)
             and (end_date is None or bar.trade_date <= end_date)
         )
+
+    def upsert_adjusted_daily_returns(self, records: tuple[AdjustedDailyReturn, ...]) -> None:
+        """Merge HFQ return revisions by (trade_date, observed_at), never into RAW bars."""
+        self._require_initialized()
+        if not records:
+            return
+        _require_one_symbol(records, "adjusted-return upsert")
+        if any(item.adjustment is not AdjustmentType.HFQ for item in records):
+            raise StorageDataError("adjusted-return upsert requires HFQ evidence")
+        _require_unique_adjusted_return_keys(records, "adjusted-return input")
+        symbol = records[0].symbol
+        existing = self._parquet.read_adjusted_daily_returns(symbol)
+        _require_one_symbol(existing, "persisted adjusted returns", allow_empty=True)
+        _require_unique_adjusted_return_keys(existing, "persisted adjusted returns")
+        if any(item.adjustment is not AdjustmentType.HFQ for item in existing):
+            raise StorageDataError("persisted adjusted returns must be HFQ")
+        merged = {(item.trade_date, item.observed_at): item for item in existing}
+        merged.update({(item.trade_date, item.observed_at): item for item in records})
+        self._parquet.write_adjusted_daily_returns(
+            symbol,
+            tuple(sorted(merged.values(), key=lambda item: (item.trade_date, item.observed_at))),
+        )
+        self._catalog.refresh_views()
+
+    def load_adjusted_daily_returns(
+        self,
+        symbol: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        observed_at_or_before: datetime | None = None,
+    ) -> tuple[AdjustedDailyReturn, ...]:
+        """Load all HFQ revisions optionally visible by an explicit PIT boundary."""
+        self._require_initialized()
+        _validate_storage_symbol(symbol)
+        if start_date is not None and end_date is not None and end_date < start_date:
+            raise StorageDataError("end_date must not precede start_date")
+        records = self._parquet.read_adjusted_daily_returns(symbol)
+        _require_one_symbol(records, "persisted adjusted returns", allow_empty=True)
+        _require_unique_adjusted_return_keys(records, "persisted adjusted returns")
+        return tuple(
+            item
+            for item in sorted(records, key=lambda value: (value.trade_date, value.observed_at))
+            if (start_date is None or item.trade_date >= start_date)
+            and (end_date is None or item.trade_date <= end_date)
+            and (observed_at_or_before is None or item.observed_at <= observed_at_or_before)
+        )
+
+    def load_latest_adjusted_daily_returns_as_of(
+        self,
+        symbol: str,
+        as_of: datetime,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[AdjustedDailyReturn, ...]:
+        """Return one latest visible revision per trade date without future leakage."""
+        visible = self.load_adjusted_daily_returns(
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            observed_at_or_before=as_of,
+        )
+        latest: dict[date, AdjustedDailyReturn] = {}
+        for item in visible:
+            latest[item.trade_date] = item
+        return tuple(latest[trade_date] for trade_date in sorted(latest))
+
+    def get_adjusted_return_stats(self) -> AdjustedReturnStorageStats:
+        """Return offline HFQ return coverage directly from the catalog view."""
+        self._require_initialized()
+        rows, symbols, earliest, latest, observed_at = self._catalog.adjusted_return_counts()
+        return AdjustedReturnStorageStats(rows, symbols, earliest, latest, observed_at)
 
     def save_realtime_snapshot(self, quotes: tuple[RealtimeQuote, ...]) -> Path:
         """Save one caller-selected, internally consistent realtime snapshot."""
@@ -464,7 +551,12 @@ def _require_unique_risk_symbols(
 
 
 def _require_one_symbol(
-    records: tuple[FinancialRecord, ...] | tuple[ValuationRecord, ...] | tuple[IndustryRecord, ...],
+    records: (
+        tuple[AdjustedDailyReturn, ...]
+        | tuple[FinancialRecord, ...]
+        | tuple[ValuationRecord, ...]
+        | tuple[IndustryRecord, ...]
+    ),
     operation: str,
     *,
     allow_empty: bool = False,
@@ -479,6 +571,13 @@ def _require_one_symbol(
 
 def _require_unique_financial_keys(records: tuple[FinancialRecord, ...], operation: str) -> None:
     if len({(item.report_period, item.available_at) for item in records}) != len(records):
+        raise StorageDataError(f"{operation} contains duplicate logical keys")
+
+
+def _require_unique_adjusted_return_keys(
+    records: tuple[AdjustedDailyReturn, ...], operation: str
+) -> None:
+    if len({(item.trade_date, item.observed_at) for item in records}) != len(records):
         raise StorageDataError(f"{operation} contains duplicate logical keys")
 
 

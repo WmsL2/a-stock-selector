@@ -2,14 +2,17 @@
 
 import math
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, time
+from itertools import pairwise
 from numbers import Integral, Real
 from typing import Final
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from pydantic import ValidationError
 
 from stock_selector.models import (
+    AdjustedDailyReturn,
     AdjustmentType,
     Board,
     DailyBar,
@@ -41,6 +44,68 @@ _SINA_DAILY_COLUMNS: Final[tuple[str, ...]] = (
     "volume",
     "amount",
 )
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def map_adjusted_daily_returns(
+    frame: pd.DataFrame, symbol: str, observed_at: datetime, *, source: str
+) -> tuple[AdjustedDailyReturn, ...]:
+    """Map one HFQ close sequence into adjacent, completed-day return observations."""
+    if frame.empty:
+        return ()
+    required = {"日期", "收盘"}
+    if not required.issubset(frame.columns):
+        raise ProviderDataError("akshare", "adjusted_daily_returns", "missing date or close")
+    return _map_adjusted_close_rows(
+        frame.rename(columns={"日期": "date", "收盘": "close"}), symbol, observed_at, source
+    )
+
+
+def map_sina_adjusted_daily_returns(
+    frame: pd.DataFrame, symbol: str, observed_at: datetime, *, source: str
+) -> tuple[AdjustedDailyReturn, ...]:
+    """Map Sina HFQ close sequence with identical completed-day rules."""
+    if frame.empty:
+        return ()
+    required = {"date", "close"}
+    if not required.issubset(frame.columns):
+        raise ProviderDataError("akshare", "adjusted_daily_returns", "missing date or close")
+    return _map_adjusted_close_rows(frame, symbol, observed_at, source)
+
+
+def _map_adjusted_close_rows(
+    frame: pd.DataFrame, symbol: str, observed_at: datetime, source: str
+) -> tuple[AdjustedDailyReturn, ...]:
+    local_now = observed_at.astimezone(_SHANGHAI)
+    rows: list[tuple[date, float]] = []
+    for row in frame[["date", "close"]].to_dict(orient="records"):
+        parsed = pd.to_datetime(row["date"], errors="coerce")
+        value = pd.to_numeric(row["close"], errors="coerce")
+        if pd.isna(parsed) or pd.isna(value) or not math.isfinite(float(value)) or value <= 0:
+            raise ProviderDataError("akshare", "adjusted_daily_returns", "invalid adjusted close")
+        trade_date = parsed.date()
+        if trade_date > local_now.date():
+            raise ProviderDataError("akshare", "adjusted_daily_returns", "future trade date")
+        if trade_date == local_now.date() and local_now.timetz().replace(tzinfo=None) < time(15, 30):
+            continue
+        rows.append((trade_date, float(value)))
+    if len({trade_date for trade_date, _ in rows}) != len(rows):
+        raise ProviderDataError("akshare", "adjusted_daily_returns", "duplicate trade date")
+    rows.sort()
+    return tuple(
+        AdjustedDailyReturn(
+            symbol=symbol,
+            previous_trade_date=previous_date,
+            trade_date=trade_date,
+            return_fraction=close / previous_close - 1,
+            adjustment=AdjustmentType.HFQ,
+            observed_at=observed_at,
+            source=source,
+        )
+        for (previous_date, previous_close), (trade_date, close) in pairwise(rows)
+    )
+
+
 _REALTIME_COLUMNS: Final[tuple[str, ...]] = (
     "代码",
     "最新价",

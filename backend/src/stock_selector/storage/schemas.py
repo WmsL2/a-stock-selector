@@ -30,6 +30,17 @@ DAILY_BAR_SCHEMA = pa.schema(
 )
 
 _UTC_TIMESTAMP = pa.timestamp("us", tz="UTC")
+ADJUSTED_DAILY_RETURN_SCHEMA = pa.schema(
+    [
+        pa.field("symbol", pa.string(), nullable=False),
+        pa.field("trade_date", pa.date32(), nullable=False),
+        pa.field("previous_trade_date", pa.date32(), nullable=False),
+        pa.field("return_fraction", pa.float64(), nullable=False),
+        pa.field("adjustment", pa.string(), nullable=False),
+        pa.field("observed_at", _UTC_TIMESTAMP, nullable=False),
+        pa.field("source", pa.string(), nullable=False),
+    ]
+)
 REALTIME_QUOTE_SCHEMA = pa.schema(
     [
         pa.field("symbol", pa.string(), nullable=False),

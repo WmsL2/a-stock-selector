@@ -45,6 +45,25 @@ class DailyBarsRequest(DomainModel):
         return self
 
 
+class AdjustedDailyReturnsRequest(DomainModel):
+    """Request one finite HFQ adjusted-close window used only for return evidence."""
+
+    symbol: str
+    start_date: date
+    end_date: date
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_canonical_symbol(cls, value: str) -> str:
+        return validate_symbol(value)
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "AdjustedDailyReturnsRequest":
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must not precede start_date")
+        return self
+
+
 class MinuteBarsRequest(DomainModel):
     """Request one symbol's timezone-aware minute bars over a time range."""
 

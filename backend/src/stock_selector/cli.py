@@ -101,6 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
     daily_collect.add_argument(
         "--end", required=True, help="Inclusive end date: YYYY-MM-DD."
     )
+    adjusted_collect = daily_subparsers.add_parser(
+        "collect-adjusted-returns",
+        help="Collect bounded HFQ daily-return evidence into its separate PIT store.",
+    )
+    adjusted_collect.add_argument("--symbols", nargs="+", required=True, help="Canonical symbols.")
+    adjusted_collect.add_argument("--start", required=True, help="Inclusive start date: YYYY-MM-DD.")
+    adjusted_collect.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    daily_subparsers.add_parser("adjusted-status", help="Show offline HFQ return-evidence coverage.")
     realtime_parser = subparsers.add_parser(
         "realtime", help="Inspect local realtime status or capture one snapshot."
     )
@@ -363,6 +371,8 @@ def _run_quality_command(command: str | None) -> int:
 def _run_daily_command(arguments: argparse.Namespace) -> int:
     """Run explicit local status or bounded provider-to-storage daily collection."""
     from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        AdjustedReturnCollectionRequest,
         CollectionError,
         DailyCollectionRequest,
         DailyPriceCollector,
@@ -376,6 +386,9 @@ def _run_daily_command(arguments: argparse.Namespace) -> int:
         if arguments.daily_command == "status":
             _print_daily_status(repository)
             return 0
+        if arguments.daily_command == "adjusted-status":
+            _print_adjusted_return_status(repository)
+            return 0
         if arguments.daily_command == "collect":
             request = DailyCollectionRequest(
                 symbols=tuple(arguments.symbols),
@@ -385,13 +398,24 @@ def _run_daily_command(arguments: argparse.Namespace) -> int:
             report = DailyPriceCollector(AKShareProvider(), repository).collect(request)
             _print_daily_collection_report(report)
             return 1 if report.failed_symbols else 0
+        if arguments.daily_command == "collect-adjusted-returns":
+            adjusted_request = AdjustedReturnCollectionRequest(
+                symbols=tuple(arguments.symbols),
+                start_date=date.fromisoformat(arguments.start),
+                end_date=date.fromisoformat(arguments.end),
+            )
+            results = AdjustedDailyReturnCollector(AKShareProvider(), repository).collect(
+                adjusted_request
+            )
+            _print_adjusted_return_collection_report(adjusted_request, results)
+            return 1 if results.failed_symbols else 0
     except (CollectionError, StorageError) as exc:
         print(f"Daily collection error: {exc}", file=sys.stderr)
         return 1
     except (ValidationError, ValueError) as exc:
         print(f"Daily collection usage error: {exc}", file=sys.stderr)
-        return 2
-    print("A daily subcommand is required: status or collect.", file=sys.stderr)
+        return 1 if arguments.daily_command == "collect-adjusted-returns" else 2
+    print("A daily subcommand is required: status, collect, adjusted-status, or collect-adjusted-returns.", file=sys.stderr)
     return 2
 
 
@@ -920,6 +944,36 @@ def _print_daily_status(repository) -> None:  # type: ignore[no-untyped-def]
     print("Corporate-action adjusted: NO")
     print("Full-market completeness verified: NO")
     print("Trading-calendar gap check applied: NO")
+
+
+def _print_adjusted_return_status(repository) -> None:  # type: ignore[no-untyped-def]
+    """Print only offline coverage of the separate HFQ return-evidence store."""
+    stats = repository.get_adjusted_return_stats()
+    print(f"Stored symbols: {stats.symbols}")
+    print(f"Stored return rows: {stats.rows}")
+    print(f"Earliest trade date: {stats.earliest_trade_date or 'unavailable'}")
+    print(f"Latest trade date: {stats.latest_trade_date or 'unavailable'}")
+    print(f"Latest observed at: {stats.latest_observed_at or 'unavailable'}")
+    print("Adjustment basis: hfq")
+    print("RAW daily bars touched: NO")
+
+
+def _print_adjusted_return_collection_report(request, report) -> None:  # type: ignore[no-untyped-def]
+    print(f"Requested symbols: {len(request.symbols)}")
+    print(f"Date range: {request.start_date.isoformat()} to {request.end_date.isoformat()}")
+    print("Adjustment: hfq")
+    print(f"Success: {report.success_symbols}")
+    print(f"Empty: {report.empty_symbols}")
+    print(f"Failed: {report.failed_symbols}")
+    print(f"Rows received: {report.rows_received}")
+    print(f"Rows persisted: {report.rows_persisted}")
+    for result in report.results:
+        if result.status.value == "success":
+            print(f"{result.symbol} success rows={result.rows_persisted}")
+        elif result.status.value == "empty":
+            print(f"{result.symbol} empty")
+        else:
+            print(f"{result.symbol} failed {result.error_type}: {result.error_message}")
 
 
 def _print_daily_collection_report(report) -> None:  # type: ignore[no-untyped-def]

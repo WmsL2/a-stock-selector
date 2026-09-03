@@ -12,10 +12,76 @@ import pytest
 import stock_selector
 import stock_selector.cli as cli_module
 from stock_selector.cli import build_parser, main
-from stock_selector.collection import CollectionError
+from stock_selector.collection import (
+    AdjustedReturnCollectionReport,
+    AdjustedReturnCollectionRequest,
+    AdjustedReturnCollectionStatus,
+    AdjustedReturnSymbolResult,
+    CollectionError,
+)
 from stock_selector.config import AppPaths, Settings
 from stock_selector.models import Board, Exchange, Instrument
 from stock_selector.storage import LocalMarketRepository
+
+
+def _patch_adjusted_cli(
+    monkeypatch: pytest.MonkeyPatch, *, results: tuple[tuple[str, int, str | None], ...] = ()
+) -> dict[str, object]:
+    """Replace all CLI dependencies with offline recording fakes."""
+    import stock_selector.collection as collection_module
+    import stock_selector.providers as providers_module
+    import stock_selector.storage as storage_module
+
+    captured: dict[str, object] = {"provider": 0, "collector": 0, "requests": []}
+
+    class FakeRepository:
+        def __init__(self, paths: object) -> None:
+            captured["repository"] = paths
+
+        def initialize(self) -> None:
+            captured["initialized"] = True
+
+        def get_adjusted_return_stats(self) -> SimpleNamespace:
+            return SimpleNamespace(symbols=0, rows=0, earliest_trade_date=None, latest_trade_date=None, latest_observed_at=None)
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            captured["provider"] = int(captured["provider"]) + 1
+
+    class FakeCollector:
+        def __init__(self, provider: object, repository: object) -> None:
+            captured["collector"] = int(captured["collector"]) + 1
+
+        def collect(self, request: AdjustedReturnCollectionRequest) -> AdjustedReturnCollectionReport:
+            captured["requests"].append(request)  # type: ignore[union-attr]
+            items = tuple(
+                AdjustedReturnSymbolResult(
+                    symbol=symbol,
+                    status=(
+                        AdjustedReturnCollectionStatus.FAILED if error else
+                        AdjustedReturnCollectionStatus.SUCCESS if rows else
+                        AdjustedReturnCollectionStatus.EMPTY
+                    ),
+                    rows_received=rows,
+                    rows_persisted=rows,
+                    error_type=error,
+                    error_message="offline" if error else None,
+                )
+                for symbol, rows, error in results
+            )
+            return AdjustedReturnCollectionReport(
+                requested_symbols=request.symbols, start_date=request.start_date, end_date=request.end_date,
+                success_symbols=sum(item.status is AdjustedReturnCollectionStatus.SUCCESS for item in items),
+                empty_symbols=sum(item.status is AdjustedReturnCollectionStatus.EMPTY for item in items),
+                failed_symbols=sum(item.status is AdjustedReturnCollectionStatus.FAILED for item in items),
+                rows_received=sum(item.rows_received for item in items),
+                rows_persisted=sum(item.rows_persisted for item in items), results=items,
+            )
+
+    monkeypatch.setattr(storage_module, "LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr(providers_module, "AKShareProvider", FakeProvider)
+    monkeypatch.setattr(collection_module, "AdjustedDailyReturnCollector", FakeCollector)
+    return captured
 
 
 def run_module(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -105,6 +171,56 @@ def test_daily_cli_parser_requires_explicit_symbols_and_range() -> None:
     )
     assert arguments.daily_command == "collect"
     assert arguments.symbols == ["600519.SH"]
+
+
+def test_adjusted_daily_parser_and_valid_collection_are_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed = build_parser().parse_args(["daily", "collect-adjusted-returns", "--symbols", "600519.SH", "000001.SZ", "--start", "2026-05-01", "--end", "2026-09-03"])
+    assert parsed.daily_command == "collect-adjusted-returns"
+    captured = _patch_adjusted_cli(monkeypatch, results=(("000001.SZ", 1, None), ("600519.SH", 0, None)))
+    assert main(["daily", "collect-adjusted-returns", "--symbols", "600519.SH", "000001.SZ", "--start", "2026-05-01", "--end", "2026-09-03"]) == 0
+    assert captured["provider"] == 1 and captured["collector"] == 1
+    request = captured["requests"][0]  # type: ignore[index]
+    assert request.symbols == ("000001.SZ", "600519.SH")
+    assert (request.start_date, request.end_date) == (date(2026, 5, 1), date(2026, 9, 3))
+
+
+@pytest.mark.parametrize(
+    "symbols,start,end",
+    [
+        (["600519.SH"] * 2, "2026-05-01", "2026-09-03"),
+        (["600519"], "2026-05-01", "2026-09-03"),
+        (["600519.SH"], "2026-09-03", "2026-09-02"),
+        ([f"{index:06d}.SZ" for index in range(21)], "2026-05-01", "2026-09-03"),
+        (["600519.SH"], "2026-03-07", "2026-09-03"),
+    ],
+)
+def test_adjusted_daily_invalid_requests_fail_before_provider(monkeypatch: pytest.MonkeyPatch, symbols, start: str, end: str) -> None:  # type: ignore[no-untyped-def]
+    captured = _patch_adjusted_cli(monkeypatch)
+    assert main(["daily", "collect-adjusted-returns", "--symbols", *symbols, "--start", start, "--end", end]) == 1
+    assert captured["provider"] == 0
+
+
+def test_adjusted_daily_20_symbols_and_180_inclusive_days_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    symbols = [f"{index:06d}.SZ" for index in range(20)]
+    captured = _patch_adjusted_cli(monkeypatch, results=tuple((symbol, 0, None) for symbol in symbols))
+    assert main(["daily", "collect-adjusted-returns", "--symbols", *symbols, "--start", "2026-03-08", "--end", "2026-09-03"]) == 0
+    assert captured["provider"] == 1
+
+
+def test_adjusted_daily_failed_report_returns_one(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _patch_adjusted_cli(monkeypatch, results=(("000001.SZ", 1, None), ("600519.SH", 0, "ProviderDataError")))
+    assert main(["daily", "collect-adjusted-returns", "--symbols", "000001.SZ", "600519.SH", "--start", "2026-05-01", "--end", "2026-09-03"]) == 1
+    assert "600519.SH failed ProviderDataError" in capsys.readouterr().out
+
+
+def test_adjusted_status_is_offline_and_formats_empty_and_nonempty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    captured = _patch_adjusted_cli(monkeypatch)
+    assert build_parser().parse_args(["daily", "adjusted-status"]).daily_command == "adjusted-status"
+    assert main(["daily", "adjusted-status"]) == 0
+    output = capsys.readouterr().out
+    assert "Stored symbols: 0" in output and "Latest observed at: unavailable" in output
+    assert "Adjustment basis: hfq" in output and "RAW daily bars touched: NO" in output
+    assert captured["provider"] == 0 and captured["collector"] == 0
 
 
 def test_realtime_cli_parser_makes_scope_and_persistence_explicit() -> None:

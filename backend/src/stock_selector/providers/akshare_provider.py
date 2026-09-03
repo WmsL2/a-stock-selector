@@ -10,6 +10,7 @@ import akshare as ak
 import pandas as pd
 
 from stock_selector.models import (
+    AdjustedDailyReturn,
     AdjustmentType,
     Board,
     DailyBar,
@@ -25,11 +26,13 @@ from stock_selector.providers.akshare_fundamentals_mapping import (
     map_valuation_records,
 )
 from stock_selector.providers.akshare_mapping import (
+    map_adjusted_daily_returns,
     map_bj_instruments,
     map_current_risk_states,
     map_daily_bars,
     map_realtime_quotes,
     map_sh_instruments,
+    map_sina_adjusted_daily_returns,
     map_sina_current_risk_states,
     map_sina_daily_bars,
     map_sina_realtime_quotes,
@@ -37,6 +40,7 @@ from stock_selector.providers.akshare_mapping import (
     sina_symbol_from_canonical,
 )
 from stock_selector.providers.base import (
+    AdjustedDailyReturnProvider,
     CurrentRiskStateProvider,
     DailyMarketDataProvider,
     FundamentalDataProvider,
@@ -51,6 +55,7 @@ from stock_selector.providers.errors import (
     ProviderNotSupportedError,
 )
 from stock_selector.providers.requests import (
+    AdjustedDailyReturnsRequest,
     CurrentRiskStatesRequest,
     DailyBarsRequest,
     FinancialRecordsRequest,
@@ -72,6 +77,7 @@ def _system_shanghai_now() -> datetime:
 class AKShareProvider(
     InstrumentProvider,
     DailyMarketDataProvider,
+    AdjustedDailyReturnProvider,
     RealtimeMarketDataProvider,
     FundamentalDataProvider,
     IndustryDataProvider,
@@ -166,6 +172,73 @@ class AKShareProvider(
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_zh_a_daily", "Sina daily history request failed"
+            ) from exc
+
+    def get_adjusted_daily_returns(
+        self, request: AdjustedDailyReturnsRequest
+    ) -> tuple[AdjustedDailyReturn, ...]:
+        """Fetch HFQ return evidence with Sina used only after primary connection failure."""
+        try:
+            frame = self._fetch_adjusted_daily_em(request)
+        except ProviderConnectionError:
+            _LOGGER.warning("Eastmoney HFQ history unavailable; falling back to Sina")
+            try:
+                sina_symbol = sina_symbol_from_canonical(request.symbol)
+            except ProviderDataError as exc:
+                raise ProviderNotSupportedError(
+                    "akshare", "stock_zh_a_daily", "Sina HFQ fallback supports SH and SZ only"
+                ) from exc
+            try:
+                frame = self._fetch_adjusted_daily_sina(request, sina_symbol)
+            except ProviderConnectionError as fallback_error:
+                raise ProviderConnectionError(
+                    "akshare", "get_adjusted_daily_returns", "primary and fallback unavailable"
+                ) from fallback_error
+            observed_at = _system_shanghai_now()
+            return map_sina_adjusted_daily_returns(
+                frame, request.symbol, observed_at, source="akshare:stock_zh_a_daily:hfq"
+            )
+        observed_at = _system_shanghai_now()
+        return map_adjusted_daily_returns(
+            frame, request.symbol, observed_at, source="akshare:stock_zh_a_hist:hfq"
+        )
+
+    def _fetch_adjusted_daily_em(self, request: AdjustedDailyReturnsRequest) -> pd.DataFrame:
+        """Call Eastmoney exactly once for HFQ close evidence."""
+        raw_code = request.symbol.split(".", maxsplit=1)[0]
+        try:
+            return cast(
+                pd.DataFrame,
+                ak.stock_zh_a_hist(
+                    symbol=raw_code,
+                    period="daily",
+                    start_date=request.start_date.strftime("%Y%m%d"),
+                    end_date=request.end_date.strftime("%Y%m%d"),
+                    adjust="hfq",
+                ),
+            )
+        except Exception as exc:
+            raise ProviderConnectionError(
+                "akshare", "stock_zh_a_hist", "HFQ daily history request failed"
+            ) from exc
+
+    def _fetch_adjusted_daily_sina(
+        self, request: AdjustedDailyReturnsRequest, symbol: str
+    ) -> pd.DataFrame:
+        """Call Sina exactly once only after the Eastmoney connection boundary fails."""
+        try:
+            return cast(
+                pd.DataFrame,
+                ak.stock_zh_a_daily(
+                    symbol=symbol,
+                    start_date=request.start_date.strftime("%Y%m%d"),
+                    end_date=request.end_date.strftime("%Y%m%d"),
+                    adjust="hfq",
+                ),
+            )
+        except Exception as exc:
+            raise ProviderConnectionError(
+                "akshare", "stock_zh_a_daily", "HFQ daily history request failed"
             ) from exc
 
     def get_realtime_quotes(

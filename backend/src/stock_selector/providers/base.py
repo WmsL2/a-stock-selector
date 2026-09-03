@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from pydantic import field_validator
 
 from stock_selector.models import (
+    AdjustedDailyReturn,
     DailyBar,
     FinancialRecord,
     IndustryRecord,
@@ -15,6 +16,7 @@ from stock_selector.models import (
 )
 from stock_selector.models.common import DomainModel, ensure_nonempty_string
 from stock_selector.providers.requests import (
+    AdjustedDailyReturnsRequest,
     CurrentRiskStatesRequest,
     DailyBarsRequest,
     FinancialRecordsRequest,
@@ -66,6 +68,21 @@ class DailyMarketDataProvider(ABC):
     @abstractmethod
     def get_daily_bars(self, request: DailyBarsRequest) -> tuple[DailyBar, ...]:
         """Return one symbol's normalized daily-bar batch."""
+
+
+class AdjustedDailyReturnProvider(ABC):
+    """Capability for revision-aware HFQ adjusted daily return evidence."""
+
+    @property
+    @abstractmethod
+    def info(self) -> ProviderInfo:
+        """Return non-sensitive provider identity."""
+
+    @abstractmethod
+    def get_adjusted_daily_returns(
+        self, request: AdjustedDailyReturnsRequest
+    ) -> tuple[AdjustedDailyReturn, ...]:
+        """Return one symbol's HFQ return observations from the requested close window."""
 
 
 class RealtimeMarketDataProvider(ABC):

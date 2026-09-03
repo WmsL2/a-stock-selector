@@ -1,5 +1,6 @@
 """Explicit bounded daily-price collection primitives."""
 
+from stock_selector.collection.adjusted_returns import AdjustedDailyReturnCollector
 from stock_selector.collection.daily import DailyPriceCollector
 from stock_selector.collection.errors import (
     CollectionDataError,
@@ -13,6 +14,10 @@ from stock_selector.collection.fundamentals import (
     ValuationCollector,
 )
 from stock_selector.collection.models import (
+    AdjustedReturnCollectionReport,
+    AdjustedReturnCollectionRequest,
+    AdjustedReturnCollectionStatus,
+    AdjustedReturnSymbolResult,
     DailyCollectionReport,
     DailyCollectionRequest,
     DailyCollectionStatus,
@@ -39,6 +44,11 @@ from stock_selector.collection.structural_valuation import (
 )
 
 __all__ = [
+    "AdjustedDailyReturnCollector",
+    "AdjustedReturnCollectionReport",
+    "AdjustedReturnCollectionRequest",
+    "AdjustedReturnCollectionStatus",
+    "AdjustedReturnSymbolResult",
     "CollectionDataError",
     "CollectionError",
     "CollectionNotSupportedError",

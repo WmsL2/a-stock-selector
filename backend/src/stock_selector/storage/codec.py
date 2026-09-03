@@ -7,6 +7,7 @@ import pyarrow as pa
 from pydantic import ValidationError
 
 from stock_selector.models import (
+    AdjustedDailyReturn,
     DailyBar,
     FinancialRecord,
     IndustryRecord,
@@ -17,6 +18,7 @@ from stock_selector.models import (
 from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage.errors import StorageDataError
 from stock_selector.storage.schemas import (
+    ADJUSTED_DAILY_RETURN_SCHEMA,
     DAILY_BAR_SCHEMA,
     FINANCIAL_SCHEMA,
     INDUSTRY_SCHEMA,
@@ -25,6 +27,35 @@ from stock_selector.storage.schemas import (
     RISK_STATE_SCHEMA,
     VALUATION_SCHEMA,
 )
+
+
+def adjusted_daily_returns_to_table(records: tuple[AdjustedDailyReturn, ...]) -> pa.Table:
+    """Encode HFQ return evidence while retaining every observed revision."""
+    return _table_from_rows(
+        [
+            {
+                "symbol": item.symbol,
+                "trade_date": item.trade_date,
+                "previous_trade_date": item.previous_trade_date,
+                "return_fraction": item.return_fraction,
+                "adjustment": item.adjustment.value,
+                "observed_at": _to_utc(item.observed_at),
+                "source": item.source,
+            }
+            for item in records
+        ],
+        ADJUSTED_DAILY_RETURN_SCHEMA,
+        "adjusted-daily-return encoding",
+    )
+
+
+def table_to_adjusted_daily_returns(table: pa.Table) -> tuple[AdjustedDailyReturn, ...]:
+    """Decode persisted HFQ return evidence through the domain contract."""
+    _require_schema(table, ADJUSTED_DAILY_RETURN_SCHEMA, "adjusted-daily-return decoding")
+    try:
+        return tuple(AdjustedDailyReturn(**row) for row in table.to_pylist())
+    except (TypeError, ValueError, ValidationError, pa.ArrowException) as exc:
+        raise StorageDataError("adjusted-daily-return domain reconstruction failed") from exc
 
 
 def instruments_to_table(instruments: tuple[Instrument, ...]) -> pa.Table:

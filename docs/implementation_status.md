@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 31 - Structural Valuation Bounded Batch Refresh Foundation
+Task 32 - PIT-Safe Corporate-Action-Adjusted Daily Return Evidence Foundation
 
 ## Status
 
@@ -243,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (617 passed; one third-party TestClient deprecation warning).
+  (649 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (617 passed, 89% coverage).
+  — PASS (649 passed, 90% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -959,6 +959,39 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (617 backend tests; 89% coverage); Ruff, mypy, frontend type
   check, lint, 37 Vitest tests and production build pass. No live provider call or real project
   market-data write was performed.
+
+## Task 32 — PIT-Safe Corporate-Action-Adjusted Daily Return Evidence Foundation (complete)
+
+- HFQ daily return evidence is a separate revision-safe domain and Parquet store under
+  `processed/adjusted_returns`; RAW `DailyBar` storage and all existing factor inputs remain
+  untouched. Each record retains the source, aware `observed_at`, prior trade date and a fraction
+  return, with latest-as-of reads selecting only the newest observation visible at the PIT cutoff.
+- AKShare obtains HFQ closes from Eastmoney once and uses Sina only after that connection boundary
+  fails. Mapping admits only positive finite closes, rejects future/duplicate rows and excludes the
+  local current day before 15:30 Shanghai time. No provider call was performed during development.
+- `daily collect-adjusted-returns --symbols ... --start ... --end ...` is sequential and bounded to
+  20 symbols and 180 calendar days; `daily adjusted-status` is an offline-only coverage read.
+  This capability does not create price series, factor evidence, ranking, API, scheduler or frontend
+  integration.
+
+## Task 32 Verification
+
+- Focused offline regressions — PASS: model contract and separate storage/PIT revision selection;
+  no provider/network call and no real project runtime data write.
+- Canonical root validation — PASS (619 backend tests; 89% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass. No live provider call or real project
+  market-data write was performed.
+
+## Task 32 Fix — Provider, Collector and CLI Regression Closure
+
+- Offline regressions now cover Eastmoney HFQ success, transport-only Sina fallback, invalid-schema
+  no-fallback, both-boundary failures, completed-day and future-date guards, sequential collection,
+  failure isolation, fatal storage writes, invalid provider batches and PIT revision visibility.
+- Operator bounded smoke (not structural or full-market coverage): `600519.SH`, 2026-05-01 through
+  2026-09-03, first run persisted 84 HFQ revisions (exit 0; latest trade date 2026-09-02;
+  observed at 2026-09-03 14:47 +08); second run retained another 84 revision observations (168
+  stored rows; latest observed at 2026-09-03 14:53 +08). RAW daily storage remained one symbol,
+  five rows, adjustment raw.
 
 ## Next Task
 

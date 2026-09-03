@@ -30,6 +30,7 @@ def test_collector_has_no_hidden_clock() -> None:
         root / "risk.py",
         root / "structural_fundamentals.py",
         root / "structural_valuation.py",
+        root / "adjusted_returns.py",
     ):
         content = path.read_text(encoding="utf-8")
         assert "date.today" not in content

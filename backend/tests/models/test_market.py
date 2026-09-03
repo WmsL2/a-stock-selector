@@ -6,7 +6,13 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from stock_selector.models import AdjustmentType, DailyBar, MinuteBar, RealtimeQuote
+from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
+    DailyBar,
+    MinuteBar,
+    RealtimeQuote,
+)
 
 
 def _aware_time() -> datetime:
@@ -54,6 +60,28 @@ def test_daily_bar_requires_and_serializes_explicit_adjustment() -> None:
     with pytest.raises(ValidationError):
         DailyBar(**values)
     assert _daily_bar().model_dump(mode="json")["adjustment"] == "raw"
+
+
+def test_adjusted_daily_return_is_hfq_only_and_pit_safe() -> None:
+    """Return evidence carries a prior completed day and an aware observation instant."""
+    record = AdjustedDailyReturn(
+        symbol="600519.SH",
+        trade_date=date(2026, 1, 2),
+        previous_trade_date=date(2025, 12, 31),
+        return_fraction=0.05,
+        adjustment=AdjustmentType.HFQ,
+        observed_at=_aware_time(),
+        source="test",
+    )
+    assert record.adjustment is AdjustmentType.HFQ
+    for changes in (
+        {"adjustment": AdjustmentType.RAW},
+        {"previous_trade_date": date(2026, 1, 2)},
+        {"return_fraction": -1.0},
+        {"observed_at": _naive_time()},
+    ):
+        with pytest.raises(ValidationError):
+            AdjustedDailyReturn(**{**record.model_dump(), **changes})
 
 
 def test_minute_bar_requires_aware_time_and_valid_vwap() -> None:
