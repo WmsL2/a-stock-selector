@@ -16,6 +16,7 @@ from stock_selector.providers import (
     ProviderDataError,
     ProviderNotSupportedError,
     RealtimeQuotesRequest,
+    ValuationRecordsRequest,
 )
 from stock_selector.providers import akshare_provider as provider_module
 
@@ -81,6 +82,23 @@ def _sina_daily_frame() -> pd.DataFrame:
             "volume": [123_400, 456_700],
             "amount": [1_234_000.0, 4_567_000.0],
         }
+    )
+
+
+def _valuation_frames() -> dict[str, pd.DataFrame]:
+    """Return one complete, mappable Baidu valuation row per required indicator."""
+    return {
+        "市盈率(TTM)": pd.DataFrame({"date": ["2026-09-02"], "value": [10.0]}),
+        "市净率": pd.DataFrame({"date": ["2026-09-02"], "value": [0.5]}),
+        "市现率": pd.DataFrame({"date": ["2026-09-02"], "value": [0.8]}),
+        "总市值": pd.DataFrame({"date": ["2026-09-02"], "value": [2.0]}),
+    }
+
+
+def _valuation_request() -> ValuationRecordsRequest:
+    return ValuationRecordsRequest(
+        symbols=("000001.SZ",),
+        as_of=datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
     )
 
 
@@ -305,6 +323,140 @@ def test_get_daily_bars_rejects_nonraw_adjustment(monkeypatch: pytest.MonkeyPatc
                 adjustment=AdjustmentType.QFQ,
             )
         )
+
+
+def test_get_valuation_records_fetches_all_required_indicators_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _valuation_frames()
+    calls: list[str] = []
+
+    def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
+        assert (symbol, period) == ("000001", "全部")
+        calls.append(indicator)
+        return frames[indicator]
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
+
+    records = AKShareProvider().get_valuation_records(_valuation_request())
+
+    assert calls == ["市盈率(TTM)", "市净率", "市现率", "总市值"]
+    assert len(records) == 1
+    assert (records[0].pe, records[0].pb, records[0].pcf) == (10.0, 0.5, 0.8)
+    assert records[0].total_market_cap == 200_000_000.0
+
+
+def test_get_valuation_records_retries_one_transient_pe_request_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _valuation_frames()
+    calls: list[str] = []
+
+    def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
+        assert (symbol, period) == ("000001", "全部")
+        calls.append(indicator)
+        if indicator == "市盈率(TTM)" and calls.count(indicator) == 1:
+            raise ConnectionError("synthetic connection reset")
+        return frames[indicator]
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
+
+    records = AKShareProvider().get_valuation_records(_valuation_request())
+
+    assert calls == ["市盈率(TTM)", "市盈率(TTM)", "市净率", "市现率", "总市值"]
+    assert len(records) == 1
+    assert records[0].pe == 10.0
+    assert records[0].total_market_cap == 200_000_000.0
+
+
+def test_get_valuation_records_retries_the_failing_indicator_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _valuation_frames()
+    calls: list[str] = []
+
+    def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
+        assert (symbol, period) == ("000001", "全部")
+        calls.append(indicator)
+        if indicator == "市净率" and calls.count(indicator) == 1:
+            raise ConnectionError("synthetic connection reset")
+        return frames[indicator]
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
+
+    records = AKShareProvider().get_valuation_records(_valuation_request())
+
+    assert calls == ["市盈率(TTM)", "市净率", "市净率", "市现率", "总市值"]
+    assert len(records) == 1
+
+
+def test_get_valuation_records_fails_after_two_attempts_without_later_indicators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
+        assert (symbol, period) == ("000001", "全部")
+        calls.append(indicator)
+        raise ConnectionError("synthetic connection reset")
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
+
+    with pytest.raises(ProviderConnectionError, match="市盈率\\(TTM\\).+2 attempts") as error:
+        AKShareProvider().get_valuation_records(_valuation_request())
+
+    assert error.value.operation == "stock_zh_valuation_baidu"
+    assert calls == ["市盈率(TTM)", "市盈率(TTM)"]
+
+
+def test_get_valuation_records_does_not_retry_mapping_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _valuation_frames()
+    frames["市现率"] = frames["市现率"].drop(columns=["value"])
+    calls: list[str] = []
+
+    def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
+        assert (symbol, period) == ("000001", "全部")
+        calls.append(indicator)
+        return frames[indicator]
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
+
+    with pytest.raises(ProviderDataError):
+        AKShareProvider().get_valuation_records(_valuation_request())
+
+    assert calls == ["市盈率(TTM)", "市净率", "市现率", "总市值"]
+
+
+def test_get_valuation_records_retries_each_transient_indicator_at_most_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = _valuation_frames()
+    calls: list[str] = []
+
+    def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
+        assert (symbol, period) == ("000001", "全部")
+        calls.append(indicator)
+        if calls.count(indicator) == 1:
+            raise ConnectionError("synthetic connection reset")
+        return frames[indicator]
+
+    monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
+
+    records = AKShareProvider().get_valuation_records(_valuation_request())
+
+    assert calls == [
+        "市盈率(TTM)",
+        "市盈率(TTM)",
+        "市净率",
+        "市净率",
+        "市现率",
+        "市现率",
+        "总市值",
+        "总市值",
+    ]
+    assert len(records) == 1
 
 
 def test_get_realtime_quotes_maps_snapshot_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:

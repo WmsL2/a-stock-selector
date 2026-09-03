@@ -319,23 +319,45 @@ class AKShareProvider(
             raw_symbol = symbol.split(".", maxsplit=1)[0]
             frames: dict[str, pd.DataFrame] = {}
             for indicator in ("市盈率(TTM)", "市净率", "市现率", "总市值"):
-                try:
-                    frames[indicator] = cast(
-                        pd.DataFrame,
-                        ak.stock_zh_valuation_baidu(
-                            symbol=raw_symbol, indicator=indicator, period="全部"
-                        ),
-                    )
-                except Exception as exc:
-                    raise ProviderConnectionError(
-                        "akshare", "stock_zh_valuation_baidu", "valuation request failed"
-                    ) from exc
+                frames[indicator] = self._fetch_valuation_indicator(raw_symbol, indicator)
             records.extend(
                 item
                 for item in map_valuation_records(frames, symbol)
                 if request.as_of is None or item.as_of <= request.as_of
             )
         return tuple(sorted(records, key=lambda item: (item.symbol, item.as_of)))
+
+    def _fetch_valuation_indicator(
+        self, raw_symbol: str, indicator: str
+    ) -> pd.DataFrame:
+        """Fetch one required valuation indicator with one bounded immediate retry."""
+        try:
+            return cast(
+                pd.DataFrame,
+                ak.stock_zh_valuation_baidu(
+                    symbol=raw_symbol, indicator=indicator, period="全部"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - third-party request boundary
+            _LOGGER.warning(
+                "valuation indicator request failed; retrying once; symbol=%s indicator=%s error=%s",
+                raw_symbol,
+                indicator,
+                type(exc).__name__,
+            )
+        try:
+            return cast(
+                pd.DataFrame,
+                ak.stock_zh_valuation_baidu(
+                    symbol=raw_symbol, indicator=indicator, period="全部"
+                ),
+            )
+        except Exception as exc:
+            raise ProviderConnectionError(
+                "akshare",
+                "stock_zh_valuation_baidu",
+                f"valuation indicator {indicator} request failed after 2 attempts",
+            ) from exc
 
     def get_industry_records(
         self, request: IndustryRecordsRequest

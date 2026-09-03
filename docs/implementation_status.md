@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 30 - Structural Financial + Industry Bounded Batch Refresh Foundation
+Task 31 - Structural Valuation Bounded Batch Refresh Foundation
 
 ## Status
 
@@ -243,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (599 passed; one third-party TestClient deprecation warning).
+  (617 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (599 passed, 89% coverage).
+  — PASS (617 passed, 89% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -328,14 +328,15 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 ## Not Implemented Yet
 
 - Full historical risk-state collection / backfill
-- Full structural valuation batching
-- Full historical / scheduled fundamentals refresh
-- Full-market daily data quality
+- Complete structural Financial / Industry operational coverage
+- Complete structural Valuation operational coverage
+- Historical backfill orchestration
+- Full-market DailyBar history
 - Long-no-trade detection
-- Full-market scheduled daily refresh
+- Scheduler / automated refresh
 - Trading-calendar gap detection
-- Corporate-action-adjusted return series
-- PIT-safe adjusted price-series ingestion
+- Provider retry / rate-limit hardening if live evidence requires it
+- PIT-safe corporate-action-adjusted price series
 - Full historical research dataset
 - CLI runtime command
 - Recurring / polling realtime scanner execution
@@ -347,7 +348,6 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Replay engine
 - Backtest
 - Factor research
-- Scheduler
 - Result caching / single-flight protection
 
 ## Task 14 — Realtime Market Data Foundation (complete)
@@ -893,6 +893,73 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   check, lint, 37 Vitest tests and production build pass. No live provider call or real project
   market-data write was performed.
 
+## Task 31 — Structural Valuation Bounded Batch Refresh Foundation (complete)
+
+- `python -m stock_selector fundamentals collect-structural-valuation --limit N` adds a manual,
+  bounded valuation refresh for current structural members only. `--limit` is mandatory and limited
+  to 1–20 because the unchanged provider retrieves four Baidu valuation indicator frames per
+  selected symbol. The Task30 core-refresh bound remains independently 1–500.
+- Optional `--start-after SYMBOL` continues strictly after the exact current structural-tuple
+  position. The CLI resolves one aware configured-timezone `current_at`, uses its date to build the
+  structural universe, and retains that same full aware instant as valuation `as_of`; this preserves
+  existing 15:30 Asia/Shanghai point-in-time visibility without fabricating today's availability.
+- The command consumes `structural.members`, thereby inheriting Task29 STAR `689xxx` CDR exclusion
+  without Task31-specific symbol rules or a risk-eligibility dependency. It runs the existing
+  `ValuationCollector` exactly once per selected symbol, sequentially, and constructs one provider
+  only after a nonempty batch has been selected.
+- Per-symbol reports retain `success`, `empty` or `failed` and row counts. Provider/data failures
+  remain isolated so later symbols continue; storage infrastructure failures abort. A zero-remaining
+  cursor is a successful no-op that constructs no provider. There is no skip-existing optimization:
+  idempotent repository upserts make repeated refreshes safe.
+- The post-run audit uses the existing `load_latest_valuation_as_of` PIT API for each selected
+  symbol, so `valuation_available_after_run` represents actually usable local evidence rather than
+  merely this batch's success count. Existing PE/PB/PCF/market-cap mapping, four-indicator provider
+  contract and negative-PE preservation are unchanged.
+- Financial, Industry, DailyBar, realtime, risk, factor/scoring, API, frontend, scheduler,
+  concurrency and retry/backoff behavior remain outside Task31. The targeted
+  `fundamentals collect-valuation --symbols ... --as-of ...` command remains unchanged.
+
+## Task 31 Verification
+
+- Focused offline regressions — PASS: 7 structural-valuation tests, 15 fundamentals tests,
+  45 collection tests, 4 fundamentals-repository tests, 13 universe tests, 25 CLI smoke tests and
+  28 relevant provider/mapping tests cover exact cursor limits, one timestamp/provider, CDR
+  inheritance, failure isolation, storage aborts, idempotence, negative PE and 15:30 PIT visibility.
+- Canonical root validation — PASS (610 backend tests; 89% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass. No live provider call or real project
+  market-data write was performed.
+
+## Task 31 Fix — Valuation Indicator Transient Connection Retry Hardening
+
+- Operator live evidence before this fix showed `000001.SZ` and the exact continuation member
+  `000002.SZ` each as valuation `failed`, with zero rows persisted and no change to the existing
+  local valuation state. The four-indicator complete-symbol and no-partial-write contract therefore
+  remained intact on the observed failures.
+- A direct diagnostic using installed AKShare 1.18.94 found a transient `ConnectionError` with
+  Windows `ConnectionResetError 10054` for `000001` 市盈率(TTM), while 市净率, 市现率 and 总市值
+  returned valid history, including 2026-09-02 observations. The root cause was one transient raw
+  indicator transport failure amplified by the intentional complete-symbol provider contract.
+- `AKShareProvider` now retries only the exact failed raw Baidu indicator request once, immediately.
+  The normal symbol path remains four calls; one transient indicator is five calls; each indicator
+  can make at most two attempts. A final second failure remains a chained
+  `ProviderConnectionError` naming the exhausted indicator, and later indicators are not fetched.
+- Mapping remains outside the retry boundary and cannot trigger more raw calls. Four indicator
+  completeness, no partial valuation persistence, PIT visibility, negative PE, Task31 limit 1–20,
+  Task30 limit 1–500 and existing collection orchestration are unchanged. No generic retry,
+  backoff, sleep, direct requests dependency or provider endpoint substitution was added.
+- This is an offline regression-validated fix only. No post-fix live valuation smoke has been run
+  or claimed by Codex.
+
+## Task 31 Fix Verification
+
+- Focused offline regressions — PASS: 27 AKShare provider tests, 116 provider-suite tests,
+  8 structural-valuation tests, 46 collection tests, 15 fundamentals tests, 4 fundamentals-storage
+  tests and 25 CLI smoke tests. They prove normal four-call flow, local PE/PB retry, fatal second
+  attempt, mapping no-retry, four transient indicators at eight calls and no partial persistence.
+- Canonical root validation — PASS (617 backend tests; 89% coverage); Ruff, mypy, frontend type
+  check, lint, 37 Vitest tests and production build pass. No live provider call or real project
+  market-data write was performed.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -927,3 +994,4 @@ No subsequent task has been started.
 - Task 28: Realtime Partial Quote Mapping Hardening (complete).
 - Task 29: Full-Market Current-Day Risk State Collection & Persistence (complete).
 - Task 30: Structural Financial + Industry Bounded Batch Refresh Foundation (complete).
+- Task 31: Structural Valuation Bounded Batch Refresh Foundation (complete).

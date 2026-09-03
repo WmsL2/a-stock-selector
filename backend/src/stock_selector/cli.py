@@ -17,7 +17,10 @@ from stock_selector.config.loader import ConfigurationError, load_settings
 from stock_selector.config.paths import AppPaths
 
 if TYPE_CHECKING:
-    from stock_selector.collection import StructuralCoreCollectionReport
+    from stock_selector.collection import (
+        StructuralCoreCollectionReport,
+        StructuralValuationCollectionReport,
+    )
     from stock_selector.providers.akshare_provider import AKShareProvider
     from stock_selector.providers.requests import (
         DailyBarsRequest,
@@ -175,6 +178,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     structural_core_collect.add_argument("--limit", type=int, required=True)
     structural_core_collect.add_argument("--start-after")
+    structural_valuation_collect = fundamentals_subparsers.add_parser(
+        "collect-structural-valuation",
+        help="Refresh one tightly bounded current structural valuation batch.",
+    )
+    structural_valuation_collect.add_argument("--limit", type=int, required=True)
+    structural_valuation_collect.add_argument("--start-after")
     return parser
 
 
@@ -494,6 +503,8 @@ def _run_fundamentals_command(arguments: argparse.Namespace) -> int:
         return _run_structural_core_fundamentals_command(
             arguments.limit, arguments.start_after
         )
+    if arguments.fundamentals_command == "collect-structural-valuation":
+        return _run_structural_valuation_command(arguments.limit, arguments.start_after)
     from stock_selector.collection import (
         FinancialCollector,
         IndustryCollector,
@@ -567,8 +578,8 @@ def _run_structural_core_fundamentals_command(
         structural = CurrentUniverseService(repository, settings).build_current(
             current_at.date()
         )
-        symbols, has_more = _select_structural_core_batch(
-            structural.members, limit, start_after
+        symbols, has_more = _select_structural_batch(
+            structural.members, limit, start_after, maximum_limit=500
         )
         if not symbols:
             print("No remaining structural members.")
@@ -601,14 +612,14 @@ def _run_structural_core_fundamentals_command(
     return 1 if report.financial_failed or report.industry_failed else 0
 
 
-def _select_structural_core_batch(
-    members: tuple[str, ...], limit: int, start_after: str | None
+def _select_structural_batch(
+    members: tuple[str, ...], limit: int, start_after: str | None, *, maximum_limit: int
 ) -> tuple[tuple[str, ...], bool]:
     """Select a bounded continuation batch by exact structural-tuple position."""
     from stock_selector.models.common import validate_symbol
 
-    if not 1 <= limit <= 500:
-        raise ValueError("--limit must be between 1 and 500")
+    if not 1 <= limit <= maximum_limit:
+        raise ValueError(f"--limit must be between 1 and {maximum_limit}")
     start_index = 0
     if start_after is not None:
         validate_symbol(start_after)
@@ -618,6 +629,62 @@ def _select_structural_core_batch(
             raise ValueError("--start-after must be a current structural member") from exc
     symbols = members[start_index : start_index + limit]
     return symbols, start_index + len(symbols) < len(members)
+
+
+def _run_structural_valuation_command(limit: int, start_after: str | None) -> int:
+    """Refresh one tightly bounded structural valuation batch without hidden retries."""
+    from stock_selector.collection import (
+        CollectionDataError,
+        CollectionError,
+        StructuralValuationCollectionRequest,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        if not 1 <= limit <= 20:
+            raise ValueError("--limit must be between 1 and 20")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        symbols, has_more = _select_structural_batch(
+            structural.members, limit, start_after, maximum_limit=20
+        )
+        if not symbols:
+            print("No remaining structural members.")
+            print("Next start-after: complete")
+            return 0
+        provider = AKShareProvider()
+        report = StructuralValuationCollector(
+            ValuationCollector(provider, repository), repository
+        ).collect(
+            StructuralValuationCollectionRequest(
+                symbols=symbols,
+                as_of=current_at,
+                has_more_structural_members=has_more,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural valuation collection error: {exc}", file=sys.stderr)
+        return 1
+    _print_structural_valuation_collection_report(report, len(structural.members))
+    return 1 if report.failed_symbols else 0
 
 
 def _print_fundamentals_status(repository) -> None:  # type: ignore[no-untyped-def]
@@ -677,6 +744,29 @@ def _print_structural_core_collection_report(
     )
     print(f"Financial failed: {financial_failed or 'none'}")
     print(f"Industry failed: {industry_failed or 'none'}")
+
+
+def _print_structural_valuation_collection_report(
+    report: StructuralValuationCollectionReport, structural_members: int
+) -> None:
+    """Print compact sequential valuation-refresh audit data without success-row spam."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {structural_members}")
+    print(f"Batch requested: {len(report.requested_symbols)}")
+    print(f"Batch first: {report.batch_first_symbol}")
+    print(f"Batch last: {report.batch_last_symbol}")
+    print(
+        "Valuation success / empty / failed: "
+        f"{report.success_symbols} / {report.empty_symbols} / {report.failed_symbols}"
+    )
+    print(f"Valuation rows persisted: {report.rows_persisted}")
+    print(f"Valuation available after run: {report.valuation_available_after_run}")
+    print(f"Has more: {'YES' if report.has_more_structural_members else 'NO'}")
+    print(f"Next start-after: {report.next_start_after or 'complete'}")
+    failed = ", ".join(
+        result.symbol for result in report.results if result.status.value == "failed"
+    )
+    print(f"Valuation failed: {failed or 'none'}")
 
 
 def _provider_label(provider: AKShareProvider) -> str:

@@ -299,27 +299,36 @@ def test_risk_cli_expected_failure_and_missing_subcommand(
     assert "risk subcommand is required" in capsys.readouterr().err
 
 
-def test_structural_core_batch_selection_validates_limit_and_exact_cursor_position() -> None:
+def test_structural_batch_selection_reuses_exact_cursor_with_distinct_task_limits() -> None:
     members = ("000001.SZ", "000002.SZ", "000004.SZ", "600000.SH")
-    assert cli_module._select_structural_core_batch(members, 1, None) == (
+    assert cli_module._select_structural_batch(members, 1, None, maximum_limit=500) == (
         ("000001.SZ",),
         True,
     )
-    assert cli_module._select_structural_core_batch(members, 2, "000002.SZ") == (
+    assert cli_module._select_structural_batch(
+        members, 2, "000002.SZ", maximum_limit=20
+    ) == (
         ("000004.SZ", "600000.SH"),
         False,
     )
-    assert cli_module._select_structural_core_batch(members, 500, "000004.SZ") == (
+    assert cli_module._select_structural_batch(
+        members, 500, "000004.SZ", maximum_limit=500
+    ) == (
         ("600000.SH",),
         False,
     )
-    assert cli_module._select_structural_core_batch(members, 1, "600000.SH") == ((), False)
+    assert cli_module._select_structural_batch(
+        members, 1, "600000.SH", maximum_limit=20
+    ) == ((), False)
     for limit in (0, -1, 501):
         with pytest.raises(ValueError, match="--limit"):
-            cli_module._select_structural_core_batch(members, limit, None)
+            cli_module._select_structural_batch(members, limit, None, maximum_limit=500)
+    for limit in (0, -1, 21):
+        with pytest.raises(ValueError, match="--limit"):
+            cli_module._select_structural_batch(members, limit, None, maximum_limit=20)
     for cursor in ("600000", "600001.SH"):
         with pytest.raises(ValueError):
-            cli_module._select_structural_core_batch(members, 1, cursor)
+            cli_module._select_structural_batch(members, 1, cursor, maximum_limit=20)
 
 
 def test_structural_core_cli_parser_is_bounded_and_current_only() -> None:
@@ -338,6 +347,32 @@ def test_structural_core_cli_parser_is_bounded_and_current_only() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(
             ["fundamentals", "collect-structural-core", "--limit", "1", "--as-of", "2026-09-02"]
+        )
+
+
+def test_structural_valuation_cli_parser_is_tightly_bounded_and_current_only() -> None:
+    arguments = build_parser().parse_args(
+        [
+            "fundamentals",
+            "collect-structural-valuation",
+            "--limit",
+            "20",
+            "--start-after",
+            "000002.SZ",
+        ]
+    )
+    assert arguments.limit == 20
+    assert arguments.start_after == "000002.SZ"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [
+                "fundamentals",
+                "collect-structural-valuation",
+                "--limit",
+                "1",
+                "--as-of",
+                "2026-09-02",
+            ]
         )
 
 
@@ -538,6 +573,197 @@ def test_structural_core_cli_reports_domain_failure_and_skips_end_or_bad_cursor_
     ) == 1
     assert "current structural member" in capsys.readouterr().err
     assert provider_calls == 1
+
+
+def test_structural_valuation_cli_uses_one_current_timestamp_and_one_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    current_at = datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    captured: dict[str, object] = {}
+    original_from_project_root = AppPaths.from_project_root
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            captured["initialized"] = True
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["structural_as_of"] = as_of
+            return SimpleNamespace(
+                members=("000001.SZ", "000002.SZ", "600000.SH", "600519.SH")
+            )
+
+    class FakeValuationCollector:
+        def __init__(self, *dependencies: object) -> None:
+            captured["collector_dependencies"] = dependencies
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=current_at,
+                requested_symbols=("000002.SZ", "600000.SH"),
+                success_symbols=2,
+                empty_symbols=0,
+                failed_symbols=0,
+                rows_persisted=2,
+                valuation_available_after_run=2,
+                results=(),
+                batch_first_symbol="000002.SZ",
+                batch_last_symbol="600000.SH",
+                has_more_structural_members=True,
+                next_start_after="600000.SH",
+            )
+
+    provider_calls = 0
+
+    def provider_factory() -> str:
+        nonlocal provider_calls
+        provider_calls += 1
+        return "provider"
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _timezone: current_at)
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralValuationCollector", FakeValuationCollector
+    )
+
+    assert main(
+        [
+            "fundamentals",
+            "collect-structural-valuation",
+            "--limit",
+            "2",
+            "--start-after",
+            "000001.SZ",
+        ]
+    ) == 0
+    assert provider_calls == 1
+    assert captured["structural_as_of"] == current_at.date()
+    assert captured["request"].symbols == ("000002.SZ", "600000.SH")
+    assert captured["request"].as_of is current_at
+    assert "Valuation available after run: 2" in capsys.readouterr().out
+
+
+def test_structural_valuation_cli_exit_and_no_provider_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original_from_project_root = AppPaths.from_project_root
+    outcome = "failed"
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            return SimpleNamespace(members=("688001.SH",))
+
+    class FakeValuationCollector:
+        def __init__(self, *_dependencies: object) -> None:
+            return None
+
+        def collect(self, _request: object) -> SimpleNamespace:
+            failed = int(outcome == "failed")
+            empty = int(outcome == "empty")
+            return SimpleNamespace(
+                as_of=datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
+                requested_symbols=("688001.SH",),
+                success_symbols=0,
+                empty_symbols=empty,
+                failed_symbols=failed,
+                rows_persisted=0,
+                valuation_available_after_run=0,
+                results=(
+                    SimpleNamespace(
+                        symbol="688001.SH",
+                        status=SimpleNamespace(value=outcome),
+                    ),
+                ),
+                batch_first_symbol="688001.SH",
+                batch_last_symbol="688001.SH",
+                has_more_structural_members=False,
+                next_start_after=None,
+            )
+
+    provider_calls = 0
+
+    def provider_factory() -> str:
+        nonlocal provider_calls
+        provider_calls += 1
+        return "provider"
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralValuationCollector", FakeValuationCollector
+    )
+
+    assert main(["fundamentals", "collect-structural-valuation", "--limit", "1"]) == 1
+    assert "Valuation failed: 688001.SH" in capsys.readouterr().out
+    assert provider_calls == 1
+    outcome = "empty"
+    assert main(["fundamentals", "collect-structural-valuation", "--limit", "1"]) == 0
+    assert provider_calls == 2
+    assert main(
+        [
+            "fundamentals",
+            "collect-structural-valuation",
+            "--limit",
+            "1",
+            "--start-after",
+            "688001.SH",
+        ]
+    ) == 0
+    assert "No remaining structural members." in capsys.readouterr().out
+    assert provider_calls == 2
+    for limit in (0, -1, 21):
+        assert main(
+            ["fundamentals", "collect-structural-valuation", "--limit", str(limit)]
+        ) == 1
+    assert main(
+        [
+            "fundamentals",
+            "collect-structural-valuation",
+            "--limit",
+            "1",
+            "--start-after",
+            "600000.SH",
+        ]
+    ) == 1
+    assert provider_calls == 2
 
 
 def test_config_check() -> None:

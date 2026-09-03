@@ -30,6 +30,13 @@ from stock_selector.collection.structural_fundamentals import (
     StructuralCoreFundamentalsCollector,
     StructuralCoreSymbolResult,
 )
+from stock_selector.collection.structural_valuation import (
+    StructuralValuationCollectionReport,
+    StructuralValuationCollectionRequest,
+    StructuralValuationCollector,
+    StructuralValuationStatus,
+    StructuralValuationSymbolResult,
+)
 
 __all__ = [
     "CollectionDataError",
@@ -51,5 +58,10 @@ __all__ = [
     "StructuralCoreDomainStatus",
     "StructuralCoreFundamentalsCollector",
     "StructuralCoreSymbolResult",
+    "StructuralValuationCollectionReport",
+    "StructuralValuationCollectionRequest",
+    "StructuralValuationCollector",
+    "StructuralValuationStatus",
+    "StructuralValuationSymbolResult",
     "ValuationCollector",
 ]
