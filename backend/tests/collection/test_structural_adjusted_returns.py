@@ -42,11 +42,16 @@ def _request(**changes: Any) -> StructuralAdjustedReturnCollectionRequest:
     return StructuralAdjustedReturnCollectionRequest(**values)
 
 
-def _result(symbol: str, status: AdjustedReturnCollectionStatus) -> AdjustedReturnSymbolResult:
+def _result(
+    symbol: str,
+    status: AdjustedReturnCollectionStatus,
+    *,
+    observed_at: datetime | None = None,
+) -> AdjustedReturnSymbolResult:
     if status is AdjustedReturnCollectionStatus.SUCCESS:
         return AdjustedReturnSymbolResult(
             symbol=symbol, status=status, rows_received=1, rows_persisted=1,
-            source="fake", observed_at=_AS_OF,
+            source="fake", observed_at=observed_at or _AS_OF,
         )
     if status is AdjustedReturnCollectionStatus.EMPTY:
         return AdjustedReturnSymbolResult(symbol=symbol, status=status, rows_received=0, rows_persisted=0)
@@ -57,13 +62,23 @@ def _result(symbol: str, status: AdjustedReturnCollectionStatus) -> AdjustedRetu
 
 
 class FakeAdjustedCollector:
-    def __init__(self, statuses: tuple[AdjustedReturnCollectionStatus, ...]) -> None:
+    def __init__(
+        self,
+        statuses: tuple[AdjustedReturnCollectionStatus, ...],
+        observed_at: tuple[datetime | None, ...] | None = None,
+    ) -> None:
         self.statuses = statuses
+        self.observed_at = observed_at or (None,) * len(statuses)
         self.requests: list[Any] = []
 
     def collect(self, request: Any) -> AdjustedReturnCollectionReport:
         self.requests.append(request)
-        results = tuple(_result(symbol, status) for symbol, status in zip(request.symbols, self.statuses, strict=True))
+        results = tuple(
+            _result(symbol, status, observed_at=observed_at)
+            for symbol, status, observed_at in zip(
+                request.symbols, self.statuses, self.observed_at, strict=True
+            )
+        )
         return AdjustedReturnCollectionReport(
             requested_symbols=request.symbols, start_date=request.start_date, end_date=request.end_date,
             success_symbols=sum(item.status is AdjustedReturnCollectionStatus.SUCCESS for item in results),
@@ -102,10 +117,10 @@ def test_structural_adjusted_return_wraps_once_preserves_outcomes_and_audits_pit
     # point-in-time-visible evidence audit.  In particular, failed and empty
     # refreshes must not hide previously persisted evidence.
     for record in (
-        _return("000001.SZ"),
+        _return("000001.SZ", observed_at=_AS_OF + timedelta(seconds=2)),
         _return("000002.SZ"),
         _return("600519.SH"),
-        _return("000003.SZ", observed_at=_AS_OF + timedelta(minutes=1)),
+        _return("000003.SZ", observed_at=_AS_OF + timedelta(seconds=3)),
     ):
         repository.upsert_adjusted_daily_returns((record,))
     wrapped = FakeAdjustedCollector((
@@ -113,7 +128,7 @@ def test_structural_adjusted_return_wraps_once_preserves_outcomes_and_audits_pit
         AdjustedReturnCollectionStatus.FAILED,
         AdjustedReturnCollectionStatus.EMPTY,
         AdjustedReturnCollectionStatus.EMPTY,
-    ))
+    ), (_AS_OF + timedelta(seconds=2), None, None, None))
 
     report = StructuralAdjustedReturnCollector(wrapped, repository).collect(_request(symbols=symbols))
 
@@ -121,19 +136,42 @@ def test_structural_adjusted_return_wraps_once_preserves_outcomes_and_audits_pit
     assert wrapped.requests[0].symbols == symbols
     assert (wrapped.requests[0].end_date - wrapped.requests[0].start_date).days + 1 == 180
     assert (report.success_symbols, report.empty_symbols, report.failed_symbols) == (1, 2, 1)
+    assert report.availability_as_of == _AS_OF + timedelta(seconds=2)
     # 000002 failed and 600519 was empty during this refresh but both retain
     # PIT-visible evidence; 000003 has only future-observed evidence.
     assert report.adjusted_return_available_after_run == 3
     assert report.next_start_after == "600519.SH"
 
 
+def test_structural_adjusted_return_uses_latest_result_timestamp_for_availability(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    observed_at = (
+        _AS_OF + timedelta(seconds=1),
+        _AS_OF + timedelta(seconds=3),
+        _AS_OF + timedelta(seconds=2),
+    )
+    for symbol, timestamp in zip(_SYMBOLS, observed_at, strict=True):
+        repository.upsert_adjusted_daily_returns((_return(symbol, observed_at=timestamp),))
+
+    report = StructuralAdjustedReturnCollector(
+        FakeAdjustedCollector((AdjustedReturnCollectionStatus.SUCCESS,) * 3, observed_at), repository
+    ).collect(_request())
+
+    assert report.availability_as_of == _AS_OF + timedelta(seconds=3)
+    assert report.adjusted_return_available_after_run == 3
+
+
 def test_structural_adjusted_return_report_and_wrapped_metadata_rejections(tmp_path: Any) -> None:
     repository = _repository(tmp_path)
     wrapped = FakeAdjustedCollector((AdjustedReturnCollectionStatus.EMPTY,) * 3)
     report = StructuralAdjustedReturnCollector(wrapped, repository).collect(_request())
+    assert report.availability_as_of == _AS_OF
     for update in (
         {"results": tuple(reversed(report.results))}, {"rows_received": 1},
         {"batch_first_symbol": "000002.SZ"}, {"next_start_after": None},
+        {"availability_as_of": _AS_OF.replace(tzinfo=None)},
+        {"availability_as_of": _AS_OF - timedelta(seconds=1)},
+        {"availability_as_of": _AS_OF + timedelta(seconds=1)},
     ):
         with pytest.raises(ValidationError):
             type(report)(**(report.model_dump() | update))

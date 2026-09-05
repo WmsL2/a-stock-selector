@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from stock_selector.models.common import (
     DomainModel,
@@ -61,6 +61,7 @@ class StructuralAdjustedReturnCollectionReport(DomainModel):
     """Audit report for one sequential structural adjusted-return batch."""
 
     as_of: datetime
+    availability_as_of: datetime
     start_date: date
     end_date: date
     requested_symbols: tuple[str, ...]
@@ -76,10 +77,10 @@ class StructuralAdjustedReturnCollectionReport(DomainModel):
     has_more_structural_members: bool
     next_start_after: str | None = None
 
-    @field_validator("as_of")
+    @field_validator("as_of", "availability_as_of")
     @classmethod
-    def validate_as_of(cls, value: datetime) -> datetime:
-        return ensure_aware_datetime(value, "as_of")
+    def validate_timestamp(cls, value: datetime, info: ValidationInfo) -> datetime:
+        return ensure_aware_datetime(value, info.field_name)
 
     @field_validator("requested_symbols")
     @classmethod
@@ -101,6 +102,12 @@ class StructuralAdjustedReturnCollectionReport(DomainModel):
     def validate_report(self) -> "StructuralAdjustedReturnCollectionReport":
         if self.end_date < self.start_date or self.end_date > self.as_of.date():
             raise ValueError("report date range must be valid for as_of")
+        observed_at = tuple(
+            item.observed_at for item in self.results if item.observed_at is not None
+        )
+        expected_availability_as_of = max((self.as_of, *observed_at))
+        if self.availability_as_of != expected_availability_as_of:
+            raise ValueError("availability_as_of must match the deterministic result cutoff")
         if tuple(item.symbol for item in self.results) != self.requested_symbols:
             raise ValueError("results must retain requested symbol order")
         expected = len(self.requested_symbols)
@@ -153,16 +160,20 @@ class StructuralAdjustedReturnCollector:
             )
         )
         _validate_base_report(base, request)
+        availability_as_of = max(
+            (request.as_of, *(item.observed_at for item in base.results if item.observed_at is not None))
+        )
         available = sum(
             bool(
                 self._repository.load_latest_adjusted_daily_returns_as_of(
-                    symbol, request.as_of
+                    symbol, availability_as_of
                 )
             )
             for symbol in request.symbols
         )
         return StructuralAdjustedReturnCollectionReport(
             as_of=request.as_of,
+            availability_as_of=availability_as_of,
             start_date=request.start_date,
             end_date=request.end_date,
             requested_symbols=request.symbols,

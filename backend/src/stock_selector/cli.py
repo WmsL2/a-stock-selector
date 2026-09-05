@@ -867,6 +867,7 @@ def _print_structural_adjusted_return_collection_report(
 ) -> None:
     """Print the complete bounded adjusted-return batch audit in request order."""
     print(f"As of: {report.as_of.isoformat()}")
+    print(f"Availability as of: {report.availability_as_of.isoformat()}")
     print(f"Start date: {report.start_date.isoformat()}")
     print(f"End date: {report.end_date.isoformat()}")
     print(f"Structural members: {structural_members}")

@@ -1036,15 +1036,28 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - The command resolves one configured-timezone instant, requests the inclusive current 180-calendar
   day window (`end_date=current_at.date()`, `start_date=end_date-179`) and remains sequential with
   no retries. Provider/data failures are isolated per selected symbol; storage failures abort.
-- Its post-run availability count means only PIT-visible adjusted-return evidence exists. It does
-  not claim Momentum/LowVol readiness, does not risk-gate scope, does not change factor membership,
-  and adds no scheduler, parallelism, full-universe loop, provider capability, API or frontend work.
+- `as_of` remains the one current instant that snapshots structural scope and the current 180-day
+  window. The separately reported `availability_as_of` is deterministically derived as the maximum
+  of `as_of` and every non-null wrapped collection-result `observed_at`; post-run availability is
+  PIT-visible evidence at that cutoff. It does not claim Momentum/LowVol readiness, does not
+  risk-gate scope, does not change factor membership, and adds no scheduler, parallelism,
+  full-universe loop, provider capability, API or frontend work.
 
 ## Task 34 Verification
 
 - Focused offline regressions — PASS: 4 structural adjusted-return collector contract tests, 7
   existing adjusted-return collection tests, 58 collection tests and 36 CLI smoke tests.
 - Canonical root validation — PASS (669 backend tests; 90% coverage); Ruff, mypy, frontend type
+  check, lint, 38 Vitest tests and production build pass. No live provider call or real project
+  runtime data write was performed.
+
+## Task 34 Availability Fix Verification
+
+- Post-run adjusted-return availability now uses the deterministic `availability_as_of` result
+  cutoff rather than the earlier request snapshot. Regressions cover fresh successful evidence,
+  multiple result timestamps, failed/empty symbols with existing evidence, future evidence, and
+  report cutoff validation; no additional clock read is introduced.
+- Canonical root validation — PASS (672 backend tests; 90% coverage); Ruff, mypy, frontend type
   check, lint, 38 Vitest tests and production build pass. No live provider call or real project
   runtime data write was performed.
 

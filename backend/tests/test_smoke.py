@@ -535,6 +535,7 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
             captured["request"] = request
             return SimpleNamespace(
                 as_of=current_at, start_date=current_at.date() - timedelta(days=179), end_date=current_at.date(),
+                availability_as_of=current_at,
                 requested_symbols=("000002.SZ", "600519.SH"), success_symbols=1, empty_symbols=1,
                 failed_symbols=0, rows_received=1, rows_persisted=1, adjusted_return_available_after_run=1,
                 results=(), batch_first_symbol="000002.SZ", batch_last_symbol="600519.SH",
@@ -563,7 +564,9 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
     assert request.end_date == current_at.date()
     assert request.start_date == request.end_date - timedelta(days=179)
     assert (request.end_date - request.start_date).days + 1 == 180
-    assert "Next start-after: complete" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert f"Availability as of: {current_at.isoformat()}" in output
+    assert "Next start-after: complete" in output
 
 
 def test_structural_adjusted_return_cli_validates_before_provider_and_exit_statuses(
@@ -607,6 +610,7 @@ def test_structural_adjusted_return_cli_validates_before_provider_and_exit_statu
             collector_calls += 1
             return SimpleNamespace(
                 as_of=current_at, start_date=current_at.date() - timedelta(days=179), end_date=current_at.date(),
+                availability_as_of=current_at,
                 requested_symbols=request.symbols, success_symbols=1, empty_symbols=1 - failed_symbols,
                 failed_symbols=failed_symbols, rows_received=1, rows_persisted=1,
                 adjusted_return_available_after_run=1, results=(), batch_first_symbol=request.symbols[0],
@@ -663,6 +667,7 @@ def test_structural_adjusted_return_cli_reports_next_cursor_for_partial_batch(
             captured["request"] = request
             return SimpleNamespace(
                 as_of=current_at, start_date=request.start_date, end_date=request.end_date,
+                availability_as_of=current_at,
                 requested_symbols=request.symbols, success_symbols=2, empty_symbols=0, failed_symbols=0,
                 rows_received=2, rows_persisted=2, adjusted_return_available_after_run=2, results=(),
                 batch_first_symbol="000001.SZ", batch_last_symbol="000002.SZ",
