@@ -2,7 +2,7 @@
 
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -490,6 +490,71 @@ def test_structural_valuation_cli_parser_is_tightly_bounded_and_current_only() -
                 "2026-09-02",
             ]
         )
+
+
+def test_structural_adjusted_return_cli_parser_is_tightly_bounded_and_current_only() -> None:
+    arguments = build_parser().parse_args(
+        ["daily", "collect-structural-adjusted-returns", "--limit", "20", "--start-after", "000002.SZ"]
+    )
+    assert arguments.limit == 20
+    assert arguments.start_after == "000002.SZ"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["daily", "collect-structural-adjusted-returns", "--limit", "1", "--symbols", "000001.SZ"]
+        )
+
+
+def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    current_at = datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    captured: dict[str, object] = {}
+    original_from_project_root = AppPaths.from_project_root
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["as_of"] = as_of
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ", "600519.SH"))
+
+    class FakeStructuralCollector:
+        def __init__(self, *_dependencies: object) -> None:
+            return None
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=current_at, start_date=current_at.date() - timedelta(days=179), end_date=current_at.date(),
+                requested_symbols=("000002.SZ", "600519.SH"), success_symbols=1, empty_symbols=1,
+                failed_symbols=0, rows_received=1, rows_persisted=1, adjusted_return_available_after_run=1,
+                results=(), batch_first_symbol="000002.SZ", batch_last_symbol="600519.SH",
+                has_more_structural_members=False, next_start_after=None,
+            )
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
+    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", FakeStructuralCollector)
+
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2", "--start-after", "000001.SZ"]) == 0
+    request = captured["request"]
+    assert captured["as_of"] == current_at.date()
+    assert request.symbols == ("000002.SZ", "600519.SH")
+    assert request.as_of is current_at
+    assert (request.end_date - request.start_date).days + 1 == 180
+    assert "Next start-after: complete" in capsys.readouterr().out
 
 
 def test_structural_core_cli_uses_bounded_structural_scope_once(

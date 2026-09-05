@@ -28,6 +28,11 @@ from stock_selector.collection.risk import (
     CurrentRiskCollectionResult,
     CurrentRiskStateCollector,
 )
+from stock_selector.collection.structural_adjusted_returns import (
+    StructuralAdjustedReturnCollectionReport,
+    StructuralAdjustedReturnCollectionRequest,
+    StructuralAdjustedReturnCollector,
+)
 from stock_selector.collection.structural_fundamentals import (
     StructuralCoreCollectionReport,
     StructuralCoreCollectionRequest,
@@ -63,6 +68,9 @@ __all__ = [
     "FinancialCollector",
     "FundamentalsCollectionReport",
     "IndustryCollector",
+    "StructuralAdjustedReturnCollectionReport",
+    "StructuralAdjustedReturnCollectionRequest",
+    "StructuralAdjustedReturnCollector",
     "StructuralCoreCollectionReport",
     "StructuralCoreCollectionRequest",
     "StructuralCoreDomainStatus",

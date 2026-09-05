@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections import Counter
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -18,6 +18,7 @@ from stock_selector.config.paths import AppPaths
 
 if TYPE_CHECKING:
     from stock_selector.collection import (
+        StructuralAdjustedReturnCollectionReport,
         StructuralCoreCollectionReport,
         StructuralValuationCollectionReport,
     )
@@ -108,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     adjusted_collect.add_argument("--symbols", nargs="+", required=True, help="Canonical symbols.")
     adjusted_collect.add_argument("--start", required=True, help="Inclusive start date: YYYY-MM-DD.")
     adjusted_collect.add_argument("--end", required=True, help="Inclusive end date: YYYY-MM-DD.")
+    structural_adjusted_collect = daily_subparsers.add_parser(
+        "collect-structural-adjusted-returns",
+        help="Refresh one bounded current structural HFQ adjusted-return batch.",
+    )
+    structural_adjusted_collect.add_argument("--limit", type=int, required=True)
+    structural_adjusted_collect.add_argument("--start-after")
     daily_subparsers.add_parser("adjusted-status", help="Show offline HFQ return-evidence coverage.")
     realtime_parser = subparsers.add_parser(
         "realtime", help="Inspect local realtime status or capture one snapshot."
@@ -370,6 +377,10 @@ def _run_quality_command(command: str | None) -> int:
 
 def _run_daily_command(arguments: argparse.Namespace) -> int:
     """Run explicit local status or bounded provider-to-storage daily collection."""
+    if arguments.daily_command == "collect-structural-adjusted-returns":
+        return _run_structural_adjusted_return_command(
+            arguments.limit, arguments.start_after
+        )
     from stock_selector.collection import (
         AdjustedDailyReturnCollector,
         AdjustedReturnCollectionRequest,
@@ -415,7 +426,7 @@ def _run_daily_command(arguments: argparse.Namespace) -> int:
     except (ValidationError, ValueError) as exc:
         print(f"Daily collection usage error: {exc}", file=sys.stderr)
         return 1 if arguments.daily_command == "collect-adjusted-returns" else 2
-    print("A daily subcommand is required: status, collect, adjusted-status, or collect-adjusted-returns.", file=sys.stderr)
+    print("A daily subcommand is required: status, collect, adjusted-status, collect-adjusted-returns, or collect-structural-adjusted-returns.", file=sys.stderr)
     return 2
 
 
@@ -711,6 +722,64 @@ def _run_structural_valuation_command(limit: int, start_after: str | None) -> in
     return 1 if report.failed_symbols else 0
 
 
+def _run_structural_adjusted_return_command(limit: int, start_after: str | None) -> int:
+    """Refresh one current structural batch through the existing Task32 collector."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        StructuralAdjustedReturnCollectionRequest,
+        StructuralAdjustedReturnCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        if not 1 <= limit <= 20:
+            raise ValueError("--limit must be between 1 and 20")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        symbols, has_more = _select_structural_batch(
+            structural.members, limit, start_after, maximum_limit=20
+        )
+        if not symbols:
+            print("No remaining structural members.")
+            print("Next start-after: complete")
+            return 0
+        end_date = current_at.date()
+        report = StructuralAdjustedReturnCollector(
+            AdjustedDailyReturnCollector(AKShareProvider(), repository), repository
+        ).collect(
+            StructuralAdjustedReturnCollectionRequest(
+                symbols=symbols,
+                as_of=current_at,
+                start_date=end_date - timedelta(days=179),
+                end_date=end_date,
+                has_more_structural_members=has_more,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural adjusted-return collection error: {exc}", file=sys.stderr)
+        return 1
+    _print_structural_adjusted_return_collection_report(report, len(structural.members))
+    return 1 if report.failed_symbols else 0
+
+
 def _print_fundamentals_status(repository) -> None:  # type: ignore[no-untyped-def]
     """Print only local coverage and conservative capability declarations."""
     stats = repository.get_stats()
@@ -791,6 +860,37 @@ def _print_structural_valuation_collection_report(
         result.symbol for result in report.results if result.status.value == "failed"
     )
     print(f"Valuation failed: {failed or 'none'}")
+
+
+def _print_structural_adjusted_return_collection_report(
+    report: StructuralAdjustedReturnCollectionReport, structural_members: int
+) -> None:
+    """Print the complete bounded adjusted-return batch audit in request order."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Start date: {report.start_date.isoformat()}")
+    print(f"End date: {report.end_date.isoformat()}")
+    print(f"Structural members: {structural_members}")
+    print(f"Batch requested: {len(report.requested_symbols)}")
+    print(f"Success / empty / failed: {report.success_symbols} / {report.empty_symbols} / {report.failed_symbols}")
+    print(f"Rows received: {report.rows_received}")
+    print(f"Rows persisted: {report.rows_persisted}")
+    print(f"Adjusted return available after run: {report.adjusted_return_available_after_run}")
+    print(f"Batch first: {report.batch_first_symbol}")
+    print(f"Batch last: {report.batch_last_symbol}")
+    print(f"Has more: {'YES' if report.has_more_structural_members else 'NO'}")
+    print(f"Next start-after: {report.next_start_after or 'complete'}")
+    for result in report.results:
+        detail = (
+            f"source={result.source} observed_at={result.observed_at.isoformat()}"
+            if result.source is not None and result.observed_at is not None
+            else f"error={result.error_type}: {result.error_message}"
+            if result.error_type is not None
+            else ""
+        )
+        print(
+            f"{result.symbol} {result.status.value} received={result.rows_received} "
+            f"persisted={result.rows_persisted} {detail}".rstrip()
+        )
 
 
 def _provider_label(provider: AKShareProvider) -> str:

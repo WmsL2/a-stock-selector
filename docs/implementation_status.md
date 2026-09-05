@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 33 - PIT-Safe Adjusted Return Factor Integration
+Task 34 - Structural Adjusted Return Bounded Batch Refresh
 
 ## Status
 
@@ -243,10 +243,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (660 passed; one third-party TestClient deprecation warning).
+  (669 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (660 passed, 90% coverage).
+  — PASS (669 passed, 90% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
@@ -1027,6 +1027,27 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   return window. Earlier suffix records cannot contaminate a 20d or 60d component source; mixed
   sources within the selected window yield `null` provenance without affecting the numeric factor.
 
+## Task 34 — Structural Adjusted Return Bounded Batch Refresh (complete)
+
+- `python -m stock_selector daily collect-structural-adjusted-returns --limit N` refreshes one
+  current structural-universe batch through the existing Task32 HFQ provider, collector and
+  revision-safe storage path. `--limit` is mandatory (1–20), and optional `--start-after SYMBOL`
+  continues strictly after that exact current structural member.
+- The command resolves one configured-timezone instant, requests the inclusive current 180-calendar
+  day window (`end_date=current_at.date()`, `start_date=end_date-179`) and remains sequential with
+  no retries. Provider/data failures are isolated per selected symbol; storage failures abort.
+- Its post-run availability count means only PIT-visible adjusted-return evidence exists. It does
+  not claim Momentum/LowVol readiness, does not risk-gate scope, does not change factor membership,
+  and adds no scheduler, parallelism, full-universe loop, provider capability, API or frontend work.
+
+## Task 34 Verification
+
+- Focused offline regressions — PASS: 4 structural adjusted-return collector contract tests, 7
+  existing adjusted-return collection tests, 58 collection tests and 36 CLI smoke tests.
+- Canonical root validation — PASS (669 backend tests; 90% coverage); Ruff, mypy, frontend type
+  check, lint, 38 Vitest tests and production build pass. No live provider call or real project
+  runtime data write was performed.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -1064,3 +1085,4 @@ No subsequent task has been started.
 - Task 31: Structural Valuation Bounded Batch Refresh Foundation (complete).
 - Task 32: PIT-Safe Corporate-Action-Adjusted Daily Return Evidence Foundation (complete).
 - Task 33: PIT-Safe Adjusted Return Factor Integration (complete).
+- Task 34: Structural Adjusted Return Bounded Batch Refresh (complete).
