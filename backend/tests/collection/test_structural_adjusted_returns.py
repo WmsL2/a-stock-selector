@@ -97,22 +97,33 @@ def test_request_rejects_invalid_current_structural_batches() -> None:
 
 def test_structural_adjusted_return_wraps_once_preserves_outcomes_and_audits_pit(tmp_path: Any) -> None:
     repository = _repository(tmp_path)
-    repository.upsert_adjusted_daily_returns((_return("000001.SZ"),))
-    future = _return("600519.SH", observed_at=_AS_OF + timedelta(minutes=1))
-    repository.upsert_adjusted_daily_returns((future,))
+    symbols = ("000001.SZ", "000002.SZ", "000003.SZ", "600519.SH")
+    # Current refresh outcomes are intentionally independent from the local,
+    # point-in-time-visible evidence audit.  In particular, failed and empty
+    # refreshes must not hide previously persisted evidence.
+    for record in (
+        _return("000001.SZ"),
+        _return("000002.SZ"),
+        _return("600519.SH"),
+        _return("000003.SZ", observed_at=_AS_OF + timedelta(minutes=1)),
+    ):
+        repository.upsert_adjusted_daily_returns((record,))
     wrapped = FakeAdjustedCollector((
         AdjustedReturnCollectionStatus.SUCCESS,
         AdjustedReturnCollectionStatus.FAILED,
         AdjustedReturnCollectionStatus.EMPTY,
+        AdjustedReturnCollectionStatus.EMPTY,
     ))
 
-    report = StructuralAdjustedReturnCollector(wrapped, repository).collect(_request())
+    report = StructuralAdjustedReturnCollector(wrapped, repository).collect(_request(symbols=symbols))
 
     assert len(wrapped.requests) == 1
-    assert wrapped.requests[0].symbols == _SYMBOLS
+    assert wrapped.requests[0].symbols == symbols
     assert (wrapped.requests[0].end_date - wrapped.requests[0].start_date).days + 1 == 180
-    assert (report.success_symbols, report.empty_symbols, report.failed_symbols) == (1, 1, 1)
-    assert report.adjusted_return_available_after_run == 1
+    assert (report.success_symbols, report.empty_symbols, report.failed_symbols) == (1, 2, 1)
+    # 000002 failed and 600519 was empty during this refresh but both retain
+    # PIT-visible evidence; 000003 has only future-observed evidence.
+    assert report.adjusted_return_available_after_run == 3
     assert report.next_start_after == "600519.SH"
 
 

@@ -509,6 +509,7 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
 ) -> None:
     current_at = datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
     captured: dict[str, object] = {}
+    now_calls = 0
     original_from_project_root = AppPaths.from_project_root
 
     class FakeRepository:
@@ -542,7 +543,12 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
     monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    def fake_now(_tz: object) -> datetime:
+        nonlocal now_calls
+        now_calls += 1
+        return current_at
+
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=fake_now))
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
@@ -553,8 +559,130 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
     assert captured["as_of"] == current_at.date()
     assert request.symbols == ("000002.SZ", "600519.SH")
     assert request.as_of is current_at
+    assert now_calls == 1
+    assert request.end_date == current_at.date()
+    assert request.start_date == request.end_date - timedelta(days=179)
     assert (request.end_date - request.start_date).days + 1 == 180
     assert "Next start-after: complete" in capsys.readouterr().out
+
+
+def test_structural_adjusted_return_cli_validates_before_provider_and_exit_statuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    current_at = datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    original_from_project_root = AppPaths.from_project_root
+    provider_constructions = 0
+    collector_calls = 0
+    failed_symbols = 0
+
+    def provider_factory() -> str:
+        nonlocal provider_constructions
+        provider_constructions += 1
+        return "provider"
+
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "0"]) == 1
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "21"]) == 1
+    assert provider_constructions == 0
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ", "600519.SH"))
+
+    class FakeStructuralCollector:
+        def __init__(self, *_dependencies: object) -> None:
+            return None
+
+        def collect(self, request: object) -> SimpleNamespace:
+            nonlocal collector_calls
+            collector_calls += 1
+            return SimpleNamespace(
+                as_of=current_at, start_date=current_at.date() - timedelta(days=179), end_date=current_at.date(),
+                requested_symbols=request.symbols, success_symbols=1, empty_symbols=1 - failed_symbols,
+                failed_symbols=failed_symbols, rows_received=1, rows_persisted=1,
+                adjusted_return_available_after_run=1, results=(), batch_first_symbol=request.symbols[0],
+                batch_last_symbol=request.symbols[-1], has_more_structural_members=False, next_start_after=None,
+            )
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
+    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", FakeStructuralCollector)
+
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2", "--start-after", "000003.SZ"]) == 1
+    assert provider_constructions == 0
+    assert collector_calls == 0
+
+    failed_symbols = 1
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2"]) == 1
+    failed_symbols = 0
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2"]) == 0
+    assert provider_constructions == 2
+    assert collector_calls == 2
+    assert "Structural adjusted-return collection error" in capsys.readouterr().err
+
+
+def test_structural_adjusted_return_cli_reports_next_cursor_for_partial_batch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    current_at = datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    captured: dict[str, object] = {}
+    original_from_project_root = AppPaths.from_project_root
+
+    class FakeRepository:
+        def __init__(self, _paths: object) -> None:
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+    class FakeUniverseService:
+        def __init__(self, _repository: object, _settings: object) -> None:
+            return None
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ", "000003.SZ"))
+
+    class FakeStructuralCollector:
+        def __init__(self, *_dependencies: object) -> None:
+            return None
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            return SimpleNamespace(
+                as_of=current_at, start_date=request.start_date, end_date=request.end_date,
+                requested_symbols=request.symbols, success_symbols=2, empty_symbols=0, failed_symbols=0,
+                rows_received=2, rows_persisted=2, adjusted_return_available_after_run=2, results=(),
+                batch_first_symbol="000001.SZ", batch_last_symbol="000002.SZ",
+                has_more_structural_members=True, next_start_after="000002.SZ",
+            )
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
+    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", FakeStructuralCollector)
+
+    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2"]) == 0
+    assert captured["request"].symbols == ("000001.SZ", "000002.SZ")
+    assert captured["request"].has_more_structural_members is True
+    output = capsys.readouterr().out
+    assert "Has more: YES" in output
+    assert "Next start-after: 000002.SZ" in output
 
 
 def test_structural_core_cli_uses_bounded_structural_scope_once(
