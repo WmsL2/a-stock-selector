@@ -195,6 +195,68 @@ def test_adjusted_returns_are_read_pit_safely_without_expanding_realtime_members
     assert factors["600519.SH"].low_volatility.available is False
 
 
+def test_adjusted_return_revisions_respect_realtime_slow_as_of(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    symbol = "600519.SH"
+    repository = _repository(tmp_path, (symbol,))
+    early = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    later = datetime(2026, 9, 3, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    first = AdjustedDailyReturn(
+        symbol=symbol,
+        trade_date=date(2026, 9, 1),
+        previous_trade_date=date(2026, 8, 31),
+        return_fraction=0.01,
+        adjustment=AdjustmentType.HFQ,
+        observed_at=early,
+        source="synthetic",
+    )
+    revision = first.model_copy(update={"return_fraction": 0.02, "observed_at": later})
+    repository.upsert_adjusted_daily_returns((first, revision))
+    service = RealtimeSlowInputService(repository, Settings())
+
+    before = service._factor_input(
+        symbol, datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    after = service._factor_input(
+        symbol, datetime(2026, 9, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+
+    assert before.adjusted_return_series is not None
+    assert len(before.adjusted_return_series.points) == 1
+    assert before.adjusted_return_series.points[0].return_fraction == 0.01
+    assert before.adjusted_return_series.points[0].observed_at == early
+    assert after.adjusted_return_series is not None
+    assert len(after.adjusted_return_series.points) == 1
+    assert after.adjusted_return_series.points[0].return_fraction == 0.02
+    assert after.adjusted_return_series.points[0].observed_at == later
+    assert before.price_series is None
+    assert after.price_series is None
+
+
+def test_adjusted_return_historical_backfill_does_not_leak_to_realtime_slow_input(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    symbol = "600519.SH"
+    repository = _repository(tmp_path, (symbol,))
+    repository.upsert_adjusted_daily_returns(
+        (
+            AdjustedDailyReturn(
+                symbol=symbol,
+                trade_date=date(2025, 1, 2),
+                previous_trade_date=date(2024, 12, 31),
+                return_fraction=0.01,
+                adjustment=AdjustmentType.HFQ,
+                observed_at=datetime(2026, 9, 3, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+                source="synthetic",
+            ),
+        )
+    )
+
+    factor_input = RealtimeSlowInputService(repository, Settings())._factor_input(
+        symbol, datetime(2025, 1, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+
+    assert factor_input.adjusted_return_series is None
+    assert factor_input.price_series is None
+
+
 def test_risk_incomplete_and_unknown_short_circuit_without_factor_loading(tmp_path) -> None:  # type: ignore[no-untyped-def]
     repository = _repository(tmp_path)
     _seed_factor_inputs(repository)
