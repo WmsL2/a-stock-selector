@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from math import sqrt
 from statistics import pstdev
 
+from stock_selector.models import AdjustedDailyReturn
+
 from .models import ComponentUnavailableReason, PriceSeriesInput, StockFactorInput
 
 
@@ -109,6 +111,8 @@ def growth_components(stock: StockFactorInput) -> dict[str, RawComponent]:
 
 
 def price_components(stock: StockFactorInput) -> dict[str, RawComponent]:
+    if stock.adjusted_return_series is not None:
+        return _adjusted_return_price_components(stock)
     series = stock.price_series
     names = ("momentum_20d", "momentum_60d", "low_volatility_20d", "low_volatility_60d")
     if series is None:
@@ -135,6 +139,53 @@ def price_components(stock: StockFactorInput) -> dict[str, RawComponent]:
         "low_volatility_20d": _volatility(closes, 20, series),
         "low_volatility_60d": _volatility(closes, 60, series),
     }
+
+
+def _adjusted_return_price_components(stock: StockFactorInput) -> dict[str, RawComponent]:
+    series = stock.adjusted_return_series
+    assert series is not None
+    points = sorted(series.points, key=lambda item: item.trade_date)
+    suffix = [points[-1]]
+    for item in reversed(points[:-1]):
+        if suffix[0].previous_trade_date != item.trade_date:
+            break
+        suffix.insert(0, item)
+    return {
+        "momentum_20d": _return_momentum(suffix, 20),
+        "momentum_60d": _return_momentum(suffix, 60),
+        "low_volatility_20d": _return_volatility(suffix, 20),
+        "low_volatility_60d": _return_volatility(suffix, 60),
+    }
+
+
+def _return_momentum(points: list[AdjustedDailyReturn], window: int) -> RawComponent:
+    if len(points) < window:
+        return RawComponent(
+            None, ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY, _window_source(points)
+        )
+    selected = points[-window:]
+    result = 1.0
+    for point in selected:
+        result *= 1 + point.return_fraction
+    return RawComponent((result - 1) * 100, None, _window_source(selected))
+
+
+def _return_volatility(points: list[AdjustedDailyReturn], window: int) -> RawComponent:
+    if len(points) < window:
+        return RawComponent(
+            None, ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY, _window_source(points)
+        )
+    selected = points[-window:]
+    return RawComponent(
+        pstdev(point.return_fraction for point in selected) * sqrt(252) * 100,
+        None,
+        _window_source(selected),
+    )
+
+
+def _window_source(points: list[AdjustedDailyReturn]) -> str | None:
+    sources = {point.source for point in points}
+    return next(iter(sources)) if len(sources) == 1 else None
 
 
 def _momentum(

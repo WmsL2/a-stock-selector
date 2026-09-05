@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from stock_selector.config import AppPaths, Settings
 from stock_selector.factors import FactorFamily, PriceSeriesInput, StockFactorInput
 from stock_selector.models import (
+    AdjustedDailyReturn,
     AdjustmentType,
     Board,
     DailyBar,
@@ -129,6 +130,22 @@ def _complete(repository: LocalMarketRepository, symbols: tuple[str, ...]) -> No
     repository.upsert_risk_states(tuple(_risk(symbol) for symbol in symbols))
 
 
+def _returns(symbol: str, count: int, *, observed_at: datetime = _AS_OF) -> tuple[AdjustedDailyReturn, ...]:
+    start = _AS_OF.date() - timedelta(days=count)
+    return tuple(
+        AdjustedDailyReturn(
+            symbol=symbol,
+            trade_date=start + timedelta(days=index + 1),
+            previous_trade_date=start + timedelta(days=index),
+            return_fraction=0.01,
+            adjustment=AdjustmentType.HFQ,
+            observed_at=observed_at,
+            source="synthetic",
+        )
+        for index in range(count)
+    )
+
+
 def test_complete_pit_assembly_is_deterministic_read_only_and_qvg_only(tmp_path) -> None:  # type: ignore[no-untyped-def]
     repository = _repository(tmp_path)
     _seed_factor_inputs(repository)
@@ -144,7 +161,7 @@ def test_complete_pit_assembly_is_deterministic_read_only_and_qvg_only(tmp_path)
     assert first.diagnostics.risk_ready is True
     assert first.diagnostics.factor_input_members == 3
     assert first.diagnostics.base_score_available_members == 3
-    assert first.diagnostics.price_factors_operational is False
+    assert first.diagnostics.price_factors_operational is True
     assert all(item.price_series is None for item in first.factor_inputs)
     assert first.factors is not None
     assert tuple(item.symbol for item in first.factors.stocks) == tuple(
@@ -153,6 +170,29 @@ def test_complete_pit_assembly_is_deterministic_read_only_and_qvg_only(tmp_path)
     assert first.factor_config == Settings().factors
     assert all(item.base_score is not None for item in first.base_scores.stocks)
     assert all(item.available_families == 3 for item in first.base_scores.stocks)
+
+
+def test_adjusted_returns_are_read_pit_safely_without_expanding_realtime_membership(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "600519.SH")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols)
+    _complete(repository, symbols)
+    repository.upsert_adjusted_daily_returns(_returns("000001.SZ", 60))
+    before = repository.get_stats()
+    result = RealtimeSlowInputService(repository, Settings()).build(_AS_OF)
+
+    assert repository.get_stats() == before
+    assert tuple(item.symbol for item in result.factor_inputs) == symbols
+    inputs = {item.symbol: item for item in result.factor_inputs}
+    assert inputs["000001.SZ"].adjusted_return_series is not None
+    assert inputs["600519.SH"].adjusted_return_series is None
+    assert result.diagnostics.price_factors_operational is True
+    assert result.factors is not None
+    factors = {item.symbol: item for item in result.factors.stocks}
+    assert factors["000001.SZ"].momentum.available is True
+    assert factors["000001.SZ"].low_volatility.available is True
+    assert factors["600519.SH"].momentum.available is False
+    assert factors["600519.SH"].low_volatility.available is False
 
 
 def test_risk_incomplete_and_unknown_short_circuit_without_factor_loading(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -393,10 +433,7 @@ def test_result_models_reject_corrupted_cross_section_contracts(tmp_path) -> Non
     _complete(repository, ("600519.SH",))
     result = RealtimeSlowInputService(repository, Settings()).build(_AS_OF)
     valid = result.model_dump()
-    for update in (
-        {"risk_ready": False},
-        {"price_factors_operational": True},
-    ):
+    for update in ({"risk_ready": False},):
         with pytest.raises(ValidationError):
             RealtimeSlowInputDiagnostics(
                 **result.diagnostics.model_copy(update=update).model_dump()

@@ -138,4 +138,8 @@ def test_daily_selection_ready_contract_returns_ranked_qvg_items(tmp_path) -> No
     assert {"code", "message", "factor_name", "value", "percentile", "contribution"} <= item["evidence"][0].keys()
     assert isinstance(item["risks"], list) and item["risks"]
     assert {"code", "message", "severity"} <= item["risks"][0].keys()
-    assert any(risk["code"] == "price_factors_unavailable" for risk in item["risks"])
+    assert all(risk["code"] != "price_factors_unavailable" for risk in item["risks"])
+    assert {risk["code"] for risk in item["risks"]} >= {
+        "missing_momentum",
+        "missing_low_volatility",
+    }

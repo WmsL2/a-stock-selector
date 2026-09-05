@@ -9,6 +9,8 @@ from stock_selector.config import AppPaths, Settings
 from stock_selector.factors import FiveFactorRequest
 from stock_selector.factors.models import FactorFamily
 from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
     Board,
     Exchange,
     FinancialRecord,
@@ -186,8 +188,24 @@ def test_complete_safe_risk_builds_qvg_only_ranked_selection(tmp_path) -> None: 
         for item in result.selection.items
     )
     assert all(
-        any(risk.code == "price_factors_unavailable" for risk in item.risks)
+        all(risk.code != "price_factors_unavailable" for risk in item.risks)
         for item in result.selection.items
+    )
+
+
+def _returns(symbol: str, count: int, *, observed_at: datetime = _AS_OF) -> tuple[AdjustedDailyReturn, ...]:
+    start = _AS_OF.date() - timedelta(days=count)
+    return tuple(
+        AdjustedDailyReturn(
+            symbol=symbol,
+            trade_date=start + timedelta(days=index + 1),
+            previous_trade_date=start + timedelta(days=index),
+            return_fraction=0.01,
+            adjustment=AdjustmentType.HFQ,
+            observed_at=observed_at,
+            source="synthetic",
+        )
+        for index in range(count)
     )
 
 
@@ -361,3 +379,63 @@ def test_pit_financial_prior_valuation_and_industry_assembly(tmp_path) -> None: 
     assert factor_input.valuation is not None and factor_input.valuation.pe == 10
     assert factor_input.industry_key == f"{_CLASSIFICATION}:B"
     assert factor_input.price_series is None
+
+
+def test_adjusted_returns_are_pit_safe_operational_and_not_required_for_membership(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "600519.SH")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols)
+    repository.upsert_risk_states(tuple(_risk(symbol) for symbol in symbols))
+    repository.upsert_adjusted_daily_returns(_returns("000001.SZ", 60))
+    service = DailySelectionService(repository, Settings())
+
+    factor_input = service._factor_input("000001.SZ", _AS_OF)
+    missing = service._factor_input("600519.SH", _AS_OF)
+    result = service.build(_AS_OF)
+
+    assert factor_input.adjusted_return_series is not None
+    assert len(factor_input.adjusted_return_series.points) == 60
+    assert missing.adjusted_return_series is None
+    assert set(repository.load_factor_input_symbols()) == set(symbols)
+    assert result.diagnostics.price_factors_operational is True
+    by_symbol = {item.symbol: item for item in result.selection.items}
+    assert by_symbol["000001.SZ"].momentum_score is not None
+    assert by_symbol["000001.SZ"].low_volatility_score is not None
+    assert by_symbol["600519.SH"].momentum_score is None
+    assert by_symbol["600519.SH"].low_volatility_score is None
+    assert by_symbol["600519.SH"].base_score is not None
+
+
+def test_adjusted_return_revisions_and_historical_backfill_do_not_leak_to_daily_input(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path, ("600519.SH",))
+    early = datetime(2026, 9, 2, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    later = datetime(2026, 9, 3, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    first = AdjustedDailyReturn(symbol="600519.SH", trade_date=date(2026, 9, 1), previous_trade_date=date(2026, 8, 31), return_fraction=0.01, adjustment=AdjustmentType.HFQ, observed_at=early, source="synthetic")
+    revision = first.model_copy(update={"return_fraction": 0.02, "observed_at": later})
+    backfill = AdjustedDailyReturn(symbol="600519.SH", trade_date=date(2025, 1, 2), previous_trade_date=date(2024, 12, 31), return_fraction=0.01, adjustment=AdjustmentType.HFQ, observed_at=later, source="synthetic")
+    repository.upsert_adjusted_daily_returns((first, revision, backfill))
+    service = DailySelectionService(repository, Settings())
+
+    before = service._factor_input("600519.SH", datetime(2026, 9, 2, 16, tzinfo=ZoneInfo("Asia/Shanghai")))
+    after = service._factor_input("600519.SH", datetime(2026, 9, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai")))
+    historical = service._factor_input("600519.SH", datetime(2025, 1, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai")))
+
+    assert before.adjusted_return_series is not None
+    assert before.adjusted_return_series.points[0].return_fraction == 0.01
+    assert after.adjusted_return_series is not None
+    assert after.adjusted_return_series.points[-1].return_fraction == 0.02
+    assert historical.adjusted_return_series is None
+
+
+def test_return_only_symbol_does_not_expand_daily_factor_input_membership(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    covered, return_only = "000001.SZ", "600519.SH"
+    repository = _repository(tmp_path, (covered, return_only))
+    _seed_factor_inputs(repository, (covered,))
+    repository.upsert_risk_states((_risk(covered), _risk(return_only)))
+    repository.upsert_adjusted_daily_returns(_returns(return_only, 60))
+
+    result = DailySelectionService(repository, Settings()).build(_AS_OF)
+
+    assert repository.load_factor_input_symbols() == (covered,)
+    assert result.diagnostics.factor_input_members == 1
+    assert [item.symbol for item in result.selection.items] == [covered]

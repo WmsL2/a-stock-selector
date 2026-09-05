@@ -5,7 +5,12 @@ from enum import StrEnum
 
 from pydantic import ValidationInfo, field_validator, model_validator
 
-from stock_selector.models import FinancialRecord, ValuationRecord
+from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
+    FinancialRecord,
+    ValuationRecord,
+)
 from stock_selector.models.common import (
     DomainModel,
     ensure_aware_datetime,
@@ -87,6 +92,38 @@ class PriceSeriesInput(DomainModel):
         return self
 
 
+class AdjustedReturnSeriesInput(DomainModel):
+    """PIT-visible HFQ return evidence consumed directly by price factors."""
+
+    symbol: str
+    as_of: datetime
+    points: tuple[AdjustedDailyReturn, ...]
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_canonical_symbol(cls, value: str) -> str:
+        return validate_symbol(value)
+
+    @field_validator("as_of")
+    @classmethod
+    def validate_as_of(cls, value: datetime) -> datetime:
+        return ensure_aware_datetime(value, "as_of")
+
+    @model_validator(mode="after")
+    def validate_points(self) -> "AdjustedReturnSeriesInput":
+        if not self.points:
+            raise ValueError("adjusted return series must not be empty")
+        if any(item.symbol != self.symbol for item in self.points):
+            raise ValueError("return series symbols must match")
+        if any(item.observed_at > self.as_of or item.trade_date > self.as_of.date() for item in self.points):
+            raise ValueError("return series must not contain future evidence")
+        if len({item.trade_date for item in self.points}) != len(self.points):
+            raise ValueError("return series trade dates must be unique")
+        if any(item.adjustment is not AdjustmentType.HFQ for item in self.points):
+            raise ValueError("return series must be HFQ")
+        return self
+
+
 class StockFactorInput(DomainModel):
     """All explicit, already-selected point-in-time inputs for one security."""
 
@@ -97,6 +134,7 @@ class StockFactorInput(DomainModel):
     financial_prior_year: FinancialRecord | None = None
     valuation: ValuationRecord | None = None
     price_series: PriceSeriesInput | None = None
+    adjusted_return_series: AdjustedReturnSeriesInput | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -120,11 +158,16 @@ class StockFactorInput(DomainModel):
             self.financial_prior_year,
             self.valuation,
             self.price_series,
+            self.adjusted_return_series,
         )
         if any(item is not None and item.symbol != self.symbol for item in children):
             raise ValueError("factor input child symbol must match parent symbol")
         if self.price_series is not None and self.price_series.as_of != self.as_of:
             raise ValueError("price series as_of must match factor input as_of")
+        if self.adjusted_return_series is not None and self.adjusted_return_series.as_of != self.as_of:
+            raise ValueError("adjusted return series as_of must match factor input as_of")
+        if self.price_series is not None and self.adjusted_return_series is not None:
+            raise ValueError("price series and adjusted return series are mutually exclusive")
         return self
 
 

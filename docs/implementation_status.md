@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 32 - PIT-Safe Corporate-Action-Adjusted Daily Return Evidence Foundation
+Task 33 - PIT-Safe Adjusted Return Factor Integration
 
 ## Status
 
@@ -243,14 +243,14 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 
 - `./.venv/Scripts/python.exe -m pip install -e ".\\backend[dev]"` — PASS
 - Backend validation (from `backend/`): `..\\.venv\\Scripts\\python.exe -m pytest` — PASS
-  (649 passed; one third-party TestClient deprecation warning).
+  (660 passed; one third-party TestClient deprecation warning).
 - Backend coverage (from `backend/`):
   `..\\.venv\\Scripts\\python.exe -m pytest --cov=stock_selector --cov-report=term-missing`
-  — PASS (649 passed, 90% coverage).
+  — PASS (660 passed, 90% coverage).
 - Backend static checks (from `backend/`): `..\\.venv\\Scripts\\ruff.exe check .` and
   `..\\.venv\\Scripts\\mypy.exe src` — PASS.
 - Frontend validation (from `frontend/`): `npm install`, `npm run type-check`, `npm run lint`,
-  `npm run test` — PASS (37 passed), and `npm run build` — PASS.
+  `npm run test` — PASS (38 passed), and `npm run build` — PASS.
 - `git diff --check` — PASS.
 
 ## Live Smoke
@@ -993,6 +993,40 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   stored rows; latest observed at 2026-09-03 14:53 +08). RAW daily storage remained one symbol,
   five rows, adjustment raw.
 
+## Task 33 — PIT-Safe Adjusted Return Factor Integration (complete)
+
+- PIT-safe HFQ adjusted-return evidence is now consumed directly by the five-factor engine. With
+  sufficient contiguous local evidence, Momentum 20d/60d uses compounded daily returns and LowVol
+  20d/60d uses population daily-return volatility annualized by `sqrt(252)`; the legacy explicitly
+  adjusted `PriceSeriesInput` path remains compatible.
+- Daily Selection and Realtime slow-input assembly both read repository latest-as-of return
+  revisions. `price_factors_operational=true` now means this application capability exists, not
+  that every symbol has price evidence: symbols without local returns remain scoreable through
+  their available families with the existing available-weight renormalization.
+- Trailing return observations must be contiguous and never bridge history gaps. Factor-input
+  membership remains the pre-existing Industry AND (Financial OR Valuation) contract; return-only
+  symbols do not enter either daily or realtime slow inputs.
+- This integration adds no structural or full-market adjusted-return refresh, scheduler or
+  historical-backfill framework. Collection, providers, storage revision keys, APIs and frontend
+  feature behavior remain unchanged.
+
+## Task 33 Verification
+
+- Focused offline regressions — PASS: 24 factor tests, 12 daily-selection tests, 16 realtime
+  slow-input tests, 220 full realtime tests, 21 storage tests, 16 explanation tests and 29 API
+  tests. They cover exact 20d/60d return formulas, window boundaries, trailing contiguous suffixes,
+  mixed sources, PIT revisions, backfill invisibility, unchanged membership and missing-evidence
+  scoreability.
+- Canonical root validation — PASS (659 backend tests; 90% coverage); Ruff, mypy, frontend type
+  check, lint, 38 Vitest tests and production build pass. No live provider call or real project
+  runtime data write was performed.
+
+## Task 33 Fix — Per-Window Adjusted Return Provenance
+
+- Each Momentum and LowVol component now derives provenance solely from its own selected trailing
+  return window. Earlier suffix records cannot contaminate a 20d or 60d component source; mixed
+  sources within the selected window yield `null` provenance without affecting the numeric factor.
+
 ## Next Task
 
 No subsequent task has been started.
@@ -1028,3 +1062,5 @@ No subsequent task has been started.
 - Task 29: Full-Market Current-Day Risk State Collection & Persistence (complete).
 - Task 30: Structural Financial + Industry Bounded Batch Refresh Foundation (complete).
 - Task 31: Structural Valuation Bounded Batch Refresh Foundation (complete).
+- Task 32: PIT-Safe Corporate-Action-Adjusted Daily Return Evidence Foundation (complete).
+- Task 33: PIT-Safe Adjusted Return Factor Integration (complete).

@@ -8,7 +8,12 @@ from stock_selector.explanation import (
     ExplanationInput,
     ExplanationResult,
 )
-from stock_selector.factors import FiveFactorEngine, FiveFactorRequest, StockFactorInput
+from stock_selector.factors import (
+    AdjustedReturnSeriesInput,
+    FiveFactorEngine,
+    FiveFactorRequest,
+    StockFactorInput,
+)
 from stock_selector.models import Instrument
 from stock_selector.models.common import ensure_aware_datetime
 from stock_selector.models.selection import SelectionResult, StockScore
@@ -94,7 +99,7 @@ class DailySelectionService:
                         factor_result=factor_by_symbol[item.symbol],
                         score_result=item,
                         risk_decision=risk_by_symbol[item.symbol],
-                        price_factors_operational=False,
+                        price_factors_operational=True,
                     )
                 ),
             )
@@ -154,6 +159,11 @@ class DailySelectionService:
             financial_prior_year=prior,
             valuation=self._repository.load_latest_valuation_as_of(symbol, as_of),
             price_series=None,
+            adjusted_return_series=(
+                AdjustedReturnSeriesInput(symbol=symbol, as_of=as_of, points=returns)
+                if (returns := self._repository.load_latest_adjusted_daily_returns_as_of(symbol, as_of))
+                else None
+            ),
         )
 
     def _result(
@@ -184,7 +194,7 @@ class DailySelectionService:
             scoreable_members=scoreable_members,
             requested_top_n=self._settings.selection.top_n,
             returned_items=len(items),
-            price_factors_operational=False,
+            price_factors_operational=True,
         )
         return DailySelectionResult(
             as_of=as_of,

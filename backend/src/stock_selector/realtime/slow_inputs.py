@@ -4,6 +4,7 @@ from datetime import datetime
 
 from stock_selector.config.models import Settings
 from stock_selector.factors import (
+    AdjustedReturnSeriesInput,
     FiveFactorCrossSectionResult,
     FiveFactorEngine,
     FiveFactorRequest,
@@ -79,7 +80,7 @@ class RealtimeSlowInputService:
             base_score_available_members=sum(
                 item.base_score is not None for item in base_scores.stocks
             ),
-            price_factors_operational=False,
+            price_factors_operational=True,
         )
         return RealtimeSlowInputResult(
             as_of=as_of,
@@ -146,6 +147,11 @@ class RealtimeSlowInputService:
             financial_prior_year=prior,
             valuation=self._repository.load_latest_valuation_as_of(symbol, as_of),
             price_series=None,
+            adjusted_return_series=(
+                AdjustedReturnSeriesInput(symbol=symbol, as_of=as_of, points=returns)
+                if (returns := self._repository.load_latest_adjusted_daily_returns_as_of(symbol, as_of))
+                else None
+            ),
         )
 
     def _factor_and_base_scores(

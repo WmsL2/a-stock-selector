@@ -15,11 +15,17 @@ from stock_selector.factors.metrics import (
 )
 from stock_selector.factors.models import (
     AdjustedClosePoint,
+    AdjustedReturnSeriesInput,
     ComponentUnavailableReason,
     PriceSeriesInput,
     StockFactorInput,
 )
-from stock_selector.models import FinancialRecord, ValuationRecord
+from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
+    FinancialRecord,
+    ValuationRecord,
+)
 
 _AS_OF = datetime(2026, 3, 31, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -62,6 +68,51 @@ def _series(count, adjusted=True, closes=None):
         ),
         corporate_action_adjusted=adjusted,
         source="fixture",
+    )
+
+
+def _return_series(
+    values: list[float], *, source: str = "fixture", gap_before_last: bool = False
+) -> AdjustedReturnSeriesInput:
+    start = _AS_OF.date() - timedelta(days=len(values))
+    points = []
+    for index, value in enumerate(values):
+        trade_date = start + timedelta(days=index + 1)
+        previous = trade_date - timedelta(days=1)
+        if gap_before_last and index == len(values) - 1:
+            previous -= timedelta(days=1)
+        points.append(
+            AdjustedDailyReturn(
+                symbol="600519.SH",
+                trade_date=trade_date,
+                previous_trade_date=previous,
+                return_fraction=value,
+                adjustment=AdjustmentType.HFQ,
+                observed_at=_AS_OF,
+                source=source,
+            )
+        )
+    return AdjustedReturnSeriesInput(symbol="600519.SH", as_of=_AS_OF, points=tuple(points))
+
+
+def _return_components(values: list[float], **kwargs):
+    return price_components(_stock(adjusted_return_series=_return_series(values, **kwargs)))
+
+
+def _return_components_with_sources(
+    values: list[float], sources: list[str]
+):
+    series = _return_series(values)
+    points = tuple(
+        point.model_copy(update={"source": source})
+        for point, source in zip(series.points, sources, strict=True)
+    )
+    return price_components(
+        _stock(
+            adjusted_return_series=AdjustedReturnSeriesInput(
+                symbol="600519.SH", as_of=_AS_OF, points=points
+            )
+        )
     )
 
 
@@ -185,3 +236,102 @@ def test_growth_and_price_boundaries_and_formulas():
         item.reason is ComponentUnavailableReason.UNADJUSTED_PRICE_SERIES
         for item in raw.values()
     )
+
+
+def test_adjusted_return_20_and_60_day_formulas_and_exact_windows():
+    twenty = _return_components([0.01] * 20)
+    assert twenty["momentum_20d"].value == pytest.approx((1.01**20 - 1) * 100)
+    assert twenty["low_volatility_20d"].value == pytest.approx(0)
+    assert twenty["momentum_60d"].reason is ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY
+    assert twenty["low_volatility_60d"].reason is ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY
+
+    values = [0.001 * (index % 7) for index in range(60)]
+    sixty = _return_components(values)
+    expected_momentum = 1.0
+    for value in values:
+        expected_momentum *= 1 + value
+    assert sixty["momentum_60d"].value == pytest.approx((expected_momentum - 1) * 100)
+    assert sixty["low_volatility_60d"].value == pytest.approx(pstdev(values) * sqrt(252) * 100)
+    longer = _return_components([0.9] * 5 + values)
+    assert longer["momentum_20d"].value == pytest.approx(sixty["momentum_20d"].value)
+    assert longer["momentum_60d"].value == pytest.approx(sixty["momentum_60d"].value)
+
+
+@pytest.mark.parametrize("count, names", [(19, ("momentum_20d", "low_volatility_20d")), (59, ("momentum_60d", "low_volatility_60d"))])
+def test_adjusted_return_windows_do_not_have_an_off_by_one(count, names):
+    components = _return_components([0.01] * count)
+    assert all(components[name].reason is ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY for name in names)
+
+
+def test_adjusted_return_uses_last_contiguous_suffix_and_mixed_source_contract():
+    gap = _return_components([0.01] * 25, gap_before_last=True)
+    assert gap["momentum_20d"].reason is ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY
+
+    points = list(_return_series([0.01] * 60).points)
+    points[-1] = points[-1].model_copy(update={"source": "second-provider"})
+    mixed = price_components(
+        _stock(adjusted_return_series=AdjustedReturnSeriesInput(symbol="600519.SH", as_of=_AS_OF, points=tuple(points)))
+    )
+    assert mixed["momentum_20d"].source is None
+    assert _return_components([0.01] * 60)["momentum_20d"].source == "fixture"
+
+
+def test_adjusted_return_uses_latest_contiguous_suffix_not_an_older_longer_segment():
+    old_start = _AS_OF.date() - timedelta(days=100)
+    old = [
+        AdjustedDailyReturn(
+            symbol="600519.SH", trade_date=old_start + timedelta(days=index + 1),
+            previous_trade_date=old_start + timedelta(days=index), return_fraction=0.01,
+            adjustment=AdjustmentType.HFQ, observed_at=_AS_OF, source="fixture",
+        )
+        for index in range(60)
+    ]
+    latest_start = _AS_OF.date() - timedelta(days=10)
+    latest = [
+        AdjustedDailyReturn(
+            symbol="600519.SH", trade_date=latest_start + timedelta(days=index + 1),
+            previous_trade_date=latest_start + timedelta(days=index), return_fraction=0.02,
+            adjustment=AdjustmentType.HFQ, observed_at=_AS_OF, source="fixture",
+        )
+        for index in range(10)
+    ]
+    components = price_components(_stock(adjusted_return_series=AdjustedReturnSeriesInput(
+        symbol="600519.SH", as_of=_AS_OF, points=tuple(old + latest)
+    )))
+    assert all(components[name].reason is ComponentUnavailableReason.INSUFFICIENT_PRICE_HISTORY for name in (
+        "momentum_20d", "momentum_60d", "low_volatility_20d", "low_volatility_60d"
+    ))
+
+
+def test_adjusted_return_provenance_uses_each_component_window_only():
+    values = [0.001 * (index % 5) for index in range(80)]
+    old_twenty_new_sixty = _return_components_with_sources(
+        values, ["old"] * 20 + ["new"] * 60
+    )
+    assert all(
+        old_twenty_new_sixty[name].source == "new"
+        for name in (
+            "momentum_20d",
+            "low_volatility_20d",
+            "momentum_60d",
+            "low_volatility_60d",
+        )
+    )
+
+    old_fifty_new_thirty = _return_components_with_sources(
+        values, ["old"] * 50 + ["new"] * 30
+    )
+    assert old_fifty_new_thirty["momentum_20d"].source == "new"
+    assert old_fifty_new_thirty["low_volatility_20d"].source == "new"
+    assert old_fifty_new_thirty["momentum_60d"].source is None
+    assert old_fifty_new_thirty["low_volatility_60d"].source is None
+
+    mixed_latest_twenty = _return_components_with_sources(
+        values, ["old"] * 60 + ["new"] * 10 + ["other"] * 10
+    )
+    assert mixed_latest_twenty["momentum_20d"].source is None
+    assert mixed_latest_twenty["low_volatility_20d"].source is None
+    assert {
+        name: old_twenty_new_sixty[name].value
+        for name in old_twenty_new_sixty
+    } == pytest.approx({name: old_fifty_new_thirty[name].value for name in old_fifty_new_thirty})

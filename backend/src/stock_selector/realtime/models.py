@@ -1701,8 +1701,6 @@ class RealtimeSlowInputDiagnostics(DomainModel):
             raise ValueError("base_score_input_members must equal factor_input_members")
         if self.base_score_available_members > self.base_score_input_members:
             raise ValueError("base_score_available_members must not exceed base_score_input_members")
-        if self.price_factors_operational:
-            raise ValueError("Task24 price factors must remain unavailable")
         if not self.risk_ready and any(
             (
                 self.factor_input_members,

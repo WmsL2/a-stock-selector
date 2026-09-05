@@ -1,6 +1,6 @@
 """Domain invariants for factor calculation inputs and audit outputs."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from stock_selector.factors.models import (
     AdjustedClosePoint,
+    AdjustedReturnSeriesInput,
     FactorComponentResult,
     FactorFamily,
     FactorFamilyResult,
@@ -16,7 +17,12 @@ from stock_selector.factors.models import (
     PriceSeriesInput,
     StockFactorInput,
 )
-from stock_selector.models import FinancialRecord, ValuationRecord
+from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
+    FinancialRecord,
+    ValuationRecord,
+)
 
 _AS_OF = datetime(2026, 3, 31, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -166,6 +172,60 @@ def test_stock_factor_input_child_symbols_and_price_as_of_contracts():
         StockFactorInput(
             symbol="600519.SH", as_of=_AS_OF, price_series=price_series
         )
+
+
+def _return_point(**changes) -> AdjustedDailyReturn:
+    values = {
+        "symbol": "600519.SH",
+        "trade_date": date(2026, 3, 30),
+        "previous_trade_date": date(2026, 3, 29),
+        "return_fraction": 0.01,
+        "adjustment": AdjustmentType.HFQ,
+        "observed_at": _AS_OF,
+        "source": "fixture",
+    }
+    values.update(changes)
+    return AdjustedDailyReturn(**values)
+
+
+def test_adjusted_return_series_and_stock_input_contracts():
+    point = _return_point()
+    series = AdjustedReturnSeriesInput(symbol="600519.SH", as_of=_AS_OF, points=(point,))
+    assert series.points == (point,)
+    invalid_series = (
+        {"symbol": "600519"},
+        {"as_of": _AS_OF.replace(tzinfo=None)},
+        {"points": (_return_point(symbol="000001.SZ"),)},
+        {"points": (_return_point(observed_at=_AS_OF.replace(day=31) + timedelta(days=1)),)},
+        {"points": (_return_point(trade_date=date(2026, 4, 1)),)},
+        {"points": (point, point)},
+    )
+    for changes in invalid_series:
+        with pytest.raises(ValidationError):
+            AdjustedReturnSeriesInput(**({"symbol": "600519.SH", "as_of": _AS_OF, "points": (point,)} | changes))
+    with pytest.raises(ValidationError):
+        _return_point(adjustment=AdjustmentType.RAW)
+
+    mismatched = AdjustedReturnSeriesInput(
+        symbol="000001.SZ", as_of=_AS_OF, points=(_return_point(symbol="000001.SZ"),)
+    )
+    with pytest.raises(ValidationError):
+        StockFactorInput(symbol="600519.SH", as_of=_AS_OF, adjusted_return_series=mismatched)
+    stale_as_of = _AS_OF.replace(day=30)
+    stale = AdjustedReturnSeriesInput(
+        symbol="600519.SH",
+        as_of=stale_as_of,
+        points=(_return_point(trade_date=date(2026, 3, 29), previous_trade_date=date(2026, 3, 28), observed_at=stale_as_of),),
+    )
+    with pytest.raises(ValidationError):
+        StockFactorInput(symbol="600519.SH", as_of=_AS_OF, adjusted_return_series=stale)
+    legacy = PriceSeriesInput(
+        symbol="600519.SH", as_of=_AS_OF,
+        points=(AdjustedClosePoint(trade_date=date(2026, 3, 30), close=1),),
+        corporate_action_adjusted=True,
+    )
+    with pytest.raises(ValidationError):
+        StockFactorInput(symbol="600519.SH", as_of=_AS_OF, price_series=legacy, adjusted_return_series=series)
 
 
 def test_price_series_naive_empty_source_and_unordered_points_contracts():
