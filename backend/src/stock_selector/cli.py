@@ -206,6 +206,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     slow_inputs_refresh.add_argument("--limit", type=int, required=True)
     slow_inputs_refresh.add_argument("--start-after")
+    slow_inputs_sweep = refresh_subparsers.add_parser("structural-slow-inputs-sweep")
+    slow_inputs_sweep.add_argument("--limit", type=int, required=True)
+    slow_inputs_sweep.add_argument("--start-after")
     return parser
 
 
@@ -236,6 +239,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "refresh":
         if arguments.refresh_command == "structural-slow-inputs":
             return _run_structural_slow_inputs_command(arguments.limit, arguments.start_after)
+        if arguments.refresh_command == "structural-slow-inputs-sweep":
+            return _run_structural_slow_inputs_sweep_command(arguments.limit, arguments.start_after)
         parser.print_help()
         return 2
     else:
@@ -734,6 +739,87 @@ def _run_structural_valuation_command(limit: int, start_after: str | None) -> in
     return 1 if report.failed_symbols else 0
 
 
+def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | None) -> int:
+    """Run a bounded multi-batch Task35 sweep with one shared collector graph."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralAdjustedReturnCollector,
+        StructuralCoreFundamentalsCollector,
+        StructuralSlowInputCollector,
+        StructuralSlowInputSweepCollector,
+        StructuralSlowInputSweepRequest,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        if not 1 <= limit <= 100:
+            raise ValueError("--limit must be between 1 and 100")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        symbols, has_more = _select_structural_batch(
+            structural.members, limit, start_after, maximum_limit=100
+        )
+        if not symbols:
+            print("No remaining structural members.")
+            print("Next start-after: complete")
+            return 0
+
+        provider = AKShareProvider()
+        task35 = StructuralSlowInputCollector(
+            StructuralCoreFundamentalsCollector(
+                FinancialCollector(provider, repository),
+                IndustryCollector(provider, repository),
+                repository,
+            ),
+            StructuralValuationCollector(ValuationCollector(provider, repository), repository),
+            StructuralAdjustedReturnCollector(
+                AdjustedDailyReturnCollector(provider, repository), repository
+            ),
+            repository,
+        )
+        report = StructuralSlowInputSweepCollector(task35).collect(
+            StructuralSlowInputSweepRequest(
+                symbols=symbols,
+                as_of=current_at,
+                has_more_structural_members=has_more,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural slow-input sweep error: {exc}", file=sys.stderr)
+        return 1
+
+    _print_structural_slow_input_sweep_report(report, len(structural.members))
+    return 1 if any(
+        batch.core_report.financial_failed
+        or batch.core_report.industry_failed
+        or batch.valuation_report.failed_symbols
+        or batch.adjusted_return_report.failed_symbols
+        for batch in report.batch_reports
+    ) else 0
+
+
 def _run_structural_slow_inputs_command(limit: int, start_after: str | None) -> int:
     """Refresh one selected structural batch through all existing slow-input wrappers."""
     from stock_selector.collection import (
@@ -954,6 +1040,50 @@ def _print_structural_adjusted_return_collection_report(
             f"{result.symbol} {result.status.value} received={result.rows_received} "
             f"persisted={result.rows_persisted} {detail}".rstrip()
         )
+
+
+def _print_structural_slow_input_sweep_report(report, structural_members: int) -> None:  # type: ignore[no-untyped-def]
+    """Print the outer sweep summary and complete audit data for every inner batch."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {structural_members}")
+    print(f"Sweep requested: {len(report.requested_symbols)}")
+    print(f"Sweep batches: {len(report.batch_reports)}")
+    print(f"Sweep first: {report.batch_first_symbol}")
+    print(f"Sweep last: {report.batch_last_symbol}")
+    for index, batch in enumerate(report.batch_reports, start=1):
+        core = batch.core_report
+        valuation = batch.valuation_report
+        adjusted = batch.adjusted_return_report
+        print(f"Batch {index}/{len(report.batch_reports)}")
+        print(f"Batch requested: {len(batch.requested_symbols)}")
+        print(f"Batch first: {batch.batch_first_symbol}")
+        print(f"Batch last: {batch.batch_last_symbol}")
+        print(
+            "Core financial success / empty / failed: "
+            f"{core.financial_success} / {core.financial_empty} / {core.financial_failed}"
+        )
+        print(
+            "Core industry success / empty / failed: "
+            f"{core.industry_success} / {core.industry_empty} / {core.industry_failed}"
+        )
+        print(
+            "Valuation success / empty / failed: "
+            f"{valuation.success_symbols} / {valuation.empty_symbols} / "
+            f"{valuation.failed_symbols}"
+        )
+        print(
+            "Adjusted returns success / empty / failed: "
+            f"{adjusted.success_symbols} / {adjusted.empty_symbols} / "
+            f"{adjusted.failed_symbols}"
+        )
+        print(f"Adjusted availability as of: {adjusted.availability_as_of.isoformat()}")
+        print(
+            "Factor input covered after batch: "
+            f"{batch.factor_input_covered_after_run}"
+        )
+    print(f"Final factor input covered after run: {report.factor_input_covered_after_run}")
+    print(f"Has more: {'YES' if report.has_more_structural_members else 'NO'}")
+    print(f"Next start-after: {report.next_start_after or 'complete'}")
 
 
 def _print_structural_slow_input_collection_report(report, structural_members: int) -> None:  # type: ignore[no-untyped-def]

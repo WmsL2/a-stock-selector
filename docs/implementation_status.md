@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 35 - Unified Structural Slow-Input Bounded Refresh Orchestration
+Task 36 - Bounded Multi-Batch Structural Slow-Input Sweep
 
 ## Status
 
@@ -1080,6 +1080,27 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (689 backend tests; 90% coverage); Ruff, mypy, frontend type
   check, lint, 38 Vitest tests and production build pass. No live provider call or real project
   runtime data write was performed.
+
+## Task 36 — Bounded Multi-Batch Structural Slow-Input Sweep (complete)
+
+- Adds `refresh structural-slow-inputs-sweep --limit N [--start-after SYMBOL]` for one
+  bounded outer selection of 1–100 current structural members.
+- The outer slice is selected once using the current structural cursor and is partitioned
+  sequentially into Task35 requests of at most 20 symbols. Non-final chunks continue;
+  the final chunk retains the outer continuation flag.
+- One clock, one structural snapshot, one provider, and one shared Task35 collector graph
+  are used for the whole invocation. Per-symbol failures remain in reports and later chunks
+  continue; infrastructure or contract errors abort subsequent chunks.
+- This is not a full-market auto-loop: there is no scheduler, checkpoint persistence,
+  parallelism, provider/storage redesign, or factor/scoring/API/frontend change.
+
+## Task 36 Verification
+
+- Offline sweep contracts cover request bounds, exact ordered 20-symbol chunking, continuation,
+  coverage summation, and batch-abort behavior.
+- Focused sweep tests — PASS (12); collection suite — PASS (81); CLI smoke — PASS (53).
+- Canonical root validation — PASS (709 backend tests; 90% coverage); Ruff, mypy, frontend
+  type-check, lint, test, and build all pass.
 
 ## Next Task
 

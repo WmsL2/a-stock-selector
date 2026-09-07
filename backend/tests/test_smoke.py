@@ -515,6 +515,236 @@ def test_structural_slow_inputs_cli_parser_is_tightly_bounded() -> None:
         )
 
 
+def test_structural_slow_input_sweep_cli_parser_allows_only_cursor_and_limit() -> None:
+    arguments = build_parser().parse_args(
+        ["refresh", "structural-slow-inputs-sweep", "--limit", "100", "--start-after", "000002.SZ"]
+    )
+    assert (arguments.limit, arguments.start_after) == (100, "000002.SZ")
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--symbols", "000001.SZ"]
+        )
+
+
+def test_structural_slow_input_sweep_stops_before_provider_for_invalid_or_empty_batch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    original_paths = AppPaths.from_project_root
+    provider_calls = 0
+    sweep_calls = 0
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ", "000003.SZ"))
+
+    def provider() -> object:
+        nonlocal provider_calls
+        provider_calls += 1
+        return object()
+
+    class SweepCollector:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def collect(self, _request: object) -> None:
+            nonlocal sweep_calls
+            sweep_calls += 1
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "datetime",
+        SimpleNamespace(now=lambda _tz: datetime(2026, 9, 7, tzinfo=ZoneInfo("Asia/Shanghai"))),
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputSweepCollector", SweepCollector
+    )
+
+    assert main(["refresh", "structural-slow-inputs-sweep", "--limit", "0"]) == 1
+    assert main(["refresh", "structural-slow-inputs-sweep", "--limit", "101"]) == 1
+    assert main(
+        ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--start-after", "600519.SH"]
+    ) == 1
+    assert provider_calls == sweep_calls == 0
+    assert main(
+        ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--start-after", "000003.SZ"]
+    ) == 0
+    assert provider_calls == sweep_calls == 0
+    assert "No remaining structural members." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    ((None, 0), ("financial", 1), ("industry", 1), ("valuation", 1), ("adjusted", 1)),
+)
+def test_structural_slow_input_sweep_cli_composes_one_shared_graph_and_reports_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failure: str | None,
+    expected: int,
+) -> None:
+    current_at = datetime(2026, 9, 7, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    original_paths = AppPaths.from_project_root
+    sentinel = object()
+    captured: dict[str, object] = {"base": [], "constructors": [], "now": 0}
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["universe_as_of"] = as_of
+            return SimpleNamespace(
+                members=("000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ")
+            )
+
+    def base_factory(name: str):
+        def factory(provider: object, _repository: object) -> SimpleNamespace:
+            captured["base"].append((name, provider))
+            return SimpleNamespace(name=name)
+
+        return factory
+
+    def structural_factory(name: str):
+        def factory(*dependencies: object) -> SimpleNamespace:
+            captured["constructors"].append((name, dependencies))
+            return SimpleNamespace(name=name)
+
+        return factory
+
+    class SweepCollector:
+        def __init__(self, task35: object) -> None:
+            captured["constructors"].append(("sweep", (task35,)))
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["request"] = request
+            failed = 1 if failure else 0
+            core = SimpleNamespace(
+                financial_success=len(request.symbols) - (failure == "financial"),
+                financial_empty=0,
+                financial_failed=failed if failure == "financial" else 0,
+                industry_success=len(request.symbols) - (failure == "industry"),
+                industry_empty=0,
+                industry_failed=failed if failure == "industry" else 0,
+            )
+            valuation = SimpleNamespace(
+                success_symbols=len(request.symbols) - (failure == "valuation"),
+                empty_symbols=0,
+                failed_symbols=failed if failure == "valuation" else 0,
+            )
+            adjusted = SimpleNamespace(
+                success_symbols=len(request.symbols) - (failure == "adjusted"),
+                empty_symbols=0,
+                failed_symbols=failed if failure == "adjusted" else 0,
+                availability_as_of=current_at,
+            )
+            batch = SimpleNamespace(
+                requested_symbols=request.symbols,
+                batch_first_symbol=request.symbols[0],
+                batch_last_symbol=request.symbols[-1],
+                core_report=core,
+                valuation_report=valuation,
+                adjusted_return_report=adjusted,
+                factor_input_covered_after_run=len(request.symbols),
+            )
+            return SimpleNamespace(
+                as_of=current_at,
+                requested_symbols=request.symbols,
+                batch_reports=(batch,),
+                factor_input_covered_after_run=len(request.symbols),
+                batch_first_symbol=request.symbols[0],
+                batch_last_symbol=request.symbols[-1],
+                has_more_structural_members=True,
+                next_start_after=request.symbols[-1],
+            )
+
+    def fake_now(_timezone: object) -> datetime:
+        captured["now"] += 1
+        return current_at
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=fake_now))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: sentinel)
+    monkeypatch.setattr("stock_selector.collection.FinancialCollector", base_factory("financial"))
+    monkeypatch.setattr("stock_selector.collection.IndustryCollector", base_factory("industry"))
+    monkeypatch.setattr("stock_selector.collection.ValuationCollector", base_factory("valuation"))
+    monkeypatch.setattr(
+        "stock_selector.collection.AdjustedDailyReturnCollector", base_factory("adjusted")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralCoreFundamentalsCollector",
+        structural_factory("core"),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralValuationCollector",
+        structural_factory("valuation"),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector",
+        structural_factory("adjusted"),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputCollector",
+        structural_factory("slow_inputs"),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputSweepCollector", SweepCollector
+    )
+
+    assert main(["refresh", "structural-slow-inputs-sweep", "--limit", "3"]) == expected
+    assert captured["now"] == 1
+    assert captured["universe_as_of"] == current_at.date()
+    assert captured["request"].symbols == ("000001.SZ", "000002.SZ", "000003.SZ")
+    assert captured["request"].has_more_structural_members is True
+    assert [name for name, _ in captured["base"]] == [
+        "financial",
+        "industry",
+        "valuation",
+        "adjusted",
+    ]
+    assert all(provider is sentinel for _, provider in captured["base"])
+    assert [name for name, _ in captured["constructors"]] == [
+        "core",
+        "valuation",
+        "adjusted",
+        "slow_inputs",
+        "sweep",
+    ]
+    output = capsys.readouterr().out
+    assert "Batch 1/1" in output
+    assert "Adjusted availability as of:" in output
+    assert "Factor input covered after batch: 3" in output
+
+
 def test_structural_slow_inputs_cli_composes_one_shared_provider_and_partial_cursor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

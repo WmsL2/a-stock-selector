@@ -40,6 +40,11 @@ from stock_selector.collection.structural_fundamentals import (
     StructuralCoreFundamentalsCollector,
     StructuralCoreSymbolResult,
 )
+from stock_selector.collection.structural_slow_input_sweep import (
+    StructuralSlowInputSweepCollector,
+    StructuralSlowInputSweepReport,
+    StructuralSlowInputSweepRequest,
+)
 from stock_selector.collection.structural_slow_inputs import (
     StructuralSlowInputCollectionReport,
     StructuralSlowInputCollectionRequest,
@@ -84,6 +89,9 @@ __all__ = [
     "StructuralSlowInputCollectionReport",
     "StructuralSlowInputCollectionRequest",
     "StructuralSlowInputCollector",
+    "StructuralSlowInputSweepCollector",
+    "StructuralSlowInputSweepReport",
+    "StructuralSlowInputSweepRequest",
     "StructuralValuationCollectionReport",
     "StructuralValuationCollectionRequest",
     "StructuralValuationCollector",
