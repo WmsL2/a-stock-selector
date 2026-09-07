@@ -199,6 +199,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     structural_valuation_collect.add_argument("--limit", type=int, required=True)
     structural_valuation_collect.add_argument("--start-after")
+    refresh_parser = subparsers.add_parser("refresh", help="Run one bounded cross-domain refresh.")
+    refresh_subparsers = refresh_parser.add_subparsers(dest="refresh_command")
+    slow_inputs_refresh = refresh_subparsers.add_parser(
+        "structural-slow-inputs", help="Refresh one current structural slow-input batch."
+    )
+    slow_inputs_refresh.add_argument("--limit", type=int, required=True)
+    slow_inputs_refresh.add_argument("--start-after")
     return parser
 
 
@@ -226,6 +233,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_quality_command(arguments.quality_command)
     elif arguments.command == "fundamentals":
         return _run_fundamentals_command(arguments)
+    elif arguments.command == "refresh":
+        if arguments.refresh_command == "structural-slow-inputs":
+            return _run_structural_slow_inputs_command(arguments.limit, arguments.start_after)
+        parser.print_help()
+        return 2
     else:
         parser.print_help()
     return 0
@@ -722,6 +734,56 @@ def _run_structural_valuation_command(limit: int, start_after: str | None) -> in
     return 1 if report.failed_symbols else 0
 
 
+def _run_structural_slow_inputs_command(limit: int, start_after: str | None) -> int:
+    """Refresh one selected structural batch through all existing slow-input wrappers."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralAdjustedReturnCollector,
+        StructuralCoreFundamentalsCollector,
+        StructuralSlowInputCollectionRequest,
+        StructuralSlowInputCollector,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        if not 1 <= limit <= 20:
+            raise ValueError("--limit must be between 1 and 20")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        symbols, has_more = _select_structural_batch(structural.members, limit, start_after, maximum_limit=20)
+        if not symbols:
+            print("No remaining structural members.")
+            print("Next start-after: complete")
+            return 0
+        provider = AKShareProvider()
+        report = StructuralSlowInputCollector(
+            StructuralCoreFundamentalsCollector(FinancialCollector(provider, repository), IndustryCollector(provider, repository), repository),
+            StructuralValuationCollector(ValuationCollector(provider, repository), repository),
+            StructuralAdjustedReturnCollector(AdjustedDailyReturnCollector(provider, repository), repository),
+            repository,
+        ).collect(StructuralSlowInputCollectionRequest(
+            symbols=symbols, as_of=current_at, has_more_structural_members=has_more
+        ))
+    except (CollectionDataError, CollectionError, ConfigurationError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        print(f"Structural slow-input refresh error: {exc}", file=sys.stderr)
+        return 1
+    _print_structural_slow_input_collection_report(report, len(structural.members))
+    return 1 if (report.core_report.financial_failed or report.core_report.industry_failed
+                 or report.valuation_report.failed_symbols or report.adjusted_return_report.failed_symbols) else 0
+
+
 def _run_structural_adjusted_return_command(limit: int, start_after: str | None) -> int:
     """Refresh one current structural batch through the existing Task32 collector."""
     from stock_selector.collection import (
@@ -892,6 +954,33 @@ def _print_structural_adjusted_return_collection_report(
             f"{result.symbol} {result.status.value} received={result.rows_received} "
             f"persisted={result.rows_persisted} {detail}".rstrip()
         )
+
+
+def _print_structural_slow_input_collection_report(report, structural_members: int) -> None:  # type: ignore[no-untyped-def]
+    """Print compact nested slow-input outcomes without implying factor readiness."""
+    core, valuation, adjusted = report.core_report, report.valuation_report, report.adjusted_return_report
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {structural_members}")
+    print(f"Batch requested: {len(report.requested_symbols)}")
+    print(f"Core financial success / empty / failed: {core.financial_success} / {core.financial_empty} / {core.financial_failed}")
+    print(f"Core financial rows persisted: {core.financial_rows_persisted}")
+    print(f"Core industry success / empty / failed: {core.industry_success} / {core.industry_empty} / {core.industry_failed}")
+    print(f"Core industry rows persisted: {core.industry_rows_persisted}")
+    print(f"Valuation success / empty / failed: {valuation.success_symbols} / {valuation.empty_symbols} / {valuation.failed_symbols}")
+    print(f"Valuation rows persisted: {valuation.rows_persisted}")
+    print(f"Valuation available after run: {valuation.valuation_available_after_run}")
+    print(f"Adjusted returns success / empty / failed: {adjusted.success_symbols} / {adjusted.empty_symbols} / {adjusted.failed_symbols}")
+    print(f"Adjusted return rows received: {adjusted.rows_received}")
+    print(f"Adjusted return rows persisted: {adjusted.rows_persisted}")
+    print(f"Availability as of: {adjusted.availability_as_of.isoformat()}")
+    print(f"Adjusted return available after run: {adjusted.adjusted_return_available_after_run}")
+    print(f"Final factor input covered after run: {report.factor_input_covered_after_run}")
+    print(f"Batch first: {report.batch_first_symbol}")
+    print(f"Batch last: {report.batch_last_symbol}")
+    print(f"Has more: {'YES' if report.has_more_structural_members else 'NO'}")
+    print(f"Next start-after: {report.next_start_after or 'complete'}")
+    for core_item, valuation_item, adjusted_item in zip(core.results, valuation.results, adjusted.results, strict=True):
+        print(f"{core_item.symbol} financial={core_item.financial_status.value} industry={core_item.industry_status.value} valuation={valuation_item.status.value} adjusted={adjusted_item.status.value}")
 
 
 def _provider_label(provider: AKShareProvider) -> str:

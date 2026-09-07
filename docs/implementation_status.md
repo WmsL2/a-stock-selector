@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 34 - Structural Adjusted Return Bounded Batch Refresh
+Task 35 - Unified Structural Slow-Input Bounded Refresh Orchestration
 
 ## Status
 
@@ -1058,6 +1058,26 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   multiple result timestamps, failed/empty symbols with existing evidence, future evidence, and
   report cutoff validation; no additional clock read is introduced.
 - Canonical root validation — PASS (672 backend tests; 90% coverage); Ruff, mypy, frontend type
+  check, lint, 38 Vitest tests and production build pass. No live provider call or real project
+  runtime data write was performed.
+
+## Task 35 — Unified Structural Slow-Input Bounded Refresh Orchestration (complete)
+
+- `python -m stock_selector refresh structural-slow-inputs --limit N [--start-after SYMBOL]`
+  selects one current structural batch (maximum 20) from one configured-timezone `current_at`.
+  It constructs one shared provider and invokes Core, Valuation, then PIT-safe Adjusted Returns once
+  each; adjusted returns retain their exact inclusive 180-calendar-day window and Task34
+  `availability_as_of` audit cutoff.
+- After all three wrappers complete, one final factor-input membership audit counts requested
+  symbols covered by existing membership semantics. This does not claim Momentum/LowVol readiness.
+  Per-symbol failures continue later domains but produce exit 1; contract/infrastructure errors abort.
+  The command is manual one-batch only: no loop, scheduler, API, frontend, ranking or full-universe run.
+
+## Task 35 Verification
+
+- Focused offline regressions — PASS: 8 unified slow-input orchestration contracts, 5 collection
+  architecture contracts, 68 collection tests and 46 CLI smoke tests.
+- Canonical root validation — PASS (689 backend tests; 90% coverage); Ruff, mypy, frontend type
   check, lint, 38 Vitest tests and production build pass. No live provider call or real project
   runtime data write was performed.
 
