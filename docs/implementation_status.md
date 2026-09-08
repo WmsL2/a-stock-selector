@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 37 - Current Structural Factor-Input Coverage Audit
+Task 38 - Missing-Targeted Structural Slow-Input Bounded Refresh
 
 ## Status
 
@@ -1122,6 +1122,26 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Canonical root validation — PASS (733 backend tests; 90% coverage); Ruff, mypy, frontend
   type-check, lint, 38 Vitest tests and production build pass. No live provider call or real
   project runtime data write was performed.
+
+## Task 38 — Missing-Targeted Structural Slow-Input Bounded Refresh (complete)
+
+- Adds `refresh structural-missing-slow-inputs --limit N [--start-after SYMBOL]`. Task37's
+  existing missing-membership partition is the authoritative target source; membership remains
+  Industry AND (Financial OR Valuation), and adjusted returns do not expand it.
+- The cursor is positioned in the current structural tuple and may name a covered member. One
+  missing scan selects at most 100 symbols, then reuses Task36's at-most-20 Task35 chunks with
+  `has_more_structural_members=False`; Task38 retains its own missing-scan continuation.
+- Nonempty execution has one clock, current snapshot, membership read, Task37 audit, pure planner,
+  shared provider, and Task35 graph. There is no automatic retry, checkpoint, scheduler,
+  full-market loop, domain-specific targeting, API/frontend change, or readiness claim. Failed
+  symbols can remain behind an advanced cursor and may be revisited without a cursor.
+
+## Task 38 Verification
+
+- Focused planner contracts — PASS (23); architecture contracts — PASS (8); collection suite —
+  PASS (121); CLI smoke — PASS (72). Canonical validation — PASS (768 backend tests; 90%
+  coverage); Ruff, mypy, frontend type-check, lint, 38 Vitest tests, and production build pass
+  (exit code 0). No live provider call or real project runtime data write was performed.
 
 ## Next Task
 

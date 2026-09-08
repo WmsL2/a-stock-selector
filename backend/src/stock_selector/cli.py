@@ -213,6 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
         "structural-factor-input-status",
         help="Audit current structural factor-input membership coverage.",
     )
+    missing_refresh = refresh_subparsers.add_parser(
+        "structural-missing-slow-inputs", allow_abbrev=False
+    )
+    missing_refresh.add_argument("--limit", type=int, required=True)
+    missing_refresh.add_argument("--start-after")
     return parser
 
 
@@ -247,6 +252,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_structural_slow_inputs_sweep_command(arguments.limit, arguments.start_after)
         if arguments.refresh_command == "structural-factor-input-status":
             return _run_structural_factor_input_status_command()
+        if arguments.refresh_command == "structural-missing-slow-inputs":
+            return _run_structural_missing_slow_inputs_command(
+                arguments.limit, arguments.start_after
+            )
         parser.print_help()
         return 2
     else:
@@ -733,6 +742,120 @@ def _run_structural_factor_input_status_command() -> int:
     return 0
 
 
+def _run_structural_missing_slow_inputs_command(
+    limit: int, start_after: str | None
+) -> int:
+    """Refresh one bounded missing-membership slice through the Task36 sweep."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralAdjustedReturnCollector,
+        StructuralCoreFundamentalsCollector,
+        StructuralFactorInputCoverageAuditor,
+        StructuralFactorInputCoverageRequest,
+        StructuralMissingRefreshPlanner,
+        StructuralMissingRefreshPlanRequest,
+        StructuralSlowInputCollector,
+        StructuralSlowInputSweepCollector,
+        StructuralSlowInputSweepRequest,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        if not 1 <= limit <= 100:
+            raise ValueError("--limit must be between 1 and 100")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        coverage = StructuralFactorInputCoverageAuditor().audit(
+            StructuralFactorInputCoverageRequest(
+                as_of=current_at,
+                structural_symbols=structural.members,
+                factor_input_symbols=repository.load_factor_input_symbols(),
+            )
+        )
+        plan = StructuralMissingRefreshPlanner().plan(
+            StructuralMissingRefreshPlanRequest(
+                as_of=current_at,
+                structural_symbols=structural.members,
+                missing_structural_symbols=coverage.missing_structural_symbols,
+                limit=limit,
+                start_after=start_after,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural missing slow-input refresh error: {exc}", file=sys.stderr)
+        return 1
+
+    _print_structural_missing_refresh_plan(coverage, plan)
+    if not plan.selected_symbols:
+        if coverage.structural_factor_input_missing == 0:
+            print("Structural factor-input coverage already complete.")
+        else:
+            print("No missing structural factor-input members after start-after.")
+        return 0
+
+    try:
+        provider = AKShareProvider()
+        task35 = StructuralSlowInputCollector(
+            StructuralCoreFundamentalsCollector(
+                FinancialCollector(provider, repository),
+                IndustryCollector(provider, repository),
+                repository,
+            ),
+            StructuralValuationCollector(ValuationCollector(provider, repository), repository),
+            StructuralAdjustedReturnCollector(
+                AdjustedDailyReturnCollector(provider, repository), repository
+            ),
+            repository,
+        )
+        report = StructuralSlowInputSweepCollector(task35).collect(
+            StructuralSlowInputSweepRequest(
+                symbols=plan.selected_symbols,
+                as_of=current_at,
+                has_more_structural_members=False,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        StorageError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural missing slow-input refresh error: {exc}", file=sys.stderr)
+        return 1
+
+    _print_structural_missing_refresh_report(report, plan)
+    return 1 if any(
+        batch.core_report.financial_failed
+        or batch.core_report.industry_failed
+        or batch.valuation_report.failed_symbols
+        or batch.adjusted_return_report.failed_symbols
+        for batch in report.batch_reports
+    ) else 0
+
+
 def _run_structural_valuation_command(limit: int, start_after: str | None) -> int:
     """Refresh one tightly bounded structural valuation batch without hidden retries."""
     from stock_selector.collection import (
@@ -1107,6 +1230,38 @@ def _print_structural_factor_input_coverage_report(report) -> None:  # type: ign
         "Non-structural stored factor-input symbols: "
         f"{report.nonstructural_stored_factor_input_symbols}"
     )
+
+
+def _print_structural_missing_refresh_plan(coverage, plan) -> None:  # type: ignore[no-untyped-def]
+    print(f"As of: {plan.as_of.isoformat()}")
+    print(f"Structural members: {len(plan.structural_symbols)}")
+    print(f"Stored factor-input symbols before refresh: {coverage.stored_factor_input_symbols}")
+    print(f"Structural factor-input covered before refresh: {coverage.structural_factor_input_covered}")
+    print(f"Structural factor-input missing before refresh: {coverage.structural_factor_input_missing}")
+    print(f"Missing after start-after: {plan.missing_after_cursor}")
+    print(f"Targeted requested: {plan.selected_count}")
+    print(f"Targeted first: {plan.selected_first_symbol or 'none'}")
+    print(f"Targeted last: {plan.selected_last_symbol or 'none'}")
+
+
+def _print_structural_missing_refresh_report(report, plan) -> None:  # type: ignore[no-untyped-def]
+    for index, batch in enumerate(report.batch_reports, start=1):
+        core = batch.core_report
+        valuation = batch.valuation_report
+        adjusted = batch.adjusted_return_report
+        print(f"Batch {index}/{len(report.batch_reports)}")
+        print(f"Batch requested: {len(batch.requested_symbols)}")
+        print(f"Batch first: {batch.batch_first_symbol}")
+        print(f"Batch last: {batch.batch_last_symbol}")
+        print(f"Core financial success / empty / failed: {core.financial_success} / {core.financial_empty} / {core.financial_failed}")
+        print(f"Core industry success / empty / failed: {core.industry_success} / {core.industry_empty} / {core.industry_failed}")
+        print(f"Valuation success / empty / failed: {valuation.success_symbols} / {valuation.empty_symbols} / {valuation.failed_symbols}")
+        print(f"Adjusted returns success / empty / failed: {adjusted.success_symbols} / {adjusted.empty_symbols} / {adjusted.failed_symbols}")
+        print(f"Adjusted availability as of: {adjusted.availability_as_of.isoformat()}")
+        print(f"Factor input covered after batch: {batch.factor_input_covered_after_run}")
+    print(f"Targeted factor-input covered after run: {report.factor_input_covered_after_run} / {plan.selected_count}")
+    print(f"Has more missing after selection: {'YES' if plan.has_more_missing_after_selection else 'NO'}")
+    print(f"Next missing-scan start-after: {plan.next_start_after or 'complete'}")
 
 
 def _print_structural_slow_input_sweep_report(report, structural_members: int) -> None:  # type: ignore[no-untyped-def]

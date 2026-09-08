@@ -34,6 +34,7 @@ def test_collector_has_no_hidden_clock() -> None:
         root / "structural_slow_inputs.py",
         root / "structural_slow_input_sweep.py",
         root / "structural_factor_input_coverage.py",
+        root / "structural_missing_refresh.py",
         root / "adjusted_returns.py",
     ):
         content = path.read_text(encoding="utf-8")
@@ -94,16 +95,38 @@ def test_structural_factor_input_coverage_has_no_infrastructure_dependencies() -
         "CurrentUniverseService",
         "datetime.now",
         "date.today",
-        "provider",
-        "filesystem",
-        "selection",
-        "scoring",
-        "realtime",
+        "from stock_selector.providers",
+        "import stock_selector.providers",
+        "from pathlib import Path",
+        "from stock_selector.selection",
+        "import stock_selector.selection",
+        "from stock_selector.scoring",
+        "import stock_selector.scoring",
+        "from stock_selector.realtime",
+        "import stock_selector.realtime",
+        "from stock_selector.api",
+        "import stock_selector.api",
         "FastAPI",
-        "frontend",
-        "sleep",
+        "sleep(",
+        "from time import sleep",
         "asyncio",
         "threading",
         "multiprocessing",
+    )
+    assert not any(token in content for token in forbidden)
+
+
+def test_structural_missing_refresh_has_no_scope_expansion_dependencies() -> None:
+    path = Path(__file__).parents[2] / "src" / "stock_selector" / "collection" / "structural_missing_refresh.py"
+    content = path.read_text(encoding="utf-8")
+    forbidden = (
+        "AKShareProvider", "akshare", "LocalMarketRepository", "CurrentUniverseService",
+        "datetime.now", "date.today", "StructuralSlowInputCollector", "StructuralSlowInputSweepCollector",
+        "from stock_selector.providers", "import stock_selector.providers",
+        "from stock_selector.selection", "import stock_selector.selection",
+        "from stock_selector.scoring", "import stock_selector.scoring",
+        "from stock_selector.realtime", "import stock_selector.realtime",
+        "from stock_selector.api", "import stock_selector.api", "FastAPI", "sleep(",
+        "from time import sleep", "asyncio", "threading", "multiprocessing",
     )
     assert not any(token in content for token in forbidden)

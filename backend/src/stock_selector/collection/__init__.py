@@ -45,6 +45,11 @@ from stock_selector.collection.structural_fundamentals import (
     StructuralCoreFundamentalsCollector,
     StructuralCoreSymbolResult,
 )
+from stock_selector.collection.structural_missing_refresh import (
+    StructuralMissingRefreshPlan,
+    StructuralMissingRefreshPlanner,
+    StructuralMissingRefreshPlanRequest,
+)
 from stock_selector.collection.structural_slow_input_sweep import (
     StructuralSlowInputSweepCollector,
     StructuralSlowInputSweepReport,
@@ -94,6 +99,9 @@ __all__ = [
     "StructuralFactorInputCoverageAuditor",
     "StructuralFactorInputCoverageReport",
     "StructuralFactorInputCoverageRequest",
+    "StructuralMissingRefreshPlan",
+    "StructuralMissingRefreshPlanRequest",
+    "StructuralMissingRefreshPlanner",
     "StructuralSlowInputCollectionReport",
     "StructuralSlowInputCollectionRequest",
     "StructuralSlowInputCollector",

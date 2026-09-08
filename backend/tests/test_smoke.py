@@ -544,6 +544,325 @@ def test_structural_factor_input_status_parser_has_no_operational_arguments() ->
     ).refresh_command == "structural-slow-inputs-sweep"
 
 
+def test_structural_missing_slow_inputs_parser_is_bounded() -> None:
+    arguments = build_parser().parse_args(
+        ["refresh", "structural-missing-slow-inputs", "--limit", "100", "--start-after", "000002.SZ"]
+    )
+    assert (arguments.limit, arguments.start_after) == (100, "000002.SZ")
+    for argument in ("--symbols", "--as-of", "--date", "--start", "--end"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(
+                ["refresh", "structural-missing-slow-inputs", "--limit", "1", argument, "x"]
+            )
+
+
+def _patch_missing_refresh_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    missing_symbols: tuple[str, ...],
+    selected_symbols: tuple[str, ...],
+    missing_after_cursor: int | None = None,
+    has_more: bool = False,
+    failure: str | None = None,
+    sweep_error: Exception | None = None,
+) -> dict[str, object]:
+    """Install offline recording fakes for the Task38 command graph."""
+    current_at = datetime(2026, 9, 8, 9, tzinfo=ZoneInfo("Asia/Shanghai"))
+    original_paths = AppPaths.from_project_root
+    captured: dict[str, object] = {
+        "now": 0,
+        "universe": 0,
+        "factor_read": 0,
+        "audit": 0,
+        "plan": 0,
+        "provider": 0,
+        "base": [],
+        "wrappers": [],
+        "task35": 0,
+        "sweep": 0,
+    }
+    provider = object()
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+        def load_factor_input_symbols(self) -> tuple[str, ...]:
+            captured["factor_read"] = int(captured["factor_read"]) + 1
+            return ("000001.SZ",)
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["universe"] = int(captured["universe"]) + 1
+            captured["universe_as_of"] = as_of
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ", "600519.SH"))
+
+    class Auditor:
+        def audit(self, request: object) -> SimpleNamespace:
+            captured["audit"] = int(captured["audit"]) + 1
+            captured["coverage_request"] = request
+            return SimpleNamespace(
+                stored_factor_input_symbols=1,
+                structural_factor_input_covered=3 - len(missing_symbols),
+                structural_factor_input_missing=len(missing_symbols),
+                missing_structural_symbols=missing_symbols,
+            )
+
+    class Planner:
+        def plan(self, request: object) -> SimpleNamespace:
+            captured["plan"] = int(captured["plan"]) + 1
+            captured["plan_request"] = request
+            return SimpleNamespace(
+                as_of=current_at,
+                structural_symbols=("000001.SZ", "000002.SZ", "600519.SH"),
+                missing_after_cursor=(
+                    len(selected_symbols)
+                    if missing_after_cursor is None
+                    else missing_after_cursor
+                ),
+                selected_symbols=selected_symbols,
+                selected_count=len(selected_symbols),
+                selected_first_symbol=selected_symbols[0] if selected_symbols else None,
+                selected_last_symbol=selected_symbols[-1] if selected_symbols else None,
+                has_more_missing_after_selection=has_more,
+                next_start_after=selected_symbols[-1] if has_more and selected_symbols else None,
+            )
+
+    def base(name: str):
+        class Base:
+            def __init__(self, supplied_provider: object, _repository: object) -> None:
+                cast = captured["base"]
+                assert isinstance(cast, list)
+                cast.append((name, supplied_provider))
+
+        return Base
+
+    class Core:
+        def __init__(self, financial: object, industry: object, _repository: object) -> None:
+            cast = captured["wrappers"]
+            assert isinstance(cast, list)
+            cast.append(("core", financial, industry))
+
+    class Valuation:
+        def __init__(self, collector: object, _repository: object) -> None:
+            cast = captured["wrappers"]
+            assert isinstance(cast, list)
+            cast.append(("valuation", collector))
+
+    class Adjusted:
+        def __init__(self, collector: object, _repository: object) -> None:
+            cast = captured["wrappers"]
+            assert isinstance(cast, list)
+            cast.append(("adjusted", collector))
+
+    class Task35:
+        def __init__(self, core: object, valuation: object, adjusted: object, _repository: object) -> None:
+            captured["task35"] = int(captured["task35"]) + 1
+            captured["task35_args"] = (core, valuation, adjusted)
+
+    class Sweep:
+        def __init__(self, task35: object) -> None:
+            captured["sweep_task35"] = task35
+
+        def collect(self, request: object) -> SimpleNamespace:
+            captured["sweep"] = int(captured["sweep"]) + 1
+            captured["sweep_request"] = request
+            if sweep_error is not None:
+                raise sweep_error
+            failed = ("000002.SZ",) if failure else ()
+            core = SimpleNamespace(
+                financial_success=0 if failure == "financial" else 1,
+                financial_empty=0,
+                financial_failed=failed if failure == "financial" else (),
+                industry_success=0 if failure == "industry" else 1,
+                industry_empty=0,
+                industry_failed=failed if failure == "industry" else (),
+            )
+            valuation = SimpleNamespace(
+                success_symbols=0 if failure == "valuation" else 1,
+                empty_symbols=0,
+                failed_symbols=failed if failure == "valuation" else (),
+            )
+            adjusted = SimpleNamespace(
+                success_symbols=0 if failure == "adjusted" else 1,
+                empty_symbols=0,
+                failed_symbols=failed if failure == "adjusted" else (),
+                availability_as_of=current_at,
+            )
+            batch = SimpleNamespace(
+                requested_symbols=selected_symbols,
+                batch_first_symbol=selected_symbols[0],
+                batch_last_symbol=selected_symbols[-1],
+                core_report=core,
+                valuation_report=valuation,
+                adjusted_return_report=adjusted,
+                factor_input_covered_after_run=len(selected_symbols),
+            )
+            return SimpleNamespace(
+                batch_reports=(batch,), factor_input_covered_after_run=len(selected_symbols)
+            )
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _timezone: _record_now(captured, current_at))
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr("stock_selector.collection.StructuralFactorInputCoverageAuditor", Auditor)
+    monkeypatch.setattr("stock_selector.collection.StructuralMissingRefreshPlanner", Planner)
+    monkeypatch.setattr(
+        "stock_selector.providers.AKShareProvider",
+        lambda: _record_provider(captured, provider),
+    )
+    monkeypatch.setattr("stock_selector.collection.FinancialCollector", base("financial"))
+    monkeypatch.setattr("stock_selector.collection.IndustryCollector", base("industry"))
+    monkeypatch.setattr("stock_selector.collection.ValuationCollector", base("valuation"))
+    monkeypatch.setattr("stock_selector.collection.AdjustedDailyReturnCollector", base("adjusted"))
+    monkeypatch.setattr("stock_selector.collection.StructuralCoreFundamentalsCollector", Core)
+    monkeypatch.setattr("stock_selector.collection.StructuralValuationCollector", Valuation)
+    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", Adjusted)
+    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputCollector", Task35)
+    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputSweepCollector", Sweep)
+    captured["current_at"] = current_at
+    return captured
+
+
+def _record_now(captured: dict[str, object], current_at: datetime) -> datetime:
+    captured["now"] = int(captured["now"]) + 1
+    return current_at
+
+
+def _record_provider(captured: dict[str, object], provider: object) -> object:
+    captured["provider"] = int(captured["provider"]) + 1
+    return provider
+
+
+def test_structural_missing_slow_inputs_rejects_invalid_limits_before_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured = _patch_missing_refresh_dependencies(
+        monkeypatch,
+        tmp_path,
+        missing_symbols=("000002.SZ",),
+        selected_symbols=("000002.SZ",),
+    )
+    assert main(["refresh", "structural-missing-slow-inputs", "--limit", "0"]) == 1
+    assert main(["refresh", "structural-missing-slow-inputs", "--limit", "101"]) == 1
+    assert captured["provider"] == captured["sweep"] == 0
+
+
+@pytest.mark.parametrize(
+    ("missing_symbols", "start_after", "expected_message"),
+    (
+        ((), None, "Structural factor-input coverage already complete."),
+        (("000001.SZ",), "600519.SH", "No missing structural factor-input members after start-after."),
+    ),
+)
+def test_structural_missing_slow_inputs_stops_without_graph_when_no_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    missing_symbols: tuple[str, ...],
+    start_after: str | None,
+    expected_message: str,
+) -> None:
+    captured = _patch_missing_refresh_dependencies(
+        monkeypatch, tmp_path, missing_symbols=missing_symbols, selected_symbols=()
+    )
+    arguments = ["refresh", "structural-missing-slow-inputs", "--limit", "2"]
+    if start_after:
+        arguments.extend(("--start-after", start_after))
+    assert main(arguments) == 0
+    assert captured["now"] == captured["universe"] == captured["factor_read"] == captured["audit"] == captured["plan"] == 1
+    assert captured["provider"] == captured["task35"] == captured["sweep"] == 0
+    output = capsys.readouterr().out
+    assert expected_message in output
+    if missing_symbols:
+        assert "coverage already complete" not in output
+        assert "Structural factor-input missing before refresh: 1" in output
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    ((None, 0), ("financial", 1), ("industry", 1), ("valuation", 1), ("adjusted", 1)),
+)
+def test_structural_missing_slow_inputs_uses_one_preselection_and_shared_graph(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failure: str | None,
+    expected: int,
+) -> None:
+    captured = _patch_missing_refresh_dependencies(
+        monkeypatch,
+        tmp_path,
+        missing_symbols=("000002.SZ", "600519.SH"),
+        selected_symbols=("000002.SZ",),
+        missing_after_cursor=2,
+        has_more=True,
+        failure=failure,
+    )
+    assert main(["refresh", "structural-missing-slow-inputs", "--limit", "1", "--start-after", "000001.SZ"]) == expected
+    current_at = captured["current_at"]
+    coverage_request = captured["coverage_request"]
+    plan_request = captured["plan_request"]
+    sweep_request = captured["sweep_request"]
+    assert captured["now"] == captured["universe"] == captured["factor_read"] == captured["audit"] == captured["plan"] == captured["provider"] == captured["task35"] == captured["sweep"] == 1
+    assert coverage_request.as_of == plan_request.as_of == sweep_request.as_of == current_at
+    assert coverage_request.structural_symbols == plan_request.structural_symbols == ("000001.SZ", "000002.SZ", "600519.SH")
+    assert coverage_request.factor_input_symbols == ("000001.SZ",)
+    assert plan_request.missing_structural_symbols == ("000002.SZ", "600519.SH")
+    assert (plan_request.limit, plan_request.start_after) == (1, "000001.SZ")
+    assert sweep_request.symbols == ("000002.SZ",)
+    assert sweep_request.has_more_structural_members is False
+    base = captured["base"]
+    assert isinstance(base, list)
+    assert [item[0] for item in base] == ["financial", "industry", "valuation", "adjusted"]
+    assert len({id(item[1]) for item in base}) == 1
+    output = capsys.readouterr().out
+    assert "Structural factor-input covered before refresh: 1" in output
+    assert "Structural factor-input missing before refresh: 2" in output
+    assert "Missing after start-after: 2" in output
+    assert "Targeted requested: 1" in output
+    assert "Targeted first: 000002.SZ" in output
+    assert "Targeted last: 000002.SZ" in output
+    assert "Batch requested: 1" in output
+    assert "Batch first: 000002.SZ" in output
+    assert "Batch last: 000002.SZ" in output
+    assert "Targeted factor-input covered after run: 1 / 1" in output
+    assert "Has more missing after selection: YES" in output
+    assert "Next missing-scan start-after: 000002.SZ" in output
+
+
+def test_structural_missing_slow_inputs_returns_one_for_sweep_storage_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured = _patch_missing_refresh_dependencies(
+        monkeypatch,
+        tmp_path,
+        missing_symbols=("000002.SZ",),
+        selected_symbols=("000002.SZ",),
+        sweep_error=StorageError("sweep storage"),
+    )
+    assert main(["refresh", "structural-missing-slow-inputs", "--limit", "1"]) == 1
+    assert captured["sweep"] == 1
+
+
+def test_task35_to_task37_parser_contracts_remain_unchanged() -> None:
+    parser = build_parser()
+    assert parser.parse_args(["refresh", "structural-slow-inputs", "--limit", "1"]).refresh_command == "structural-slow-inputs"
+    assert parser.parse_args(["refresh", "structural-slow-inputs-sweep", "--limit", "1"]).refresh_command == "structural-slow-inputs-sweep"
+    assert parser.parse_args(["refresh", "structural-factor-input-status"]).refresh_command == "structural-factor-input-status"
+
+
 @pytest.mark.parametrize(
     ("factor_symbols", "covered", "missing", "nonstructural", "coverage"),
     (
