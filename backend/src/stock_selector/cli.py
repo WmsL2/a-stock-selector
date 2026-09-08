@@ -209,6 +209,10 @@ def build_parser() -> argparse.ArgumentParser:
     slow_inputs_sweep = refresh_subparsers.add_parser("structural-slow-inputs-sweep")
     slow_inputs_sweep.add_argument("--limit", type=int, required=True)
     slow_inputs_sweep.add_argument("--start-after")
+    refresh_subparsers.add_parser(
+        "structural-factor-input-status",
+        help="Audit current structural factor-input membership coverage.",
+    )
     return parser
 
 
@@ -241,6 +245,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_structural_slow_inputs_command(arguments.limit, arguments.start_after)
         if arguments.refresh_command == "structural-slow-inputs-sweep":
             return _run_structural_slow_inputs_sweep_command(arguments.limit, arguments.start_after)
+        if arguments.refresh_command == "structural-factor-input-status":
+            return _run_structural_factor_input_status_command()
         parser.print_help()
         return 2
     else:
@@ -683,6 +689,50 @@ def _select_structural_batch(
     return symbols, start_index + len(symbols) < len(members)
 
 
+def _run_structural_factor_input_status_command() -> int:
+    """Audit existing factor-input membership for the current structural universe."""
+    from stock_selector.collection import (
+        CollectionDataError,
+        CollectionError,
+        StructuralFactorInputCoverageAuditor,
+        StructuralFactorInputCoverageRequest,
+    )
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(
+            current_at.date()
+        )
+        factor_input_symbols = repository.load_factor_input_symbols()
+        report = StructuralFactorInputCoverageAuditor().audit(
+            StructuralFactorInputCoverageRequest(
+                as_of=current_at,
+                structural_symbols=structural.members,
+                factor_input_symbols=factor_input_symbols,
+            )
+        )
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Structural factor-input status error: {exc}", file=sys.stderr)
+        return 1
+
+    _print_structural_factor_input_coverage_report(report)
+    return 0
+
+
 def _run_structural_valuation_command(limit: int, start_after: str | None) -> int:
     """Refresh one tightly bounded structural valuation batch without hidden retries."""
     from stock_selector.collection import (
@@ -1040,6 +1090,23 @@ def _print_structural_adjusted_return_collection_report(
             f"{result.symbol} {result.status.value} received={result.rows_received} "
             f"persisted={result.rows_persisted} {detail}".rstrip()
         )
+
+
+def _print_structural_factor_input_coverage_report(report) -> None:  # type: ignore[no-untyped-def]
+    """Print deterministic membership coverage without any readiness claim."""
+    coverage = report.structural_factor_input_covered / report.structural_members * 100
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {report.structural_members}")
+    print(f"Stored factor-input symbols: {report.stored_factor_input_symbols}")
+    print(f"Structural factor-input covered: {report.structural_factor_input_covered}")
+    print(f"Structural factor-input missing: {report.structural_factor_input_missing}")
+    print(f"Structural coverage: {coverage:.2f}%")
+    print(f"First missing symbol: {report.first_missing_symbol or 'complete'}")
+    print(f"Last missing symbol: {report.last_missing_symbol or 'complete'}")
+    print(
+        "Non-structural stored factor-input symbols: "
+        f"{report.nonstructural_stored_factor_input_symbols}"
+    )
 
 
 def _print_structural_slow_input_sweep_report(report, structural_members: int) -> None:  # type: ignore[no-untyped-def]

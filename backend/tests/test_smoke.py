@@ -20,8 +20,10 @@ from stock_selector.collection import (
     CollectionError,
 )
 from stock_selector.config import AppPaths, Settings
+from stock_selector.config.loader import ConfigurationError
 from stock_selector.models import Board, Exchange, Instrument
-from stock_selector.storage import LocalMarketRepository
+from stock_selector.storage import LocalMarketRepository, StorageError
+from stock_selector.universe import UniverseError
 
 
 def _patch_adjusted_cli(
@@ -524,6 +526,178 @@ def test_structural_slow_input_sweep_cli_parser_allows_only_cursor_and_limit() -
         build_parser().parse_args(
             ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--symbols", "000001.SZ"]
         )
+
+
+def test_structural_factor_input_status_parser_has_no_operational_arguments() -> None:
+    arguments = build_parser().parse_args(["refresh", "structural-factor-input-status"])
+    assert arguments.refresh_command == "structural-factor-input-status"
+    for argument in ("--limit", "--start-after", "--symbols", "--as-of"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(
+                ["refresh", "structural-factor-input-status", argument, "000001.SZ"]
+            )
+    assert build_parser().parse_args(
+        ["refresh", "structural-slow-inputs", "--limit", "1"]
+    ).refresh_command == "structural-slow-inputs"
+    assert build_parser().parse_args(
+        ["refresh", "structural-slow-inputs-sweep", "--limit", "1"]
+    ).refresh_command == "structural-slow-inputs-sweep"
+
+
+@pytest.mark.parametrize(
+    ("factor_symbols", "covered", "missing", "nonstructural", "coverage"),
+    (
+        (("000002.SZ", "600519.SH"), 1, 1, 1, "50.00%"),
+        ((), 0, 2, 0, "0.00%"),
+        (("000001.SZ", "000002.SZ"), 2, 0, 0, "100.00%"),
+    ),
+)
+def test_structural_factor_input_status_uses_one_snapshot_read_and_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    factor_symbols: tuple[str, ...],
+    covered: int,
+    missing: int,
+    nonstructural: int,
+    coverage: str,
+) -> None:
+    current_at = datetime(2026, 9, 7, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    original_paths = AppPaths.from_project_root
+    captured: dict[str, object] = {"now": 0, "universe": 0, "factor_read": 0, "audit": 0}
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+        def load_factor_input_symbols(self) -> tuple[str, ...]:
+            captured["factor_read"] += 1
+            return factor_symbols
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            captured["universe"] += 1
+            captured["universe_as_of"] = as_of
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ"))
+
+    class Auditor:
+        def audit(self, request: object) -> SimpleNamespace:
+            captured["audit"] += 1
+            captured["request"] = request
+            covered_symbols = tuple(
+                symbol for symbol in request.structural_symbols if symbol in factor_symbols
+            )
+            missing_symbols = tuple(
+                symbol for symbol in request.structural_symbols if symbol not in factor_symbols
+            )
+            assert len(covered_symbols) == covered
+            assert len(missing_symbols) == missing
+            return SimpleNamespace(
+                as_of=current_at,
+                structural_members=2,
+                stored_factor_input_symbols=len(factor_symbols),
+                structural_factor_input_covered=covered,
+                structural_factor_input_missing=missing,
+                nonstructural_stored_factor_input_symbols=nonstructural,
+                first_missing_symbol=missing_symbols[0] if missing_symbols else None,
+                last_missing_symbol=missing_symbols[-1] if missing_symbols else None,
+            )
+
+    def fake_now(_timezone: object) -> datetime:
+        captured["now"] += 1
+        return current_at
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=fake_now))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr(
+        "stock_selector.providers.AKShareProvider",
+        lambda: (_ for _ in ()).throw(AssertionError("provider must not be constructed")),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralFactorInputCoverageAuditor", Auditor
+    )
+
+    assert main(["refresh", "structural-factor-input-status"]) == 0
+    assert captured["now"] == captured["universe"] == captured["factor_read"] == captured["audit"] == 1
+    assert captured["universe_as_of"] == current_at.date()
+    assert captured["request"].structural_symbols == ("000001.SZ", "000002.SZ")
+    assert captured["request"].factor_input_symbols == factor_symbols
+    output = capsys.readouterr().out
+    assert f"Structural factor-input covered: {covered}" in output
+    assert f"Structural factor-input missing: {missing}" in output
+    assert f"Structural coverage: {coverage}" in output
+    assert f"Non-structural stored factor-input symbols: {nonstructural}" in output
+    missing_symbols = tuple(
+        symbol
+        for symbol in captured["request"].structural_symbols
+        if symbol not in factor_symbols
+    )
+    expected_marker = "complete" if not missing else missing_symbols[0]
+    assert f"First missing symbol: {expected_marker}" in output
+    assert f"Last missing symbol: {expected_marker if missing == 1 else (missing_symbols[-1] if missing else 'complete')}" in output
+
+
+@pytest.mark.parametrize("failure", ("config", "storage", "universe", "contract"))
+def test_structural_factor_input_status_returns_one_for_operational_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
+    original_paths = AppPaths.from_project_root
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            if failure == "storage":
+                raise StorageError("storage")
+
+        def load_factor_input_symbols(self) -> tuple[str, ...]:
+            return ()
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            if failure == "universe":
+                raise UniverseError("universe")
+            return SimpleNamespace(members=("000001.SZ",))
+
+    class Auditor:
+        def audit(self, _request: object) -> None:
+            raise ValueError("contract")
+
+    monkeypatch.setattr(
+        cli_module,
+        "load_settings",
+        (lambda _path: (_ for _ in ()).throw(ConfigurationError("config")))
+        if failure == "config" else lambda _path: Settings(),
+    )
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "datetime",
+        SimpleNamespace(now=lambda _tz: datetime(2026, 9, 7, tzinfo=ZoneInfo("Asia/Shanghai"))),
+    )
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralFactorInputCoverageAuditor", Auditor
+    )
+    assert main(["refresh", "structural-factor-input-status"]) == 1
 
 
 def test_structural_slow_input_sweep_stops_before_provider_for_invalid_or_empty_batch(

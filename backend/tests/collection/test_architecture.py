@@ -33,6 +33,7 @@ def test_collector_has_no_hidden_clock() -> None:
         root / "structural_adjusted_returns.py",
         root / "structural_slow_inputs.py",
         root / "structural_slow_input_sweep.py",
+        root / "structural_factor_input_coverage.py",
         root / "adjusted_returns.py",
     ):
         content = path.read_text(encoding="utf-8")
@@ -79,5 +80,30 @@ def test_structural_slow_input_sweep_has_no_scope_expansion_dependencies() -> No
         "AKShareProvider", "akshare", "CurrentUniverseService", "datetime.now",
         "date.today", "selection", "scoring", "realtime", "FastAPI", "frontend",
         "sleep", "asyncio", "threading", "multiprocessing",
+    )
+    assert not any(token in content for token in forbidden)
+
+
+def test_structural_factor_input_coverage_has_no_infrastructure_dependencies() -> None:
+    path = Path(__file__).parents[2] / "src" / "stock_selector" / "collection" / "structural_factor_input_coverage.py"
+    content = path.read_text(encoding="utf-8")
+    forbidden = (
+        "AKShareProvider",
+        "akshare",
+        "LocalMarketRepository",
+        "CurrentUniverseService",
+        "datetime.now",
+        "date.today",
+        "provider",
+        "filesystem",
+        "selection",
+        "scoring",
+        "realtime",
+        "FastAPI",
+        "frontend",
+        "sleep",
+        "asyncio",
+        "threading",
+        "multiprocessing",
     )
     assert not any(token in content for token in forbidden)

@@ -33,6 +33,11 @@ from stock_selector.collection.structural_adjusted_returns import (
     StructuralAdjustedReturnCollectionRequest,
     StructuralAdjustedReturnCollector,
 )
+from stock_selector.collection.structural_factor_input_coverage import (
+    StructuralFactorInputCoverageAuditor,
+    StructuralFactorInputCoverageReport,
+    StructuralFactorInputCoverageRequest,
+)
 from stock_selector.collection.structural_fundamentals import (
     StructuralCoreCollectionReport,
     StructuralCoreCollectionRequest,
@@ -86,6 +91,9 @@ __all__ = [
     "StructuralCoreDomainStatus",
     "StructuralCoreFundamentalsCollector",
     "StructuralCoreSymbolResult",
+    "StructuralFactorInputCoverageAuditor",
+    "StructuralFactorInputCoverageReport",
+    "StructuralFactorInputCoverageRequest",
     "StructuralSlowInputCollectionReport",
     "StructuralSlowInputCollectionRequest",
     "StructuralSlowInputCollector",

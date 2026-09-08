@@ -2,7 +2,7 @@
 
 ## Current Task
 
-Task 36 - Bounded Multi-Batch Structural Slow-Input Sweep
+Task 37 - Current Structural Factor-Input Coverage Audit
 
 ## Status
 
@@ -1101,6 +1101,27 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
 - Focused sweep tests — PASS (12); collection suite — PASS (81); CLI smoke — PASS (53).
 - Canonical root validation — PASS (709 backend tests; 90% coverage); Ruff, mypy, frontend
   type-check, lint, test, and build all pass.
+
+## Task 37 — Current Structural Factor-Input Coverage Audit (complete)
+
+- Adds `refresh structural-factor-input-status`, a current operational audit with one aware
+  clock read, one current structural snapshot, and one read of existing repository
+  factor-input membership.
+- It reports the exact structural intersection, structural missing symbols, and non-structural
+  stored membership. Zero coverage is valid; complete coverage prints `complete` for both
+  missing-symbol markers.
+- Membership remains Industry AND (Financial OR Valuation). Adjusted returns do not expand it.
+  The command constructs no provider, performs no collection or missing-targeted refresh, and
+  adds no checkpoint, scheduler, or full-market loop.
+- The audit does not claim readiness for Momentum, LowVol, five-factor, risk, or selection.
+
+## Task 37 Verification
+
+- Focused factor-input coverage contracts — PASS (15); collection suite — PASS (97); CLI smoke
+  — PASS (61).
+- Canonical root validation — PASS (733 backend tests; 90% coverage); Ruff, mypy, frontend
+  type-check, lint, 38 Vitest tests and production build pass. No live provider call or real
+  project runtime data write was performed.
 
 ## Next Task
 
