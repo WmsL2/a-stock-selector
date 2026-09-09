@@ -2,13 +2,24 @@
 
 ## Current Task
 
-Task 38 - Missing-Targeted Structural Slow-Input Bounded Refresh
+Task 39 - Current Daily-Selection Upstream Readiness Audit
 
 ## Status
 
 Completed
 
 ## Completed
+
+- Task39 adds local read-only `selection input-status`: one current structural snapshot, one
+  exact-date risk evaluation, Task37 factor-input membership reuse, and a pure current
+  risk-eligible factor-input audit. Upstream inputs are ready only when risk coverage is complete,
+  at least one member is risk-eligible, and every eligible member has factor-input membership.
+  Full structural coverage remains separately reported; this is not `selection_ready` and runs no
+  factors, BaseScore, selection, provider/network operation, write, or Task35–38 behavior.
+- Task39 verification: pure readiness contracts PASS (49), selection suite PASS (62), CLI smoke — PASS
+  (79), canonical validation PASS (825 backend tests; 91% coverage), Ruff and mypy PASS
+  (112 source files), and frontend type-check, lint, 38 Vitest tests, and production build PASS (exit code 0).
+  No live provider call or real runtime market-data write was performed.
 
 - Python 3.12 project scaffold
 - src layout

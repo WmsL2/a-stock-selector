@@ -152,6 +152,13 @@ def build_parser() -> argparse.ArgumentParser:
         "collect-current",
         help="Collect and persist complete current-day risk states for structural members.",
     )
+    selection_parser = subparsers.add_parser(
+        "selection", help="Inspect local daily-selection upstream inputs."
+    )
+    selection_subparsers = selection_parser.add_subparsers(dest="selection_command")
+    selection_subparsers.add_parser(
+        "input-status", help="Audit current daily-selection upstream inputs locally."
+    )
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
@@ -241,6 +248,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_realtime_command(arguments)
     elif arguments.command == "risk":
         return _run_risk_command(arguments.risk_command)
+    elif arguments.command == "selection":
+        return _run_selection_command(arguments.selection_command)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
     elif arguments.command == "fundamentals":
@@ -696,6 +705,60 @@ def _select_structural_batch(
             raise ValueError("--start-after must be a current structural member") from exc
     symbols = members[start_index : start_index + limit]
     return symbols, start_index + len(symbols) < len(members)
+
+
+def _run_selection_command(command: str | None) -> int:
+    """Audit local current upstream inputs without running daily selection."""
+    if command != "input-status":
+        print("A selection subcommand is required: input-status.", file=sys.stderr)
+        return 2
+    from stock_selector.collection import (
+        StructuralFactorInputCoverageAuditor,
+        StructuralFactorInputCoverageRequest,
+    )
+    from stock_selector.risk import RiskError
+    from stock_selector.risk.evaluator import RiskEligibilityEvaluator
+    from stock_selector.selection import (
+        DailySelectionInputReadinessAuditor,
+        DailySelectionInputReadinessRequest,
+    )
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        risk_states = repository.load_risk_states(current_at.date(), structural.members)
+        risk = RiskEligibilityEvaluator().evaluate(structural, risk_states, settings.universe)
+        factor_input_symbols = repository.load_factor_input_symbols()
+        coverage = StructuralFactorInputCoverageAuditor().audit(
+            StructuralFactorInputCoverageRequest(
+                as_of=current_at,
+                structural_symbols=structural.members,
+                factor_input_symbols=factor_input_symbols,
+            )
+        )
+        report = DailySelectionInputReadinessAuditor().audit(
+            DailySelectionInputReadinessRequest(
+                as_of=current_at,
+                structural_symbols=structural.members,
+                risk_record_symbols=tuple(state.symbol for state in risk_states),
+                risk_complete_symbols=tuple(
+                    decision.symbol for decision in risk.decisions if decision.risk_complete
+                ),
+                risk_eligible_symbols=risk.eligible_members,
+                factor_input_symbols=factor_input_symbols,
+            )
+        )
+    except (ConfigurationError, RiskError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        print(f"Daily-selection input status error: {exc}", file=sys.stderr)
+        return 1
+    _print_daily_selection_input_readiness_report(coverage, report)
+    return 0
 
 
 def _run_structural_factor_input_status_command() -> int:
@@ -1230,6 +1293,38 @@ def _print_structural_factor_input_coverage_report(report) -> None:  # type: ign
         "Non-structural stored factor-input symbols: "
         f"{report.nonstructural_stored_factor_input_symbols}"
     )
+
+
+def _print_daily_selection_input_readiness_report(coverage, report) -> None:  # type: ignore[no-untyped-def]
+    """Print current upstream inputs without implying selection output readiness."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {report.structural_members}")
+    print(f"Exact-date risk records: {report.risk_records}")
+    print(f"Risk-complete members: {report.risk_complete_members}")
+    print(f"Risk-incomplete members: {report.risk_incomplete_members}")
+    print(f"Risk-incomplete first: {report.risk_incomplete_first_symbol or 'none'}")
+    print(f"Risk-incomplete last: {report.risk_incomplete_last_symbol or 'none'}")
+    print(f"Risk-eligible members: {report.risk_eligible_members}")
+    print(f"Stored factor-input symbols: {coverage.stored_factor_input_symbols}")
+    print(f"Structural factor-input covered: {coverage.structural_factor_input_covered}")
+    print(f"Structural factor-input missing: {coverage.structural_factor_input_missing}")
+    print(
+        "Nonstructural stored factor-input symbols: "
+        f"{coverage.nonstructural_stored_factor_input_symbols}"
+    )
+    print(f"Eligible factor-input covered: {report.eligible_factor_input_covered}")
+    print(f"Eligible factor-input missing: {report.eligible_factor_input_missing}")
+    print(
+        "Eligible factor-input missing first: "
+        f"{report.eligible_factor_input_missing_first_symbol or 'none'}"
+    )
+    print(
+        "Eligible factor-input missing last: "
+        f"{report.eligible_factor_input_missing_last_symbol or 'none'}"
+    )
+    print(f"Daily-selection upstream inputs ready: {'YES' if report.upstream_inputs_ready else 'NO'}")
+    print("Blockers: " + (", ".join(item.value for item in report.blockers) or "none"))
+    print("Upstream readiness does not run factors/BaseScore and does not guarantee returned selection items.")
 
 
 def _print_structural_missing_refresh_plan(coverage, plan) -> None:  # type: ignore[no-untyped-def]

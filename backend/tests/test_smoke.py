@@ -863,6 +863,173 @@ def test_task35_to_task37_parser_contracts_remain_unchanged() -> None:
     assert parser.parse_args(["refresh", "structural-factor-input-status"]).refresh_command == "structural-factor-input-status"
 
 
+def test_selection_input_status_parser_has_no_operational_arguments() -> None:
+    assert build_parser().parse_args(["selection", "input-status"]).selection_command == "input-status"
+    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--refresh", "--persist"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["selection", "input-status", argument, "x"])
+
+
+@pytest.mark.parametrize(
+    ("complete", "eligible", "factor_symbols", "expected_ready", "expected_blocker", "structural_missing"),
+    (
+        (("000001.SZ",), (), ("000001.SZ",), "NO", "risk_state_coverage_incomplete", 1),
+        (("000001.SZ", "000002.SZ"), (), (), "NO", "no_risk_eligible_members", 2),
+        (("000001.SZ", "000002.SZ"), ("000001.SZ",), (), "NO", "eligible_factor_input_coverage_incomplete", 2),
+        (("000001.SZ", "000002.SZ"), ("000001.SZ",), ("000001.SZ",), "YES", "none", 1),
+        (("000001.SZ", "000002.SZ"), ("000001.SZ", "000002.SZ"), ("000001.SZ", "000002.SZ"), "YES", "none", 0),
+    ),
+)
+def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    complete: tuple[str, ...],
+    eligible: tuple[str, ...],
+    factor_symbols: tuple[str, ...],
+    expected_ready: str,
+    expected_blocker: str,
+    structural_missing: int,
+) -> None:
+    current_at = datetime(2026, 9, 8, 9, tzinfo=ZoneInfo("Asia/Shanghai"))
+    original_paths = AppPaths.from_project_root
+    calls: dict[str, object] = {"now": 0, "build": 0, "risk_read": 0, "evaluate": 0, "factor_read": 0, "coverage": 0, "readiness": 0}
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+        def load_risk_states(self, as_of: date, symbols: tuple[str, ...]) -> tuple[SimpleNamespace, ...]:
+            calls["risk_read"] = int(calls["risk_read"]) + 1
+            calls["risk_request"] = (as_of, symbols)
+            return tuple(SimpleNamespace(symbol=symbol) for symbol in symbols)
+
+        def load_factor_input_symbols(self) -> tuple[str, ...]:
+            calls["factor_read"] = int(calls["factor_read"]) + 1
+            return factor_symbols
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, as_of: date) -> SimpleNamespace:
+            calls["build"] = int(calls["build"]) + 1
+            calls["build_as_of"] = as_of
+            return SimpleNamespace(members=("000001.SZ", "000002.SZ"))
+
+    class Evaluator:
+        def evaluate(self, structural: object, states: tuple[SimpleNamespace, ...], _config: object) -> SimpleNamespace:
+            calls["evaluate"] = int(calls["evaluate"]) + 1
+            return SimpleNamespace(
+                eligible_members=eligible,
+                decisions=tuple(SimpleNamespace(symbol=symbol, risk_complete=symbol in complete) for symbol in structural.members),
+            )
+
+    from stock_selector.collection import (
+        StructuralFactorInputCoverageAuditor as CoverageAuditor,
+    )
+    from stock_selector.selection import (
+        DailySelectionInputReadinessAuditor as ReadinessAuditor,
+    )
+
+    class Coverage(CoverageAuditor):
+        def audit(self, request: object):  # type: ignore[no-untyped-def]
+            calls["coverage"] = int(calls["coverage"]) + 1
+            calls["coverage_request"] = request
+            return super().audit(request)
+
+    class Readiness(ReadinessAuditor):
+        def audit(self, request: object):  # type: ignore[no-untyped-def]
+            calls["readiness"] = int(calls["readiness"]) + 1
+            calls["readiness_request"] = request
+            return super().audit(request)
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _timezone: _record_now(calls, current_at)))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr("stock_selector.risk.evaluator.RiskEligibilityEvaluator", Evaluator)
+    monkeypatch.setattr("stock_selector.collection.StructuralFactorInputCoverageAuditor", Coverage)
+    monkeypatch.setattr("stock_selector.selection.DailySelectionInputReadinessAuditor", Readiness)
+    for target in (
+        "stock_selector.providers.AKShareProvider",
+        "stock_selector.collection.CurrentRiskStateCollector",
+        "stock_selector.collection.StructuralSlowInputCollector",
+        "stock_selector.collection.StructuralSlowInputSweepCollector",
+        "stock_selector.collection.StructuralMissingRefreshPlanner",
+        "stock_selector.selection.DailySelectionService",
+        "stock_selector.factors.FiveFactorEngine",
+        "stock_selector.scoring.BaseScoreEngine",
+        "stock_selector.explanation.ExplanationEngine",
+    ):
+        monkeypatch.setattr(
+            target,
+            lambda target=target: (_ for _ in ()).throw(AssertionError(target)),
+        )
+    assert main(["selection", "input-status"]) == 0
+    assert calls["now"] == calls["build"] == calls["risk_read"] == calls["evaluate"] == calls["factor_read"] == calls["coverage"] == calls["readiness"] == 1
+    assert calls["build_as_of"] == current_at.date()
+    assert calls["risk_request"] == (current_at.date(), ("000001.SZ", "000002.SZ"))
+    request = calls["readiness_request"]
+    coverage_request = calls["coverage_request"]
+    assert coverage_request.as_of == current_at
+    assert coverage_request.structural_symbols == ("000001.SZ", "000002.SZ")
+    assert coverage_request.factor_input_symbols == factor_symbols
+    assert request.as_of == current_at
+    assert request.structural_symbols == ("000001.SZ", "000002.SZ")
+    assert request.risk_record_symbols == ("000001.SZ", "000002.SZ")
+    assert request.risk_complete_symbols == complete
+    assert request.risk_eligible_symbols == eligible
+    assert request.factor_input_symbols == factor_symbols
+    output = capsys.readouterr().out
+    assert f"Daily-selection upstream inputs ready: {expected_ready}" in output
+    assert f"Blockers: {expected_blocker}" in output
+    assert f"Structural factor-input missing: {structural_missing}" in output
+    if expected_ready == "YES" and structural_missing == 1:
+        assert "Structural factor-input covered: 1" in output
+        assert "Eligible factor-input covered: 1" in output
+        assert "Eligible factor-input missing: 0" in output
+    assert "does not run factors/BaseScore and does not guarantee returned selection items" in output
+
+
+def test_selection_input_status_returns_one_for_storage_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    original_paths = AppPaths.from_project_root
+
+    class Repository:
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+        def load_risk_states(self, _as_of: date, _symbols: tuple[str, ...]) -> tuple[object, ...]:
+            raise StorageError("risk read")
+
+    class Universe:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def build_current(self, _as_of: date) -> SimpleNamespace:
+            return SimpleNamespace(members=("000001.SZ",))
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
+    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
+    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _timezone: datetime(2026, 9, 8, tzinfo=ZoneInfo("Asia/Shanghai"))))
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr(
+        "stock_selector.providers.AKShareProvider",
+        lambda: (_ for _ in ()).throw(AssertionError("provider must not be constructed")),
+    )
+    assert main(["selection", "input-status"]) == 1
+
+
 @pytest.mark.parametrize(
     ("factor_symbols", "covered", "missing", "nonstructural", "coverage"),
     (
