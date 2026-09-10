@@ -159,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
     selection_subparsers.add_parser(
         "input-status", help="Audit current daily-selection upstream inputs locally."
     )
+    prepare_inputs = selection_subparsers.add_parser(
+        "prepare-inputs",
+        allow_abbrev=False,
+        help="Prepare one bounded current upstream-input slice.",
+    )
+    prepare_inputs.add_argument("--limit", type=int, required=True)
+    prepare_inputs.add_argument("--start-after")
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
@@ -249,6 +256,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "risk":
         return _run_risk_command(arguments.risk_command)
     elif arguments.command == "selection":
+        if arguments.selection_command == "prepare-inputs":
+            return _run_selection_prepare_inputs_command(arguments.limit, arguments.start_after)
         return _run_selection_command(arguments.selection_command)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
@@ -759,6 +768,124 @@ def _run_selection_command(command: str | None) -> int:
         return 1
     _print_daily_selection_input_readiness_report(coverage, report)
     return 0
+
+
+def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -> int:
+    """Refresh current risk then one bounded eligible missing slow-input slice."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        CurrentRiskCollectionRequest,
+        CurrentRiskStateCollector,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralAdjustedReturnCollector,
+        StructuralCoreFundamentalsCollector,
+        StructuralFactorInputCoverageAuditor,
+        StructuralFactorInputCoverageRequest,
+        StructuralMissingRefreshPlanner,
+        StructuralMissingRefreshPlanRequest,
+        StructuralSlowInputCollector,
+        StructuralSlowInputSweepCollector,
+        StructuralSlowInputSweepRequest,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider, ProviderError
+    from stock_selector.risk import RiskError
+    from stock_selector.risk.evaluator import RiskEligibilityEvaluator
+    from stock_selector.selection import (
+        DailySelectionInputReadinessAuditor,
+        DailySelectionInputReadinessRequest,
+    )
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+    try:
+        if not 1 <= limit <= 100:
+            raise ValueError("--limit must be between 1 and 100")
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        if start_after is not None:
+            from stock_selector.models.common import validate_symbol
+            validate_symbol(start_after)
+            if start_after not in structural.members:
+                raise ValueError("--start-after must be a current structural member")
+        provider = AKShareProvider()
+        risk_report = CurrentRiskStateCollector(provider, repository).collect(
+            CurrentRiskCollectionRequest(symbols=structural.members, as_of=current_at.date())
+        )
+        risk_states = repository.load_risk_states(current_at.date(), structural.members)
+        risk = RiskEligibilityEvaluator().evaluate(structural, risk_states, settings.universe)
+        factor_before = repository.load_factor_input_symbols()
+        risk_records = tuple(state.symbol for state in risk_states)
+        complete = tuple(item.symbol for item in risk.decisions if item.risk_complete)
+        readiness_request = DailySelectionInputReadinessRequest(
+            as_of=current_at, structural_symbols=structural.members, risk_record_symbols=risk_records,
+            risk_complete_symbols=complete, risk_eligible_symbols=risk.eligible_members,
+            factor_input_symbols=factor_before,
+        )
+        pre_coverage = StructuralFactorInputCoverageAuditor().audit(
+            StructuralFactorInputCoverageRequest(as_of=current_at, structural_symbols=structural.members, factor_input_symbols=factor_before)
+        )
+        pre = DailySelectionInputReadinessAuditor().audit(readiness_request)
+        if pre.risk_incomplete_members:
+            raise ValueError("current-risk refresh did not produce complete risk coverage")
+        plan = StructuralMissingRefreshPlanner().plan(StructuralMissingRefreshPlanRequest(
+            as_of=current_at, structural_symbols=structural.members,
+            missing_structural_symbols=pre.eligible_factor_input_missing_symbols,
+            limit=limit, start_after=start_after,
+        ))
+    except (CollectionDataError, CollectionError, ConfigurationError, ProviderError, RiskError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        print(f"Daily-selection input preparation error: {exc}", file=sys.stderr)
+        return 1
+    _print_selection_prepare_pre(risk_report, pre_coverage, pre, plan)
+    if not plan.selected_symbols:
+        if not pre.risk_eligible_members:
+            print("No risk-eligible structural members after current-risk refresh.")
+        elif pre.upstream_inputs_ready:
+            print("Current daily-selection upstream inputs already ready after risk refresh.")
+        else:
+            print("No eligible factor-input-missing members after start-after.")
+        print("Preparation does not run DailySelectionService, factors, BaseScore, or return selection items.")
+        return 0
+    try:
+        task35 = StructuralSlowInputCollector(
+            StructuralCoreFundamentalsCollector(
+                FinancialCollector(provider, repository),
+                IndustryCollector(provider, repository),
+                repository,
+            ),
+            StructuralValuationCollector(
+                ValuationCollector(provider, repository), repository
+            ),
+            StructuralAdjustedReturnCollector(
+                AdjustedDailyReturnCollector(provider, repository), repository
+            ),
+            repository,
+        )
+        slow = StructuralSlowInputSweepCollector(task35).collect(StructuralSlowInputSweepRequest(
+            symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False
+        ))
+        factor_after = repository.load_factor_input_symbols()
+        post_coverage = StructuralFactorInputCoverageAuditor().audit(StructuralFactorInputCoverageRequest(as_of=current_at, structural_symbols=structural.members, factor_input_symbols=factor_after))
+        post = DailySelectionInputReadinessAuditor().audit(readiness_request.model_copy(update={"factor_input_symbols": factor_after}))
+    except (CollectionDataError, CollectionError, ConfigurationError, ProviderError, RiskError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        print(f"Daily-selection input preparation error: {exc}", file=sys.stderr)
+        return 1
+    _print_selection_prepare_post(slow, post_coverage, post)
+    print("Preparation does not run DailySelectionService, factors, BaseScore, or return selection items.")
+    return 1 if any(
+        batch.core_report.financial_failed
+        or batch.core_report.industry_failed
+        or batch.valuation_report.failed_symbols
+        or batch.adjusted_return_report.failed_symbols
+        for batch in slow.batch_reports
+    ) else 0
 
 
 def _run_structural_factor_input_status_command() -> int:
@@ -1325,6 +1452,62 @@ def _print_daily_selection_input_readiness_report(coverage, report) -> None:  # 
     print(f"Daily-selection upstream inputs ready: {'YES' if report.upstream_inputs_ready else 'NO'}")
     print("Blockers: " + (", ".join(item.value for item in report.blockers) or "none"))
     print("Upstream readiness does not run factors/BaseScore and does not guarantee returned selection items.")
+
+
+def _print_selection_prepare_pre(risk, coverage, readiness, plan) -> None:  # type: ignore[no-untyped-def]
+    print(f"As of: {readiness.as_of.isoformat()}")
+    print(f"Structural members: {readiness.structural_members}")
+    print(f"Current-risk requested: {len(risk.requested_symbols)}")
+    print(f"Current-risk persisted: {risk.states_persisted}")
+    print(f"Current-risk ST members: {risk.st_members}")
+    print(f"Current-risk suspended members: {risk.suspended_members}")
+    print(f"Current-risk delisting-period members: {risk.delisting_period_members}")
+    print(f"Current-risk observed_at: {risk.observed_at.isoformat()}")
+    print(f"Current-risk source: {risk.source}")
+    print(f"Pre-slow risk-complete: {readiness.risk_complete_members}")
+    print(f"Pre-slow risk-eligible: {readiness.risk_eligible_members}")
+    print(f"Pre-slow structural factor-input covered: {coverage.structural_factor_input_covered}")
+    print(f"Pre-slow structural factor-input missing: {coverage.structural_factor_input_missing}")
+    print(
+        f"Pre-slow eligible factor-input covered: "
+        f"{readiness.eligible_factor_input_covered}"
+    )
+    print(
+        f"Pre-slow eligible factor-input missing: "
+        f"{readiness.eligible_factor_input_missing}"
+    )
+    print(
+        f"Pre-slow upstream inputs ready: "
+        f"{'YES' if readiness.upstream_inputs_ready else 'NO'}"
+    )
+    print("Pre-slow blockers: " + (", ".join(item.value for item in readiness.blockers) or "none"))
+    print(f"Eligible missing after start-after: {plan.missing_after_cursor}")
+    print(f"Targeted requested: {plan.selected_count}")
+    print(f"Targeted first: {plan.selected_first_symbol or 'none'}")
+    print(f"Targeted last: {plan.selected_last_symbol or 'none'}")
+    print(f"Has more eligible missing after selection: {'YES' if plan.has_more_missing_after_selection else 'NO'}")
+    print(f"Next eligible-missing start-after: {plan.next_start_after or 'complete'}")
+
+
+def _print_selection_prepare_post(slow, coverage, readiness) -> None:  # type: ignore[no-untyped-def]
+    for index, batch in enumerate(slow.batch_reports, start=1):
+        core, valuation, adjusted = batch.core_report, batch.valuation_report, batch.adjusted_return_report
+        print(f"Batch {index}/{len(slow.batch_reports)}")
+        print(f"Batch requested: {len(batch.requested_symbols)}")
+        print(f"Batch first: {batch.batch_first_symbol}")
+        print(f"Batch last: {batch.batch_last_symbol}")
+        print(f"Financial success / empty / failed: {core.financial_success} / {core.financial_empty} / {core.financial_failed}")
+        print(f"Industry success / empty / failed: {core.industry_success} / {core.industry_empty} / {core.industry_failed}")
+        print(f"Valuation success / empty / failed: {valuation.success_symbols} / {valuation.empty_symbols} / {valuation.failed_symbols}")
+        print(f"Adjusted success / empty / failed: {adjusted.success_symbols} / {adjusted.empty_symbols} / {adjusted.failed_symbols}")
+        print(f"Adjusted availability as of: {adjusted.availability_as_of.isoformat()}")
+        print(f"Factor input covered after batch: {batch.factor_input_covered_after_run}")
+    print(f"Post-slow structural factor-input covered: {coverage.structural_factor_input_covered}")
+    print(f"Post-slow structural factor-input missing: {coverage.structural_factor_input_missing}")
+    print(f"Post-slow eligible factor-input covered: {readiness.eligible_factor_input_covered}")
+    print(f"Post-slow eligible factor-input missing: {readiness.eligible_factor_input_missing}")
+    print(f"Post-slow upstream inputs ready: {'YES' if readiness.upstream_inputs_ready else 'NO'}")
+    print("Post-slow blockers: " + (", ".join(item.value for item in readiness.blockers) or "none"))
 
 
 def _print_structural_missing_refresh_plan(coverage, plan) -> None:  # type: ignore[no-untyped-def]

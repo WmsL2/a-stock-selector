@@ -2,13 +2,31 @@
 
 ## Current Task
 
-Task 39 - Current Daily-Selection Upstream Readiness Audit
+Task 40 - Current Daily-Selection Upstream Input Bounded Preparation
 
 ## Status
 
 Completed
 
 ## Completed
+
+- Task40 verification: focused preparation PASS (18), selection suite PASS (80), CLI smoke PASS
+  (80), canonical validation PASS (844 backend tests; 89% coverage), Ruff and mypy PASS (112
+  source files), and frontend type-check, lint, 38 Vitest tests, and production build PASS (exit
+  code 0). No live provider call or real runtime market-data write was performed.
+
+- Task40 adds `selection prepare-inputs --limit N [--start-after SYMBOL]`. It refreshes current
+  full-structural risk once with one shared provider; fresh risk eligibility is authoritative, and
+  the target is risk-eligible AND factor-input-missing. Risk-ineligible structural misses remain
+  reported but are not targeted. The Task38 full-structural cursor is reused, including a covered,
+  risk-ineligible structural cursor. Task36 always receives
+  `has_more_structural_members=False`; Task40 owns eligible-missing continuation.
+  Selected symbols run the complete Financial/Industry/Valuation/Adjusted bundle, followed by one
+  factor-membership reread and no second risk read/evaluation. Remaining bounded work and EMPTY
+  results are not failures; nested FAILED results return 1 after the post-audit. An advanced cursor
+  can leave failed symbols behind, while a no-cursor rerun revisits them. There is no
+  scheduler/checkpoint/retry and no DailySelectionService, FiveFactor, BaseScore, Explanation, or
+  ranking execution.
 
 - Task39 adds local read-only `selection input-status`: one current structural snapshot, one
   exact-date risk evaluation, Task37 factor-input membership reuse, and a pure current

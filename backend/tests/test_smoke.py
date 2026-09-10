@@ -870,6 +870,16 @@ def test_selection_input_status_parser_has_no_operational_arguments() -> None:
             build_parser().parse_args(["selection", "input-status", argument, "x"])
 
 
+def test_selection_prepare_inputs_parser_is_tightly_bounded() -> None:
+    arguments = build_parser().parse_args(
+        ["selection", "prepare-inputs", "--limit", "100", "--start-after", "000002.SZ"]
+    )
+    assert (arguments.limit, arguments.start_after) == (100, "000002.SZ")
+    for argument in ("--as-of", "--date", "--symbols", "--start", "--end", "--persist", "--all-market", "--top-n"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["selection", "prepare-inputs", "--limit", "1", argument, "x"])
+
+
 @pytest.mark.parametrize(
     ("complete", "eligible", "factor_symbols", "expected_ready", "expected_blocker", "structural_missing"),
     (
