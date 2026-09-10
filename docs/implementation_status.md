@@ -2,13 +2,29 @@
 
 ## Current Task
 
-Task 40 - Current Daily-Selection Upstream Input Bounded Preparation
+Task 41 - Official Daily-Selection Upstream Readiness Enforcement
 
 ## Status
 
 Completed
 
 ## Completed
+
+- Task41 verification: focused daily selection PASS (19), selection suite PASS (88), relevant
+  daily-selection API coverage PASS (3), canonical validation PASS (852 backend tests; 89%
+  coverage), Ruff and mypy PASS (112 source files), and frontend type-check, lint, 38 Vitest
+  tests, and production build PASS (exit code 0). No live provider call or real runtime
+  market-data write was performed.
+
+- Task41 enforces Task39 upstream readiness in `DailySelectionService`: official ranking cannot
+  use a factor-covered subset of current risk-eligible members. Blocker priority is no structural,
+  risk incomplete, no eligible, eligible factor-input incomplete, then no scoreable. The new
+  blocker is `eligible_factor_input_coverage_incomplete`. Risk-ineligible structural gaps do not
+  block, while nonstructural stored membership cannot satisfy eligible coverage. Once ready, all
+  eligible members are the official cross-section and raw BaseScore ordering/tie-breaking are
+  unchanged. Membership readiness remains distinct from actual BaseScore scoreability. Task41 adds
+  no provider/network/write/current-risk refresh/Task40 preparation and makes no CLI, API, or
+  frontend production change.
 
 - Task40 verification: focused preparation PASS (18), selection suite PASS (80), CLI smoke PASS
   (80), canonical validation PASS (844 backend tests; 89% coverage), Ruff and mypy PASS (112

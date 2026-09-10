@@ -28,6 +28,11 @@ from stock_selector.storage import LocalMarketRepository
 from stock_selector.universe import AshareUniverseBuilder
 
 from .errors import SelectionDataError
+from .input_readiness import (
+    DailySelectionInputReadinessAuditor,
+    DailySelectionInputReadinessBlocker,
+    DailySelectionInputReadinessRequest,
+)
 from .models import DailySelectionDiagnostics, DailySelectionResult, SelectionBlocker
 
 
@@ -42,6 +47,7 @@ class DailySelectionService:
         self._factor_engine = FiveFactorEngine()
         self._score_engine = BaseScoreEngine()
         self._explanation_engine = ExplanationEngine()
+        self._input_readiness_auditor = DailySelectionInputReadinessAuditor()
 
     def build(self, as_of: datetime) -> DailySelectionResult:
         """Build one explicit-time result without a clock, provider, or storage mutation."""
@@ -50,26 +56,9 @@ class DailySelectionService:
         structural = self._universe_builder.build(
             instruments, self._settings.universe, as_of.date()
         )
-        risk = self._risk_evaluator.evaluate(
-            structural,
-            self._repository.load_risk_states(as_of.date(), structural.members),
-            self._settings.universe,
-        )
-        risk_ready = (
-            risk.structural_members > 0
-            and risk.risk_complete_members == risk.structural_members
-        )
-        blockers = _readiness_blockers(risk_ready, risk.structural_members, len(risk.eligible_members))
-        if not risk_ready:
-            return self._result(as_of, instruments, risk, 0, 0, (), blockers)
-        covered_symbols = set(self._repository.load_factor_input_symbols())
-        candidates = tuple(
-            symbol
-            for symbol in risk.eligible_members
-            if symbol in covered_symbols
-        )
-        factor_inputs = tuple(self._factor_input(symbol, as_of) for symbol in candidates)
-        if not factor_inputs:
+        risk_states = self._repository.load_risk_states(as_of.date(), structural.members)
+        risk = self._risk_evaluator.evaluate(structural, risk_states, self._settings.universe)
+        if not risk.structural_members:
             return self._result(
                 as_of,
                 instruments,
@@ -77,9 +66,61 @@ class DailySelectionService:
                 0,
                 0,
                 (),
-                _readiness_blockers(risk_ready, risk.structural_members, len(risk.eligible_members))
-                + (SelectionBlocker.NO_SCOREABLE_INSTRUMENTS,),
+                (SelectionBlocker.NO_STRUCTURAL_MEMBERS,),
             )
+        risk_ready = (
+            risk.risk_complete_members == risk.structural_members
+        )
+        if not risk_ready:
+            return self._result(
+                as_of,
+                instruments,
+                risk,
+                0,
+                0,
+                (),
+                (SelectionBlocker.RISK_STATE_COVERAGE_INCOMPLETE,),
+            )
+        if not risk.eligible_members:
+            return self._result(
+                as_of,
+                instruments,
+                risk,
+                0,
+                0,
+                (),
+                (SelectionBlocker.NO_RISK_ELIGIBLE_MEMBERS,),
+            )
+        factor_input_symbols = self._repository.load_factor_input_symbols()
+        readiness = self._input_readiness_auditor.audit(
+            DailySelectionInputReadinessRequest(
+                as_of=as_of,
+                structural_symbols=structural.members,
+                risk_record_symbols=tuple(state.symbol for state in risk_states),
+                risk_complete_symbols=tuple(
+                    decision.symbol for decision in risk.decisions if decision.risk_complete
+                ),
+                risk_eligible_symbols=risk.eligible_members,
+                factor_input_symbols=factor_input_symbols,
+            )
+        )
+        if not readiness.upstream_inputs_ready:
+            if readiness.blockers != (
+                DailySelectionInputReadinessBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE,
+            ):
+                raise SelectionDataError("contradictory upstream readiness after risk gates")
+            return self._result(
+                as_of,
+                instruments,
+                risk,
+                readiness.eligible_factor_input_covered,
+                0,
+                (),
+                (SelectionBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE,),
+            )
+        factor_inputs = tuple(
+            self._factor_input(symbol, as_of) for symbol in risk.eligible_members
+        )
         factor_result = self._factor_engine.compute(FiveFactorRequest(stocks=factor_inputs))
         score_result = self._score_engine.compute(
             BaseScoreRequest(factors=factor_result, config=self._settings.factors)
@@ -105,14 +146,14 @@ class DailySelectionService:
             )
             for rank, item in enumerate(ordered[: self._settings.selection.top_n], start=1)
         )
-        blockers = _readiness_blockers(risk_ready, risk.structural_members, len(risk.eligible_members))
+        blockers: tuple[SelectionBlocker, ...] = ()
         if not ordered:
             blockers += (SelectionBlocker.NO_SCOREABLE_INSTRUMENTS,)
         return self._result(
             as_of,
             instruments,
             risk,
-            len(factor_inputs),
+            readiness.eligible_factor_input_covered,
             len(ordered),
             top_items,
             blockers,
@@ -201,19 +242,6 @@ class DailySelectionService:
             diagnostics=diagnostics,
             selection=SelectionResult(as_of=as_of, strategy_name="base_score_v1", items=items),
         )
-
-
-def _readiness_blockers(
-    risk_ready: bool, structural_members: int, risk_eligible_members: int
-) -> tuple[SelectionBlocker, ...]:
-    blockers: list[SelectionBlocker] = []
-    if not structural_members:
-        blockers.append(SelectionBlocker.NO_STRUCTURAL_MEMBERS)
-    if not risk_ready and structural_members:
-        blockers.append(SelectionBlocker.RISK_STATE_COVERAGE_INCOMPLETE)
-    if risk_ready and not risk_eligible_members:
-        blockers.append(SelectionBlocker.NO_RISK_ELIGIBLE_MEMBERS)
-    return tuple(blockers)
 
 
 def _stock_score(

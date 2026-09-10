@@ -25,7 +25,14 @@ from stock_selector.scoring import (
     BaseScoreStockResult,
     FactorWeightContribution,
 )
-from stock_selector.selection import DailySelectionService, SelectionBlocker
+from stock_selector.selection import (
+    DailySelectionService,
+    SelectionBlocker,
+    SelectionDataError,
+)
+from stock_selector.selection.input_readiness import (
+    DailySelectionInputReadinessBlocker,
+)
 from stock_selector.storage import LocalMarketRepository
 
 _AS_OF = datetime(2026, 3, 31, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
@@ -438,4 +445,132 @@ def test_return_only_symbol_does_not_expand_daily_factor_input_membership(tmp_pa
 
     assert repository.load_factor_input_symbols() == (covered,)
     assert result.diagnostics.factor_input_members == 1
-    assert [item.symbol for item in result.selection.items] == [covered]
+    assert result.selection.items == ()
+    assert result.diagnostics.blockers == (
+        SelectionBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE,
+    )
+
+
+def _forbid_official_engines(service: DailySelectionService, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        service._factor_engine, "compute", lambda _request: (_ for _ in ()).throw(AssertionError("factors"))
+    )
+    monkeypatch.setattr(
+        service._score_engine, "compute", lambda _request: (_ for _ in ()).throw(AssertionError("scoring"))
+    )
+    monkeypatch.setattr(
+        service._explanation_engine, "explain", lambda _request: (_ for _ in ()).throw(AssertionError("explanation"))
+    )
+
+
+def test_partial_eligible_factor_coverage_blocks_official_ranking(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "000002.SZ", "000003.SZ")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols[:2])
+    repository.upsert_risk_states(tuple(_risk(symbol) for symbol in symbols))
+    service = DailySelectionService(repository, Settings())
+    _forbid_official_engines(service, monkeypatch)
+
+    result = service.build(_AS_OF)
+
+    assert result.selection.items == ()
+    assert result.diagnostics.selection_ready is False
+    assert result.diagnostics.risk_eligible_members == 3
+    assert result.diagnostics.factor_input_members == 2
+    assert result.diagnostics.scoreable_members == result.diagnostics.returned_items == 0
+    assert result.diagnostics.blockers == (
+        SelectionBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE,
+    )
+
+
+def test_risk_ineligible_structural_factor_gap_does_not_block(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "000002.SZ", "000003.SZ")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols[:2])
+    repository.upsert_risk_states((_risk(symbols[0]), _risk(symbols[1]), _risk(symbols[2], is_st=True)))
+    service = DailySelectionService(repository, Settings())
+    monkeypatch.setattr(service._score_engine, "compute", lambda _request: _stub_score(_AS_OF, ((symbols[0], 80.0, 1.0), (symbols[1], 70.0, 1.0))))
+
+    result = service.build(_AS_OF)
+
+    assert result.diagnostics.risk_eligible_members == result.diagnostics.factor_input_members == 2
+    assert SelectionBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE not in result.diagnostics.blockers
+    assert [item.symbol for item in result.selection.items] == list(symbols[:2])
+
+
+def test_nonstructural_factor_membership_does_not_satisfy_eligible_coverage(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "000002.SZ")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols)
+    repository.upsert_risk_states(tuple(_risk(symbol) for symbol in symbols))
+    monkeypatch.setattr(repository, "load_factor_input_symbols", lambda: (symbols[0], "300001.SZ"))
+    service = DailySelectionService(repository, Settings())
+    _forbid_official_engines(service, monkeypatch)
+
+    result = service.build(_AS_OF)
+
+    assert result.diagnostics.factor_input_members == 1
+    assert result.diagnostics.blockers == (
+        SelectionBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("symbols", "risks", "expected"),
+    (
+        ((), (), SelectionBlocker.NO_STRUCTURAL_MEMBERS),
+        (("000001.SZ",), (), SelectionBlocker.RISK_STATE_COVERAGE_INCOMPLETE),
+        (("000001.SZ",), (_risk("000001.SZ", is_st=True),), SelectionBlocker.NO_RISK_ELIGIBLE_MEMBERS),
+    ),
+)
+def test_root_blocker_priority_short_circuits_before_factor_membership(tmp_path, monkeypatch: pytest.MonkeyPatch, symbols: tuple[str, ...], risks: tuple[DatedRiskState, ...], expected: SelectionBlocker) -> None:  # type: ignore[no-untyped-def]
+    if symbols:
+        repository = _repository(tmp_path, symbols)
+    else:
+        repository = LocalMarketRepository(AppPaths.from_project_root(tmp_path))
+        repository.initialize()
+    if risks:
+        repository.upsert_risk_states(risks)
+    monkeypatch.setattr(repository, "load_factor_input_symbols", lambda: (_ for _ in ()).throw(AssertionError("membership")))
+    service = DailySelectionService(repository, Settings())
+    _forbid_official_engines(service, monkeypatch)
+
+    result = service.build(_AS_OF)
+
+    assert result.diagnostics.blockers == (expected,)
+
+
+def test_task39_auditor_receives_exact_local_snapshot_once(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    symbols = ("000001.SZ", "000002.SZ")
+    repository = _repository(tmp_path, symbols)
+    _seed_factor_inputs(repository, symbols)
+    repository.upsert_risk_states(tuple(_risk(symbol) for symbol in symbols))
+    service = DailySelectionService(repository, Settings())
+    requests = []
+    audit = service._input_readiness_auditor.audit
+    monkeypatch.setattr(service._input_readiness_auditor, "audit", lambda request: requests.append(request) or audit(request))
+
+    service.build(_AS_OF)
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.as_of == _AS_OF
+    assert request.structural_symbols == request.risk_record_symbols == request.risk_complete_symbols == request.risk_eligible_symbols == symbols
+    assert request.factor_input_symbols == symbols
+
+
+def test_contradictory_task39_result_fails_closed(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    symbol = "000001.SZ"
+    repository = _repository(tmp_path, (symbol,))
+    _seed_factor_inputs(repository, (symbol,))
+    repository.upsert_risk_states((_risk(symbol),))
+    service = DailySelectionService(repository, Settings())
+    monkeypatch.setattr(
+        service._input_readiness_auditor,
+        "audit",
+        lambda _request: type("Report", (), {"upstream_inputs_ready": False, "blockers": (DailySelectionInputReadinessBlocker.RISK_STATE_COVERAGE_INCOMPLETE,)})(),
+    )
+    _forbid_official_engines(service, monkeypatch)
+
+    with pytest.raises(SelectionDataError, match="contradictory upstream readiness"):
+        service.build(_AS_OF)

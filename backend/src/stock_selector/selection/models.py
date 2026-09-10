@@ -15,6 +15,9 @@ class SelectionBlocker(StrEnum):
     RISK_STATE_COVERAGE_INCOMPLETE = "risk_state_coverage_incomplete"
     NO_STRUCTURAL_MEMBERS = "no_structural_members"
     NO_RISK_ELIGIBLE_MEMBERS = "no_risk_eligible_members"
+    ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE = (
+        "eligible_factor_input_coverage_incomplete"
+    )
     NO_SCOREABLE_INSTRUMENTS = "no_scoreable_instruments"
 
 
