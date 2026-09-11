@@ -880,6 +880,18 @@ def test_selection_prepare_inputs_parser_is_tightly_bounded() -> None:
             build_parser().parse_args(["selection", "prepare-inputs", "--limit", "1", argument, "x"])
 
 
+def test_selection_run_current_parser_has_no_operational_arguments() -> None:
+    assert build_parser().parse_args(["selection", "run-current"]).selection_command == "run-current"
+    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--top-n", "--persist", "--refresh", "--prepare", "--all-market"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["selection", "run-current", argument, "x"])
+
+
+def test_selection_without_subcommand_reports_all_available_commands(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["selection"]) == 2
+    assert "input-status, prepare-inputs, or run-current" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("complete", "eligible", "factor_symbols", "expected_ready", "expected_blocker", "structural_missing"),
     (

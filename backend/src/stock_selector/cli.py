@@ -153,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collect and persist complete current-day risk states for structural members.",
     )
     selection_parser = subparsers.add_parser(
-        "selection", help="Inspect local daily-selection upstream inputs."
+        "selection", help="Inspect, prepare, or run current daily selection."
     )
     selection_subparsers = selection_parser.add_subparsers(dest="selection_command")
     selection_subparsers.add_parser(
@@ -166,6 +166,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_inputs.add_argument("--limit", type=int, required=True)
     prepare_inputs.add_argument("--start-after")
+    selection_subparsers.add_parser(
+        "run-current",
+        allow_abbrev=False,
+        help="Run the current official daily selection from local inputs.",
+    )
     quality_parser = subparsers.add_parser(
         "quality", help="Inspect offline dated-risk coverage and realtime freshness."
     )
@@ -258,6 +263,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "selection":
         if arguments.selection_command == "prepare-inputs":
             return _run_selection_prepare_inputs_command(arguments.limit, arguments.start_after)
+        if arguments.selection_command == "run-current":
+            return _run_selection_run_current_command()
         return _run_selection_command(arguments.selection_command)
     elif arguments.command == "quality":
         return _run_quality_command(arguments.quality_command)
@@ -719,7 +726,10 @@ def _select_structural_batch(
 def _run_selection_command(command: str | None) -> int:
     """Audit local current upstream inputs without running daily selection."""
     if command != "input-status":
-        print("A selection subcommand is required: input-status.", file=sys.stderr)
+        print(
+            "A selection subcommand is required: input-status, prepare-inputs, or run-current.",
+            file=sys.stderr,
+        )
         return 2
     from stock_selector.collection import (
         StructuralFactorInputCoverageAuditor,
@@ -768,6 +778,72 @@ def _run_selection_command(command: str | None) -> int:
         return 1
     _print_daily_selection_input_readiness_report(coverage, report)
     return 0
+
+
+def _run_selection_run_current_command() -> int:
+    """Run the authoritative current official daily selection once."""
+    from stock_selector.risk import RiskError
+    from stock_selector.selection import DailySelectionService, SelectionError
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import UniverseError
+
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        result = DailySelectionService(repository, settings).build(current_at)
+    except (
+        ConfigurationError,
+        RiskError,
+        SelectionError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Daily-selection execution error: {exc}", file=sys.stderr)
+        return 1
+    _print_daily_selection_execution(result)
+    return 0
+
+
+def _print_daily_selection_execution(result) -> None:  # type: ignore[no-untyped-def]
+    """Print the returned official result without changing its order or ranks."""
+    diagnostics = result.diagnostics
+    print(f"As of: {result.as_of.isoformat()}")
+    print(f"Official daily selection ready: {'YES' if diagnostics.selection_ready else 'NO'}")
+    print("Blockers: " + (", ".join(item.value for item in diagnostics.blockers) or "none"))
+    print(f"Input instruments: {diagnostics.input_instruments}")
+    print(f"Structural members: {diagnostics.structural_members}")
+    print(f"Exact-date risk records: {diagnostics.risk_records}")
+    print(f"Risk-complete members: {diagnostics.risk_complete_members}")
+    print(f"Risk coverage: {diagnostics.risk_coverage_ratio:.2%}")
+    print(f"Risk-eligible members: {diagnostics.risk_eligible_members}")
+    print(f"Eligible factor-input members: {diagnostics.factor_input_members}")
+    print(f"Scoreable members: {diagnostics.scoreable_members}")
+    print(f"Requested TopN: {diagnostics.requested_top_n}")
+    print(f"Returned items: {diagnostics.returned_items}")
+    print(f"Price factors operational: {'YES' if diagnostics.price_factors_operational else 'NO'}")
+    if not result.selection.items:
+        print("Official selection items: none")
+        return
+    for item in result.selection.items:
+        print(
+            f"Rank {item.market_rank}: {item.symbol} BaseScore={item.base_score:.4f} "
+            f"completeness={item.data_completeness:.2%} confidence={item.confidence:.2%} "
+            f"confidence_adjusted_score={_format_optional_score(item.confidence_adjusted_score)} "
+            f"quality={_format_optional_score(item.quality_score)} "
+            f"value={_format_optional_score(item.value_score)} "
+            f"growth={_format_optional_score(item.growth_score)} "
+            f"momentum={_format_optional_score(item.momentum_score)} "
+            f"low_volatility={_format_optional_score(item.low_volatility_score)}"
+        )
+
+
+def _format_optional_score(value: float | None) -> str:
+    return "unavailable" if value is None else f"{value:.4f}"
 
 
 def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -> int:

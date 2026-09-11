@@ -2,13 +2,26 @@
 
 ## Current Task
 
-Task 41 - Official Daily-Selection Upstream Readiness Enforcement
+Task 42 - Current Official Daily-Selection CLI Execution
 
 ## Status
 
 Completed
 
 ## Completed
+
+- Task42 verification: focused current CLI PASS (8), selection suite PASS (96), CLI smoke PASS
+  (82), canonical validation PASS (862 backend tests; 89% coverage), Ruff and mypy PASS (112
+  source files), and frontend type-check, lint, 38 Vitest tests, and production build PASS (exit
+  code 0). No live provider call or real runtime market-data write was performed.
+
+- Task42 adds `selection run-current` with no operational arguments. The thin local adapter owns
+  one aware current clock, one repository, and one `DailySelectionService.build(current_at)` call;
+  Task41 remains authoritative for readiness and ranking, with no duplicated Task39 audit or Task40
+  preparation. Ready and blocked-domain results both exit 0; exceptions exit 1. Blocker values,
+  returned item order, and market ranks are preserved; raw BaseScore remains official order and
+  confidence-adjusted score is display-only. Configured TopN remains authoritative. There is no
+  provider/network/refresh/write/persistence/scheduler/retry or API/frontend production change.
 
 - Task41 verification: focused daily selection PASS (19), selection suite PASS (88), relevant
   daily-selection API coverage PASS (3), canonical validation PASS (852 backend tests; 89%
