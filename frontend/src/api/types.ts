@@ -318,10 +318,17 @@ export interface DailySelectionDiagnosticsResponse {
   price_factors_operational: boolean
 }
 
+export type DailySelectionBlocker =
+  | 'no_structural_members'
+  | 'risk_state_coverage_incomplete'
+  | 'no_risk_eligible_members'
+  | 'eligible_factor_input_coverage_incomplete'
+  | 'no_scoreable_instruments'
+
 export interface DailySelectionResponse {
   as_of: string
   selection_ready: boolean
-  blockers: string[]
+  blockers: DailySelectionBlocker[]
   diagnostics: DailySelectionDiagnosticsResponse
   items: DailySelectionItemResponse[]
 }

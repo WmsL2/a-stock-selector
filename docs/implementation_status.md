@@ -2,13 +2,26 @@
 
 ## Current Task
 
-Task 42 - Current Official Daily-Selection CLI Execution
+Task 43 - Official Daily-Selection Blocker-Aware Frontend Diagnostics
 
 ## Status
 
 Completed
 
 ## Completed
+
+- Task43 verification: focused daily-selection frontend PASS (12), frontend Vitest PASS (44),
+  frontend type-check, lint, and production build PASS, canonical validation PASS (862 backend
+  tests; 89% coverage), and mypy PASS (112 source files; exit code 0). No live provider call or
+  real runtime market-data write was performed.
+
+- Task43 narrows `DailySelectionResponse` to the five official Task41 blocker values and presents
+  each in `DailySelectionView` with its raw code visible. Eligible factor-input coverage is shown
+  as covered / risk-eligible, and incomplete coverage explicitly blocks partial-covered-subset
+  ranking. No-scoreable remains distinct from membership incomplete; risk-ineligible and empty
+  structural states are not mislabeled as data failure. HTTP failures remain separate, ready-table
+  order is unchanged, and refresh remains read-only. No backend, API, provider, storage, or
+  collection production change was made.
 
 - Task42 verification: focused current CLI PASS (8), selection suite PASS (96), CLI smoke PASS
   (82), canonical validation PASS (862 backend tests; 89% coverage), Ruff and mypy PASS (112

@@ -10,6 +10,7 @@ vi.mock('@/api/selection', () => api)
 vi.mock('vue-router', () => ({ useRouter: () => router }))
 
 import DailySelectionView from '@/views/DailySelectionView.vue'
+import type { DailySelectionBlocker, DailySelectionResponse } from '@/api/types'
 
 const diagnostics = {
   input_instruments: 3,
@@ -25,7 +26,7 @@ const diagnostics = {
   price_factors_operational: false,
 }
 
-const notReadyResponse = {
+const notReadyResponse: DailySelectionResponse = {
   as_of: '2026-03-31T16:00:00+08:00',
   selection_ready: false,
   blockers: ['risk_state_coverage_incomplete'],
@@ -33,7 +34,7 @@ const notReadyResponse = {
   items: [],
 }
 
-const readyResponse = {
+const readyResponse: DailySelectionResponse = {
   as_of: '2026-03-31T16:00:00+08:00',
   selection_ready: true,
   blockers: [],
@@ -64,6 +65,14 @@ const readyResponse = {
   ],
 }
 
+const blockerFixtures: Record<DailySelectionBlocker, DailySelectionResponse> = {
+  no_structural_members: { ...notReadyResponse, blockers: ['no_structural_members'], diagnostics: { ...notReadyResponse.diagnostics, structural_members: 0 } },
+  risk_state_coverage_incomplete: notReadyResponse,
+  no_risk_eligible_members: { ...notReadyResponse, blockers: ['no_risk_eligible_members'], diagnostics: { ...diagnostics, risk_eligible_members: 0, factor_input_members: 0, scoreable_members: 0, returned_items: 0 } },
+  eligible_factor_input_coverage_incomplete: { ...notReadyResponse, blockers: ['eligible_factor_input_coverage_incomplete'], diagnostics: { ...diagnostics, scoreable_members: 0, returned_items: 0, factor_input_members: 2 } },
+  no_scoreable_instruments: { ...notReadyResponse, blockers: ['no_scoreable_instruments'], diagnostics: { ...diagnostics, risk_eligible_members: 2, factor_input_members: 2, scoreable_members: 0, returned_items: 0 } },
+}
+
 function mountView() {
   return mount(DailySelectionView, { global: { plugins: [ElementPlus] } })
 }
@@ -79,10 +88,55 @@ describe('DailySelectionView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('今日选股尚未就绪')
-    expect(wrapper.text()).toContain('风险状态覆盖不足')
+    expect(wrapper.text()).toContain('精确日期风险覆盖不完整')
     expect(wrapper.text()).toContain('结构股票池')
     expect(wrapper.text()).toContain('风险完整覆盖')
     expect(wrapper.text()).toContain('0%')
+  })
+
+  it.each([
+    ['no_structural_members', '当前结构股票池为空', '当前结构股票池规则'],
+    ['risk_state_coverage_incomplete', '今日选股尚未就绪', '精确日期风险覆盖不完整'],
+    ['no_risk_eligible_members', '当前无风险合格股票', '风险覆盖已完整'],
+    ['eligible_factor_input_coverage_incomplete', '风险合格股票因子输入覆盖不完整', '官方排名被阻断'],
+    ['no_scoreable_instruments', '当前无可评分股票', '可用 BaseScore'],
+  ] as const)('renders %s as a truthful domain blocker', async (blocker, title, description) => {
+    const response = blockerFixtures[blocker]
+    api.getDailySelection.mockResolvedValue(response)
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain(title)
+    expect(wrapper.text()).toContain(description)
+    expect(wrapper.text()).toContain(`阻断原因：${blocker}`)
+    expect(wrapper.text()).toContain('因子输入覆盖')
+    expect(wrapper.find('tbody').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('无法读取本地今日选股状态。')
+    if (blocker === 'no_structural_members') {
+      expect(wrapper.text()).toContain('0')
+      expect(wrapper.text()).not.toContain('风险覆盖不完整')
+      expect(wrapper.text()).not.toContain('因子输入覆盖不完整')
+    }
+    if (blocker === 'no_risk_eligible_members') expect(wrapper.text()).toContain('100%')
+    if (blocker === 'eligible_factor_input_coverage_incomplete') {
+      expect(wrapper.text()).toContain('2 / 3')
+      expect(wrapper.text()).toContain('不会只对已覆盖子集排名')
+    }
+    if (blocker === 'no_scoreable_instruments') {
+      expect(wrapper.text()).toContain('2 / 2')
+      expect(wrapper.text()).not.toContain('不会只对已覆盖子集排名')
+    }
+  })
+
+  it('preserves returned blocker order and uses the first blocker presentation', async () => {
+    api.getDailySelection.mockResolvedValue({
+      ...notReadyResponse,
+      blockers: ['no_risk_eligible_members', 'risk_state_coverage_incomplete'] as DailySelectionBlocker[],
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('当前无风险合格股票')
+    expect(text.indexOf('no_risk_eligible_members')).toBeLessThan(text.indexOf('risk_state_coverage_incomplete'))
   })
 
   it('renders ready QVG rows with formatted scores and missing price families', async () => {
@@ -95,6 +149,7 @@ describe('DailySelectionView', () => {
     expect(wrapper.text()).toContain('81.2')
     expect(wrapper.text()).toContain('75%')
     expect(wrapper.text()).toContain('80%')
+    expect(wrapper.text()).toContain('3 / 3')
     expect(wrapper.text()).toContain('—')
   })
 

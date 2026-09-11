@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { getDailySelection } from '@/api/selection'
-import type { DailySelectionItemResponse, DailySelectionResponse } from '@/api/types'
+import type { DailySelectionBlocker, DailySelectionItemResponse, DailySelectionResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 
 const router = useRouter()
@@ -11,6 +11,17 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const selection = ref<DailySelectionResponse | null>(null)
 const diagnostics = computed(() => selection.value?.diagnostics ?? null)
+const blockerPresentation = computed(() => {
+  const blocker = selection.value?.blockers[0]
+  const presentations: Record<DailySelectionBlocker, { title: string; description: string }> = {
+    no_structural_members: { title: '当前结构股票池为空', description: '当前结构股票池规则下没有可选的结构成员。' },
+    risk_state_coverage_incomplete: { title: '今日选股尚未就绪', description: '精确日期风险覆盖不完整；未知或缺失风险状态不会被当作安全，官方选股已阻断。' },
+    no_risk_eligible_members: { title: '当前无风险合格股票', description: '风险覆盖已完整，但当前结构股票池中没有成员通过配置的风险合格规则。' },
+    eligible_factor_input_coverage_incomplete: { title: '风险合格股票因子输入覆盖不完整', description: '存在风险合格股票，但其中部分缺少必需因子输入成员资格；官方排名被阻断，不会只对已覆盖子集排名。' },
+    no_scoreable_instruments: { title: '当前无可评分股票', description: '上游资格和因子输入覆盖已通过，但现有因子值仍未形成可用 BaseScore。' },
+  }
+  return blocker ? presentations[blocker] : { title: '今日选股尚未就绪', description: '当前官方选股结果尚未形成。' }
+})
 
 function score(value: number | null): string {
   return value === null ? '—' : value.toFixed(1)
@@ -64,15 +75,14 @@ onMounted(() => void loadSelection())
       <article class="metric-card"><span class="metric-card__label">结构股票池</span><strong class="metric-card__value">{{ diagnostics.structural_members }}</strong><span class="metric-card__description">输入 {{ diagnostics.input_instruments }}</span></article>
       <article class="metric-card"><span class="metric-card__label">风险完整覆盖</span><strong class="metric-card__value">{{ diagnostics.risk_complete_members }}</strong><span class="metric-card__description">{{ percent(diagnostics.risk_coverage_ratio) }}</span></article>
       <article class="metric-card"><span class="metric-card__label">风险合格</span><strong class="metric-card__value">{{ diagnostics.risk_eligible_members }}</strong><span class="metric-card__description">仅精确日期、完整风险状态</span></article>
+      <article class="metric-card"><span class="metric-card__label">因子输入覆盖</span><strong class="metric-card__value">{{ diagnostics.factor_input_members }} / {{ diagnostics.risk_eligible_members }}</strong><span class="metric-card__description">当前风险合格股票</span></article>
       <article class="metric-card"><span class="metric-card__label">可评分</span><strong class="metric-card__value">{{ diagnostics.scoreable_members }}</strong><span class="metric-card__description">无最低完整度阈值</span></article>
       <article class="metric-card"><span class="metric-card__label">返回数量</span><strong class="metric-card__value">{{ diagnostics.returned_items }}/{{ diagnostics.requested_top_n }}</strong><span class="metric-card__description">按 BaseScore 排名</span></article>
     </section>
 
     <section v-if="!selection?.selection_ready" class="panel">
-      <EmptyState title="今日选股尚未就绪" :description="selection?.blockers.includes('risk_state_coverage_incomplete') ? '风险状态覆盖不足；未知或缺失风险状态不会被当作安全，官方候选为空。' : '当前本地数据不足以形成可评分的官方候选。'" />
-    </section>
-    <section v-else-if="selection?.items.length === 0" class="panel">
-      <EmptyState title="暂无可评分股票" description="风险过滤已通过，但当前可用因子无法形成 BaseScore。" />
+      <EmptyState :title="blockerPresentation.title" :description="blockerPresentation.description" />
+      <p class="provenance">阻断原因：{{ selection?.blockers.join(', ') || 'none' }}</p>
     </section>
     <section v-else class="panel">
       <h2>BaseScore Top {{ diagnostics.returned_items }}</h2>
