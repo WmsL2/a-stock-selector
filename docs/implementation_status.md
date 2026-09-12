@@ -2,11 +2,15 @@
 
 ## Current Task
 
-Task 43 - Official Daily-Selection Blocker-Aware Frontend Diagnostics
+Task 44 - Current Official Selection Data Coverage Closure Audit
 
 ## Status
 
 Completed
+
+`selection coverage-status` is a read-only local audit that reuses Task37 factor-input coverage and Task39 readiness semantics. Factor input remains Industry AND (Financial OR Valuation); it exposes structural and risk-eligible component membership, missing causes, and informational adjusted-return evidence coverage. Adjusted-return evidence is nonblocking and makes no Momentum/LowVol readiness claim. The Task40 `--limit 100` run count is only a lower bound assuming every targeted refresh succeeds. It performs no provider/network call, write, selection, scoring, ranking, API, or frontend work.
+
+Task44 verification: focused coverage contracts PASS (35), selection suite PASS (131), CLI smoke PASS (83), canonical backend validation PASS (898 tests; 91% coverage), Ruff PASS, mypy PASS (113 source files), frontend type-check/lint PASS, 44 Vitest tests PASS, production build PASS, and canonical exit code 0. No provider/network call or real runtime market-data write was performed.
 
 ## Completed
 

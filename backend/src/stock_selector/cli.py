@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         DailyBarsRequest,
         RealtimeQuotesRequest,
     )
+    from stock_selector.selection import CurrentSelectionCoverageReport
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -159,6 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     selection_subparsers.add_parser(
         "input-status", help="Audit current daily-selection upstream inputs locally."
     )
+    selection_subparsers.add_parser(
+        "coverage-status", allow_abbrev=False,
+        help="Read-only current official selection data-coverage audit.",
+    )
     prepare_inputs = selection_subparsers.add_parser(
         "prepare-inputs",
         allow_abbrev=False,
@@ -261,6 +266,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "risk":
         return _run_risk_command(arguments.risk_command)
     elif arguments.command == "selection":
+        if arguments.selection_command == "coverage-status":
+            return _run_selection_coverage_status_command()
         if arguments.selection_command == "prepare-inputs":
             return _run_selection_prepare_inputs_command(arguments.limit, arguments.start_after)
         if arguments.selection_command == "run-current":
@@ -727,7 +734,7 @@ def _run_selection_command(command: str | None) -> int:
     """Audit local current upstream inputs without running daily selection."""
     if command != "input-status":
         print(
-            "A selection subcommand is required: input-status, prepare-inputs, or run-current.",
+            "A selection subcommand is required: input-status, coverage-status, prepare-inputs, or run-current.",
             file=sys.stderr,
         )
         return 2
@@ -778,6 +785,77 @@ def _run_selection_command(command: str | None) -> int:
         return 1
     _print_daily_selection_input_readiness_report(coverage, report)
     return 0
+
+
+def _run_selection_coverage_status_command() -> int:
+    """Audit current local coverage without collection, writes, or selection."""
+    from stock_selector.risk import RiskError
+    from stock_selector.risk.evaluator import RiskEligibilityEvaluator
+    from stock_selector.selection import (
+        CurrentSelectionCoverageAuditor,
+        CurrentSelectionCoverageRequest,
+    )
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        risk_states = repository.load_risk_states(current_at.date(), structural.members)
+        risk = RiskEligibilityEvaluator().evaluate(structural, risk_states, settings.universe)
+        report = CurrentSelectionCoverageAuditor().audit(CurrentSelectionCoverageRequest(
+            as_of=current_at, structural_symbols=structural.members,
+            risk_record_symbols=tuple(state.symbol for state in risk_states),
+            risk_complete_symbols=tuple(item.symbol for item in risk.decisions if item.risk_complete),
+            risk_eligible_symbols=risk.eligible_members,
+            financial_symbols=repository.load_financial_symbols(),
+            valuation_symbols=repository.load_valuation_symbols(),
+            industry_symbols=repository.load_industry_symbols(),
+            factor_input_symbols=repository.load_factor_input_symbols(),
+            adjusted_return_symbols=repository.load_adjusted_return_symbols(),
+        ))
+    except (ConfigurationError, RiskError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        print(f"Selection coverage audit error: {exc}", file=sys.stderr)
+        return 1
+    _print_selection_coverage_status(report)
+    return 0
+
+
+def _print_selection_coverage_status(
+    report: CurrentSelectionCoverageReport,
+) -> None:
+    coverage = report.structural_factor_input_coverage
+    readiness = report.input_readiness
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {coverage.structural_members}")
+    print(f"Structural stored financial: {len(report.structural_financial_symbols)}")
+    print(f"Structural stored valuation: {len(report.structural_valuation_symbols)}")
+    print(f"Structural stored industry: {len(report.structural_industry_symbols)}")
+    print(f"Structural factor-input covered: {coverage.structural_factor_input_covered} / {coverage.structural_members}")
+    print(f"Structural factor-input missing: {coverage.structural_factor_input_missing}")
+    print(f"Exact-date risk records: {readiness.risk_records}")
+    print(f"Risk-complete members: {readiness.risk_complete_members}")
+    print(f"Risk coverage: {readiness.risk_complete_members / readiness.structural_members:.2%}")
+    print(f"Risk-eligible members: {readiness.risk_eligible_members}")
+    print(f"Eligible stored financial: {len(report.eligible_financial_symbols)}")
+    print(f"Eligible stored valuation: {len(report.eligible_valuation_symbols)}")
+    print(f"Eligible stored industry: {len(report.eligible_industry_symbols)}")
+    print(f"Eligible factor-input covered: {readiness.eligible_factor_input_covered} / {readiness.risk_eligible_members}")
+    print(f"Eligible factor-input missing: {readiness.eligible_factor_input_missing}")
+    print(f"Eligible missing industry: {len(report.eligible_missing_industry_symbols)}")
+    print(f"Eligible missing financial AND valuation: {len(report.eligible_missing_financial_and_valuation_symbols)}")
+    print(f"Eligible adjusted-return evidence: {len(report.eligible_adjusted_return_symbols)} / {readiness.risk_eligible_members}")
+    print(f"Eligible adjusted-return evidence missing: {len(report.eligible_adjusted_return_missing_symbols)}")
+    print(f"Minimum prepare-inputs runs at --limit 100: {report.minimum_prepare_runs_at_max_limit}")
+    print(f"Official upstream inputs ready: {'YES' if readiness.upstream_inputs_ready else 'NO'}")
+    print("Blockers: " + (", ".join(item.value for item in readiness.blockers) or "none"))
+    print("Adjusted-return evidence is optional and does not block official upstream readiness.")
+    print("Minimum prepare-inputs runs assume all targeted refreshes succeed.")
+    print("Coverage audit is read-only and does not run official selection.")
 
 
 def _run_selection_run_current_command() -> int:

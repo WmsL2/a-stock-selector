@@ -400,11 +400,23 @@ class LocalMarketRepository:
 
     def load_factor_input_symbols(self) -> tuple[str, ...]:
         """Return deterministic local symbols with industry plus financial or valuation data."""
+        return tuple(sorted(set(self.load_industry_symbols()) & (set(self.load_financial_symbols()) | set(self.load_valuation_symbols()))))
+
+    def load_financial_symbols(self) -> tuple[str, ...]:
         self._require_initialized()
-        financials = _symbols_from_parquet_directory(self._parquet.financials_dir)
-        valuations = _symbols_from_parquet_directory(self._parquet.valuations_dir)
-        industries = _symbols_from_parquet_directory(self._parquet.industries_dir)
-        return tuple(sorted(industries & (financials | valuations)))
+        return tuple(sorted(_symbols_from_parquet_directory(self._parquet.financials_dir)))
+
+    def load_valuation_symbols(self) -> tuple[str, ...]:
+        self._require_initialized()
+        return tuple(sorted(_symbols_from_parquet_directory(self._parquet.valuations_dir)))
+
+    def load_industry_symbols(self) -> tuple[str, ...]:
+        self._require_initialized()
+        return tuple(sorted(_symbols_from_parquet_directory(self._parquet.industries_dir)))
+
+    def load_adjusted_return_symbols(self) -> tuple[str, ...]:
+        self._require_initialized()
+        return tuple(sorted(_symbols_from_parquet_directory(self._parquet.adjusted_returns_dir)))
 
     def upsert_industry_records(self, records: tuple[IndustryRecord, ...]) -> None:
         """Merge one symbol's reliable industry intervals without overlap ambiguity."""
