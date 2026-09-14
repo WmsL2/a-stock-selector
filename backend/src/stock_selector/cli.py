@@ -27,7 +27,10 @@ if TYPE_CHECKING:
         DailyBarsRequest,
         RealtimeQuotesRequest,
     )
-    from stock_selector.selection import CurrentSelectionCoverageReport
+    from stock_selector.selection import (
+        CurrentSelectionCoverageReport,
+        CurrentSelectionRefreshReport,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -172,6 +175,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_inputs.add_argument("--limit", type=int, required=True)
     prepare_inputs.add_argument("--start-after")
     selection_subparsers.add_parser(
+        "refresh-current",
+        allow_abbrev=False,
+        help="Refresh all current eligible missing upstream inputs once.",
+    )
+    selection_subparsers.add_parser(
         "run-current",
         allow_abbrev=False,
         help="Run the current official daily selection from local inputs.",
@@ -270,6 +278,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_selection_coverage_status_command()
         if arguments.selection_command == "prepare-inputs":
             return _run_selection_prepare_inputs_command(arguments.limit, arguments.start_after)
+        if arguments.selection_command == "refresh-current":
+            return _run_selection_refresh_current_command()
         if arguments.selection_command == "run-current":
             return _run_selection_run_current_command()
         return _run_selection_command(arguments.selection_command)
@@ -734,7 +744,7 @@ def _run_selection_command(command: str | None) -> int:
     """Audit local current upstream inputs without running daily selection."""
     if command != "input-status":
         print(
-            "A selection subcommand is required: input-status, coverage-status, prepare-inputs, or run-current.",
+            "A selection subcommand is required: input-status, coverage-status, prepare-inputs, refresh-current, or run-current.",
             file=sys.stderr,
         )
         return 2
@@ -922,6 +932,111 @@ def _print_daily_selection_execution(result) -> None:  # type: ignore[no-untyped
 
 def _format_optional_score(value: float | None) -> str:
     return "unavailable" if value is None else f"{value:.4f}"
+
+
+def _run_selection_refresh_current_command() -> int:
+    """Refresh current upstream inputs without running official selection."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        CurrentRiskStateCollector,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralAdjustedReturnCollector,
+        StructuralCoreFundamentalsCollector,
+        StructuralSlowInputCollector,
+        StructuralSlowInputSweepCollector,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider, ProviderError
+    from stock_selector.risk import RiskError
+    from stock_selector.selection import CurrentSelectionRefreshService
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        provider = AKShareProvider()
+        risk_collector = CurrentRiskStateCollector(provider, repository)
+        task35 = StructuralSlowInputCollector(
+            StructuralCoreFundamentalsCollector(
+                FinancialCollector(provider, repository),
+                IndustryCollector(provider, repository),
+                repository,
+            ),
+            StructuralValuationCollector(ValuationCollector(provider, repository), repository),
+            StructuralAdjustedReturnCollector(
+                AdjustedDailyReturnCollector(provider, repository), repository
+            ),
+            repository,
+        )
+        service = CurrentSelectionRefreshService(
+            repository, settings, risk_collector, StructuralSlowInputSweepCollector(task35)
+        )
+        report = service.refresh(current_at, structural)
+    except (
+        CollectionDataError,
+        CollectionError,
+        ConfigurationError,
+        ProviderError,
+        RiskError,
+        StorageError,
+        UniverseError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Current selection refresh error: {exc}", file=sys.stderr)
+        return 1
+    _print_selection_refresh_current_report(report)
+    return 1 if report.had_collection_failures else 0
+
+
+def _print_selection_refresh_current_report(
+    report: CurrentSelectionRefreshReport,
+) -> None:
+    """Print the refresh audit trail without exposing selection outputs."""
+    initial = report.initial_coverage
+    final = report.final_coverage
+    initial_readiness = initial.input_readiness
+    final_readiness = final.input_readiness
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Structural members: {len(report.structural_symbols)}")
+    print(f"Risk refreshed: {report.risk_collection_result.states_persisted}")
+    print(f"Risk-eligible members: {initial_readiness.risk_eligible_members}")
+    print(f"Initial eligible factor-input covered: {initial_readiness.eligible_factor_input_covered}")
+    print(f"Initial eligible factor-input missing: {initial_readiness.eligible_factor_input_missing}")
+    print(f"Initial upstream inputs ready: {'YES' if initial_readiness.upstream_inputs_ready else 'NO'}")
+    print("Initial blockers: " + (", ".join(item.value for item in initial_readiness.blockers) or "none"))
+    print(f"Refresh sweeps: {len(report.steps)}")
+    print("Attempted symbols: " + (", ".join(report.attempted_symbols) or "none"))
+    for ordinal, step in enumerate(report.steps, start=1):
+        sweep = step.sweep_report
+        failed = any(
+            batch.core_report.financial_failed or batch.core_report.industry_failed
+            or batch.valuation_report.failed_symbols or batch.adjusted_return_report.failed_symbols
+            for batch in sweep.batch_reports
+        )
+        print(
+            f"Sweep {ordinal}: requested={len(sweep.requested_symbols)} "
+            f"first={sweep.batch_first_symbol} last={sweep.batch_last_symbol} "
+            f"nested FAILED={'YES' if failed else 'NO'} "
+            f"eligible missing after={step.coverage_after.input_readiness.eligible_factor_input_missing}"
+        )
+    print(f"Final eligible factor-input covered: {final_readiness.eligible_factor_input_covered}")
+    print(f"Final eligible factor-input missing: {final_readiness.eligible_factor_input_missing}")
+    print(f"Final upstream inputs ready: {'YES' if final_readiness.upstream_inputs_ready else 'NO'}")
+    print("Final blockers: " + (", ".join(item.value for item in final_readiness.blockers) or "none"))
+    print(f"Collection failures: {'YES' if report.had_collection_failures else 'NO'}")
+    print("Adjusted-return evidence does not block official upstream readiness.")
+    print("Each missing member is attempted at most once per refresh-current invocation.")
+    print("Current selection refresh does not run DailySelectionService, factors, BaseScore, Explanation, or return selection items.")
 
 
 def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -> int:

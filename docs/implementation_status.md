@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 44 - Current Official Selection Data Coverage Closure Audit
+Task 45 - Current Official Selection Refresh Orchestration
 
 ## Status
 
 Completed
 
-`selection coverage-status` is a read-only local audit that reuses Task37 factor-input coverage and Task39 readiness semantics. Factor input remains Industry AND (Financial OR Valuation); it exposes structural and risk-eligible component membership, missing causes, and informational adjusted-return evidence coverage. Adjusted-return evidence is nonblocking and makes no Momentum/LowVol readiness claim. The Task40 `--limit 100` run count is only a lower bound assuming every targeted refresh succeeds. It performs no provider/network call, write, selection, scoring, ranking, API, or frontend work.
+`selection refresh-current` reads one configured-timezone current clock, builds one structural snapshot, initializes one repository, and shares one provider between exactly one current-risk collection and one Task35/Task36 slow-input graph. It evaluates risk once, then uses Task44 as the sole coverage/readiness authority before and after every outer sweep. It targets only risk-eligible factor-input-missing members in forward structural slices of at most 100 (Task36 retains internal slices of at most 20); each missing member is attempted at most once, and earlier FAILED members are never retried in the same invocation. The scan terminates finitely; EMPTY is not FAILED, and adjusted-return evidence remains informational/nonblocking. It runs no DailySelectionService, factor computation, BaseScore, Explanation, ranking/TopN, API/frontend, scheduler/checkpoint, concurrency, retry/backoff, broker, or trading work.
 
-Task44 verification: focused coverage contracts PASS (35), selection suite PASS (131), CLI smoke PASS (83), canonical backend validation PASS (898 tests; 91% coverage), Ruff PASS, mypy PASS (113 source files), frontend type-check/lint PASS, 44 Vitest tests PASS, production build PASS, and canonical exit code 0. No provider/network call or real runtime market-data write was performed.
+Task45 verification: focused refresh contracts PASS (19), selection suite PASS (150), CLI smoke PASS (84), canonical backend validation PASS (918 tests; 90% coverage; 12 warnings), Ruff PASS, mypy PASS (114 source files), frontend type-check/lint PASS, 44 Vitest tests PASS across 12 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed.
 
 ## Completed
 
