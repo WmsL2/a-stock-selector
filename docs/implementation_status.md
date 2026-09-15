@@ -10,7 +10,7 @@ Completed
 
 `selection refresh-current` reads one configured-timezone current clock, builds one structural snapshot, initializes one repository, and shares one provider between exactly one current-risk collection and one Task35/Task36 slow-input graph. It evaluates risk once, then uses Task44 as the sole coverage/readiness authority before and after every outer sweep. It targets only risk-eligible factor-input-missing members in forward structural slices of at most 100 (Task36 retains internal slices of at most 20); each missing member is attempted at most once, and earlier FAILED members are never retried in the same invocation. The scan terminates finitely; EMPTY is not FAILED, and adjusted-return evidence remains informational/nonblocking. It runs no DailySelectionService, factor computation, BaseScore, Explanation, ranking/TopN, API/frontend, scheduler/checkpoint, concurrency, retry/backoff, broker, or trading work.
 
-Task45 verification: focused refresh contracts PASS (19), selection suite PASS (150), CLI smoke PASS (84), canonical backend validation PASS (918 tests; 90% coverage; 12 warnings), Ruff PASS, mypy PASS (114 source files), frontend type-check/lint PASS, 44 Vitest tests PASS across 12 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed.
+Task45 verification: focused refresh contracts PASS (24), selection suite PASS (155), CLI smoke PASS (84), canonical backend validation PASS (923 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (114 source files), frontend type-check/lint PASS, 44 Vitest tests PASS across 12 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed.
 
 ## Completed
 

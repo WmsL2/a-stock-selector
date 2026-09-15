@@ -8,11 +8,13 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
+from stock_selector import cli
+from stock_selector.cli import main
 from stock_selector.collection import (
     CurrentRiskCollectionResult,
     StructuralSlowInputSweepReport,
 )
-from stock_selector.config import Settings
+from stock_selector.config import AppPaths, Settings
 from stock_selector.risk import DatedRiskState
 from stock_selector.selection import (
     CurrentSelectionRefreshReport,
@@ -96,10 +98,12 @@ def test_already_ready_has_one_risk_snapshot_and_no_sweep(monkeypatch: pytest.Mo
     from stock_selector.risk.evaluator import RiskEligibilityEvaluator
     original, calls = RiskEligibilityEvaluator.evaluate, {"evaluate": 0}
     def evaluate(self: object, snapshot: object, states: object, config: object) -> object:
-        calls["evaluate"] += 1; return original(self, snapshot, states, config)
+        calls["evaluate"] += 1; calls["config"] = config; return original(self, snapshot, states, config)
     monkeypatch.setattr(RiskEligibilityEvaluator, "evaluate", evaluate)
-    report = CurrentSelectionRefreshService(repository, Settings(), collector, NoSweep()).refresh(NOW, structural(members))
+    settings = Settings()
+    report = CurrentSelectionRefreshService(repository, settings, collector, NoSweep()).refresh(NOW, structural(members))
     assert collector.calls == repository.risk_reads == calls["evaluate"] == 1
+    assert calls["config"] is settings.universe
     assert report.initial_coverage == report.final_coverage and report.steps == ()
 
 
@@ -116,6 +120,23 @@ def test_one_missing_sweeps_once_and_reaudits() -> None:
     assert step.plan.limit == 100 and step.plan.start_after is None and not step.sweep_report.has_more_structural_members
     assert step.coverage_after.input_readiness.upstream_inputs_ready
     assert all(value == 2 for value in repository.reads.values())
+
+
+def test_post_sweep_task44_ready_stops_before_second_outer_batch() -> None:
+    members = symbols(101)
+    repository, collector = Repository(members), RiskCollector()
+
+    class ReadySweep(Sweep):
+        def collect(self, request: object) -> StructuralSlowInputSweepReport:
+            result = super().collect(request)
+            self.repository.covered.update(members)
+            return result
+
+    sweep = ReadySweep(repository)
+    report = CurrentSelectionRefreshService(repository, Settings(), collector, sweep).refresh(NOW, structural(members))
+    assert len(sweep.requests) == 1
+    assert sweep.requests[0].symbols == members[:100]
+    assert report.final_coverage.input_readiness.upstream_inputs_ready is True
 
 
 @pytest.mark.parametrize(("count", "sizes"), ((100, (100,)), (101, (100, 1)), (201, (100, 100, 1))))
@@ -166,3 +187,72 @@ def test_current_refresh_source_has_no_forbidden_runtime_dependencies() -> None:
     source = (Path(__file__).parents[2] / "src/stock_selector/selection/current_refresh.py").read_text(encoding="utf-8")
     for forbidden in ("AKShareProvider", "stock_selector.providers", "datetime.now", "date.today", "FastAPI", "stock_selector.api", "stock_selector.realtime", "stock_selector.factors", "stock_selector.scoring", "stock_selector.explanation"):
         assert forbidden not in source
+
+
+@pytest.mark.parametrize(("mode", "expected"), (("ready", 0), ("empty", 0), ("failed", 1), ("boom", 1)))
+def test_refresh_current_cli_constructs_one_shared_graph(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], mode: str, expected: int
+) -> None:
+    report, _, _, _ = run(1, failed={"000001.SZ"} if mode == "failed" else None, empty={"000001.SZ"} if mode == "empty" else None)
+    calls: dict[str, object] = {"now": 0, "repository": 0, "initialize": 0, "universe": 0, "build": 0, "provider": 0, "service": 0, "refresh": 0, "dependencies": []}
+    settings, snapshot, original_paths = Settings(), structural(symbols(1)), AppPaths.from_project_root
+    class Repo:
+        def __init__(self, _paths: object) -> None: calls["repository"] += 1
+        def initialize(self) -> None: calls["initialize"] += 1
+    class Universe:
+        def __init__(self, repository_arg: object, settings_arg: Settings) -> None:
+            calls["universe"] += 1
+            assert repository_arg is calls["repo"] and settings_arg is settings
+        def build_current(self, as_of: date) -> UniverseSnapshot: calls["build"] += 1; assert as_of == NOW.date(); return snapshot
+    provider = object()
+    def provider_factory() -> object: calls["provider"] += 1; return provider
+    risk_obj, financial_obj, industry_obj, valuation_obj, adjusted_obj = (object() for _ in range(5))
+    core_obj, wrapped_valuation, wrapped_adjusted, task35_obj, sweep_obj = (object() for _ in range(5))
+    def leaf(result: object):
+        def construct(provider_arg: object, repository_arg: object) -> object:
+            assert provider_arg is provider and repository_arg is calls["repo"]
+            return result
+        return construct
+    def core(financial: object, industry: object, repository_arg: object) -> object: assert (financial, industry, repository_arg) == (financial_obj, industry_obj, calls["repo"]); return core_obj
+    def structural_valuation(valuation: object, repository_arg: object) -> object: assert (valuation, repository_arg) == (valuation_obj, calls["repo"]); return wrapped_valuation
+    def structural_adjusted(adjusted: object, repository_arg: object) -> object: assert (adjusted, repository_arg) == (adjusted_obj, calls["repo"]); return wrapped_adjusted
+    def task35(core_arg: object, valuation_arg: object, adjusted_arg: object, repository_arg: object) -> object: assert (core_arg, valuation_arg, adjusted_arg, repository_arg) == (core_obj, wrapped_valuation, wrapped_adjusted, calls["repo"]); return task35_obj
+    def sweep(task35_arg: object) -> object: assert task35_arg is task35_obj; return sweep_obj
+    class Service:
+        def __init__(self, repository: object, received_settings: Settings, risk: object, slow: object) -> None:
+            calls["service"] += 1; calls["service_args"] = (repository, received_settings, risk, slow)
+            assert repository is calls["repo"] and received_settings is settings and risk is risk_obj and slow is sweep_obj
+        def refresh(self, current_at: datetime, received: UniverseSnapshot) -> object:
+            calls["refresh"] += 1; assert (current_at, received) == (NOW, snapshot)
+            if mode == "boom": raise ValueError("boom")
+            return report
+    monkeypatch.setattr(cli, "load_settings", lambda _path: settings)
+    monkeypatch.setattr(cli.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
+    def now(timezone: ZoneInfo) -> datetime: calls["now"] += 1; assert timezone == ZoneInfo(settings.app.timezone); return NOW
+    monkeypatch.setattr(cli, "datetime", SimpleNamespace(now=now))
+    def repository_constructor(_paths: object) -> Repo: result = Repo(_paths); calls["repo"] = result; return result
+    monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", repository_constructor)
+    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
+    for name, result in (("CurrentRiskStateCollector", risk_obj), ("FinancialCollector", financial_obj), ("IndustryCollector", industry_obj), ("ValuationCollector", valuation_obj), ("AdjustedDailyReturnCollector", adjusted_obj)):
+        monkeypatch.setattr(f"stock_selector.collection.{name}", leaf(result))
+    for name, fake in (("StructuralCoreFundamentalsCollector", core), ("StructuralValuationCollector", structural_valuation), ("StructuralAdjustedReturnCollector", structural_adjusted), ("StructuralSlowInputCollector", task35), ("StructuralSlowInputSweepCollector", sweep)):
+        monkeypatch.setattr(f"stock_selector.collection.{name}", fake)
+    monkeypatch.setattr("stock_selector.selection.CurrentSelectionRefreshService", Service)
+    for target in ("stock_selector.selection.DailySelectionService", "stock_selector.factors.FiveFactorEngine", "stock_selector.scoring.BaseScoreEngine", "stock_selector.explanation.ExplanationEngine"):
+        monkeypatch.setattr(target, _forbidden(target))
+    monkeypatch.setattr(cli, "_run_selection_prepare_inputs_command", lambda *_: (_ for _ in ()).throw(AssertionError("prepare-inputs")))
+    assert main(["selection", "refresh-current"]) == expected
+    assert all(calls[key] == 1 for key in ("now", "repository", "initialize", "universe", "build", "provider", "service", "refresh"))
+    captured = capsys.readouterr()
+    if mode == "boom":
+        assert "Current selection refresh error: boom" in captured.err
+        return
+    output = captured.out
+    for label in ("As of:", "Structural members:", "Refresh sweeps:", "Final upstream inputs ready:", "Collection failures:"):
+        assert label in output
+
+
+def _forbidden(name: str):
+    def fail(*_args: object, **_kwargs: object) -> None: raise AssertionError(name)
+    return fail
