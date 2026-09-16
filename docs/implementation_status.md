@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 45 - Current Official Selection Refresh Orchestration
+Task 46 - One-Command Daily Selection Workflow (MVP)
 
 ## Status
 
 Completed
 
-`selection refresh-current` reads one configured-timezone current clock, builds one structural snapshot, initializes one repository, and shares one provider between exactly one current-risk collection and one Task35/Task36 slow-input graph. It evaluates risk once, then uses Task44 as the sole coverage/readiness authority before and after every outer sweep. It targets only risk-eligible factor-input-missing members in forward structural slices of at most 100 (Task36 retains internal slices of at most 20); each missing member is attempted at most once, and earlier FAILED members are never retried in the same invocation. The scan terminates finitely; EMPTY is not FAILED, and adjusted-return evidence remains informational/nonblocking. It runs no DailySelectionService, factor computation, BaseScore, Explanation, ranking/TopN, API/frontend, scheduler/checkpoint, concurrency, retry/backoff, broker, or trading work.
+`selection daily` performs Task45 current refresh followed by official daily selection within one configured-timezone `current_at`, one repository/settings context, and one provider-backed refresh graph. Task45 refresh runs first; `DailySelectionService` remains the authoritative official selection and ranking owner. If refresh returns normally, official selection still runs, including after nested refresh FAILED results. Nested refresh FAILED causes final CLI exit 1, while legitimate official blockers remain normal exit-0 completion when refresh has no nested collection failure. Supported refresh or selection exceptions use `Daily selection workflow error:`. No export, result persistence, scheduler, API/frontend change, broker, or trading was added.
 
-Task45 verification: focused refresh contracts PASS (24), selection suite PASS (155), CLI smoke PASS (84), canonical backend validation PASS (923 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (114 source files), frontend type-check/lint PASS, 44 Vitest tests PASS across 12 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed.
+Task46 verification: focused workflow/CLI contracts PASS (22; 1 warning), selection suite PASS (177; 11 warnings), CLI smoke PASS (85), canonical backend validation PASS (946 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (115 source files), frontend type-check/lint PASS, 44 Vitest tests PASS across 12 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 

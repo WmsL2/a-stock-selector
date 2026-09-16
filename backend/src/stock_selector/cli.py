@@ -180,6 +180,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refresh all current eligible missing upstream inputs once.",
     )
     selection_subparsers.add_parser(
+        "daily", allow_abbrev=False,
+        help="Refresh current inputs and run the official daily selection.",
+    )
+    selection_subparsers.add_parser(
         "run-current",
         allow_abbrev=False,
         help="Run the current official daily selection from local inputs.",
@@ -280,6 +284,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_selection_prepare_inputs_command(arguments.limit, arguments.start_after)
         if arguments.selection_command == "refresh-current":
             return _run_selection_refresh_current_command()
+        if arguments.selection_command == "daily":
+            return _run_selection_daily_workflow_command()
         if arguments.selection_command == "run-current":
             return _run_selection_run_current_command()
         return _run_selection_command(arguments.selection_command)
@@ -744,7 +750,7 @@ def _run_selection_command(command: str | None) -> int:
     """Audit local current upstream inputs without running daily selection."""
     if command != "input-status":
         print(
-            "A selection subcommand is required: input-status, coverage-status, prepare-inputs, refresh-current, or run-current.",
+            "A selection subcommand is required: input-status, coverage-status, prepare-inputs, refresh-current, daily, or run-current.",
             file=sys.stderr,
         )
         return 2
@@ -932,6 +938,68 @@ def _print_daily_selection_execution(result) -> None:  # type: ignore[no-untyped
 
 def _format_optional_score(value: float | None) -> str:
     return "unavailable" if value is None else f"{value:.4f}"
+
+
+def _run_selection_daily_workflow_command() -> int:
+    """Run current refresh followed by the official local daily selection."""
+    from stock_selector.collection import (
+        AdjustedDailyReturnCollector,
+        CollectionDataError,
+        CollectionError,
+        CurrentRiskStateCollector,
+        FinancialCollector,
+        IndustryCollector,
+        StructuralAdjustedReturnCollector,
+        StructuralCoreFundamentalsCollector,
+        StructuralSlowInputCollector,
+        StructuralSlowInputSweepCollector,
+        StructuralValuationCollector,
+        ValuationCollector,
+    )
+    from stock_selector.providers import AKShareProvider, ProviderError
+    from stock_selector.risk import RiskError
+    from stock_selector.selection import (
+        CurrentDailySelectionWorkflowService,
+        CurrentSelectionRefreshService,
+        DailySelectionService,
+        SelectionError,
+    )
+    from stock_selector.storage import LocalMarketRepository, StorageError
+    from stock_selector.universe import CurrentUniverseService, UniverseError
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        repository = LocalMarketRepository(paths)
+        repository.initialize()
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        provider = AKShareProvider()
+        risk_collector = CurrentRiskStateCollector(provider, repository)
+        task35 = StructuralSlowInputCollector(
+            StructuralCoreFundamentalsCollector(FinancialCollector(provider, repository), IndustryCollector(provider, repository), repository),
+            StructuralValuationCollector(ValuationCollector(provider, repository), repository),
+            StructuralAdjustedReturnCollector(AdjustedDailyReturnCollector(provider, repository), repository),
+            repository,
+        )
+        refresh = CurrentSelectionRefreshService(
+            repository, settings, risk_collector, StructuralSlowInputSweepCollector(task35)
+        )
+        workflow = CurrentDailySelectionWorkflowService(
+            refresh, DailySelectionService(repository, settings)
+        )
+        report = workflow.run(current_at, structural)
+    except (
+        CollectionDataError, CollectionError, ConfigurationError, ProviderError,
+        RiskError, SelectionError, StorageError, UniverseError, ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"Daily selection workflow error: {exc}", file=sys.stderr)
+        return 1
+    print("=== Current input refresh ===")
+    _print_selection_refresh_current_report(report.refresh_report)
+    print("=== Official daily selection ===")
+    _print_daily_selection_execution(report.selection_result)
+    return 1 if report.had_collection_failures else 0
 
 
 def _run_selection_refresh_current_command() -> int:
