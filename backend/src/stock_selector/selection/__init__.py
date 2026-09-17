@@ -31,6 +31,13 @@ from .research import (
     SelectionResearchSnapshot,
     SelectionResearchSnapshotBuilder,
 )
+from .research_returns import (
+    SelectionResearchReturnAvailability,
+    SelectionResearchReturnItem,
+    SelectionResearchReturnLabel,
+    SelectionResearchReturnLabeler,
+    SelectionResearchReturnReport,
+)
 
 __all__ = [
     "CurrentDailySelectionWorkflowReport",
@@ -55,6 +62,11 @@ __all__ = [
     "SelectionResearchError",
     "SelectionResearchExportResult",
     "SelectionResearchItem",
+    "SelectionResearchReturnAvailability",
+    "SelectionResearchReturnItem",
+    "SelectionResearchReturnLabel",
+    "SelectionResearchReturnLabeler",
+    "SelectionResearchReturnReport",
     "SelectionResearchSnapshot",
     "SelectionResearchSnapshotBuilder",
 ]

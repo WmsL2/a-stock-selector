@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 47 - Selection Result Export & Research View
+Task 48 - Selection Forward-Return Labeling Foundation
 
 ## Status
 
 Completed
 
-`selection daily` now exports its already-produced official result without reranking or recomputing: canonical JSON and convenience CSV are stored under `runtime/snapshots/selection/YYYY-MM-DD/`. Blocked official results are exported too. Nested refresh FAILED remains provenance in the snapshot and still causes exit 1. The research API is read-only and never runs `DailySelectionService`; `SelectionResearchView` reads only the persisted artifact, while `DailySelectionView` remains current and on-demand. There is no historical replay, forward-return labeling, effectiveness evaluation, or trading.
+Task48 adds a deterministic, read-only research projection that labels an existing Task47 `SelectionResearchSnapshot` with local HFQ adjusted-return evidence at fixed 5, 20, and 60-session horizons. It uses only the latest revision visible at an explicit timezone-aware `evaluated_at`, follows exact `previous_trade_date` links from the snapshot date, and preserves official item order and rank. Missing anchors, insufficient evidence, and broken continuity remain explicit unavailable states; no gaps are bridged or inferred. This is labeling only: it does not rerun selection, refresh, collection, factors, scoring, ranking, providers, benchmarks, performance evaluation, or trading.
 
-Task47 verification: Fix3 focused research artifact contracts PASS (18), selection suite PASS (195; 11 warnings), API suite PASS (37; 1 warning), CLI smoke PASS (85), canonical backend validation PASS (972 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (116 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task48 verification: focused research and forward-return-label contracts PASS (31), selection suite PASS (208; 11 warnings), canonical backend validation PASS (985 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (117 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 
