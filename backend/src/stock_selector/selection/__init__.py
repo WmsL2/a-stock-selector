@@ -23,6 +23,14 @@ from .input_readiness import (
     DailySelectionInputReadinessRequest,
 )
 from .models import DailySelectionDiagnostics, DailySelectionResult, SelectionBlocker
+from .research import (
+    SelectionResearchArtifactStore,
+    SelectionResearchError,
+    SelectionResearchExportResult,
+    SelectionResearchItem,
+    SelectionResearchSnapshot,
+    SelectionResearchSnapshotBuilder,
+)
 
 __all__ = [
     "CurrentDailySelectionWorkflowReport",
@@ -43,4 +51,10 @@ __all__ = [
     "SelectionBlocker",
     "SelectionDataError",
     "SelectionError",
+    "SelectionResearchArtifactStore",
+    "SelectionResearchError",
+    "SelectionResearchExportResult",
+    "SelectionResearchItem",
+    "SelectionResearchSnapshot",
+    "SelectionResearchSnapshotBuilder",
 ]

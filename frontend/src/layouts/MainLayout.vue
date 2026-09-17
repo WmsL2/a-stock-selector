@@ -33,6 +33,7 @@ onMounted(() => appStore.ensureStatus())
       <el-menu router :collapse="sidebarCollapsed" :collapse-transition="false" :default-active="activeMenu">
         <el-menu-item index="/"><el-icon><Monitor /></el-icon><span>总览</span></el-menu-item>
         <el-menu-item index="/daily-selection"><el-icon><DocumentChecked /></el-icon><span>今日选股</span></el-menu-item>
+        <el-menu-item index="/selection-research"><el-icon><DataAnalysis /></el-icon><span>选股研究</span></el-menu-item>
         <el-menu-item index="/realtime-selection"><el-icon><TrendCharts /></el-icon><span>实时选股</span></el-menu-item>
         <el-menu-item index="/stocks"><el-icon><Histogram /></el-icon><span>股票中心</span></el-menu-item>
         <el-menu-item index="/factors"><el-icon><DataAnalysis /></el-icon><span>因子研究</span></el-menu-item>

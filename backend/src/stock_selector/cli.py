@@ -963,6 +963,9 @@ def _run_selection_daily_workflow_command() -> int:
         CurrentSelectionRefreshService,
         DailySelectionService,
         SelectionError,
+        SelectionResearchArtifactStore,
+        SelectionResearchError,
+        SelectionResearchSnapshotBuilder,
     )
     from stock_selector.storage import LocalMarketRepository, StorageError
     from stock_selector.universe import CurrentUniverseService, UniverseError
@@ -999,6 +1002,18 @@ def _run_selection_daily_workflow_command() -> int:
     _print_selection_refresh_current_report(report.refresh_report)
     print("=== Official daily selection ===")
     _print_daily_selection_execution(report.selection_result)
+    try:
+        snapshot = SelectionResearchSnapshotBuilder(repository, settings).build(
+            report.selection_result,
+            refresh_had_collection_failures=report.had_collection_failures,
+        )
+        export = SelectionResearchArtifactStore(paths).export(snapshot)
+    except (SelectionResearchError, OSError, ValidationError, ValueError) as exc:
+        print(f"Daily selection workflow error: {exc}", file=sys.stderr)
+        return 1
+    print("=== Selection research export ===")
+    print(f"JSON: {export.json_path}")
+    print(f"CSV: {export.csv_path}")
     return 1 if report.had_collection_failures else 0
 
 

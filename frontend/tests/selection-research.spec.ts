@@ -1,0 +1,121 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import ElementPlus from 'element-plus'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { SelectionResearchSnapshotResponse } from '@/api/types'
+
+const api = vi.hoisted(() => ({
+  getDailySelection: vi.fn(),
+  getSelectionResearchLatest: vi.fn(),
+  selectionResearchDownloadUrl: vi.fn(),
+}))
+vi.mock('@/api/selection', () => api)
+import SelectionResearchView from '@/views/SelectionResearchView.vue'
+
+const firstItem = {
+  rank: 2, as_of: '2026-09-16T16:00:00+08:00', symbol: '600519.SH', name: '贵州茅台', board: 'sh_main',
+  industry_code: 'C15', industry_name: '饮料制造', base_score: 72.5, confidence_adjusted_score: null,
+  data_completeness: 0.75, confidence: 0.8, quality_score: 81, value_score: 70, growth_score: 68,
+  momentum_score: null, low_volatility_score: null,
+  evidence: [{ code: 'quality', message: '质量依据', factor_name: null, value: null, percentile: null, contribution: null }],
+  risks: [{ code: 'volatility', message: '波动风险', severity: 'warning' as const }],
+}
+const secondItem = {
+  ...firstItem, rank: 1, symbol: '000001.SZ', name: '平安银行', board: 'sz_main', base_score: 91,
+  confidence_adjusted_score: 75, data_completeness: 0.8, confidence: 0.75,
+  evidence: [{ ...firstItem.evidence[0], code: 'value', message: '价值依据' }], risks: [],
+}
+const snapshot: SelectionResearchSnapshotResponse = {
+  schema_version: 1, as_of: '2026-09-16T16:00:00+08:00', strategy_name: 'official', selection_ready: true,
+  blockers: [], refresh_had_collection_failures: false,
+  diagnostics: { input_instruments: 2, structural_members: 2, risk_records: 2, risk_complete_members: 2, risk_coverage_ratio: 1, risk_eligible_members: 2, factor_input_members: 2, scoreable_members: 2, requested_top_n: 20, returned_items: 2, price_factors_operational: true },
+  items: [firstItem, secondItem],
+}
+
+function mountView() { return mount(SelectionResearchView, { global: { plugins: [ElementPlus] } }) }
+function mockSnapshot(value: SelectionResearchSnapshotResponse = snapshot) {
+  api.getSelectionResearchLatest.mockResolvedValue({ available: true, snapshot: value })
+}
+
+afterEach(() => { vi.resetAllMocks(); vi.restoreAllMocks() })
+
+describe('SelectionResearchView', () => {
+  it('uses only the persisted research API and retains exact official item order', async () => {
+    api.getDailySelection.mockImplementation(() => { throw new Error('daily API must not be called') })
+    mockSnapshot()
+    const wrapper = mountView(); await flushPromises()
+
+    const text = wrapper.text()
+    expect(api.getDailySelection).not.toHaveBeenCalled()
+    expect(text.indexOf('600519.SH')).toBeLessThan(text.indexOf('000001.SZ'))
+    expect(text).toContain('72.5')
+    expect(text).toContain('91.0')
+    expect(text).toContain('—')
+    expect(text).toContain('75.0')
+    expect(text).toContain('75%')
+    expect(text).toContain('80%')
+  })
+
+  it('renders blocked snapshots and raw official blockers without result rows', async () => {
+    mockSnapshot({
+      ...snapshot, selection_ready: false, blockers: ['eligible_factor_input_coverage_incomplete'],
+      diagnostics: { ...snapshot.diagnostics, factor_input_members: 0, scoreable_members: 0, returned_items: 0 }, items: [],
+    })
+    const wrapper = mountView(); await flushPromises()
+
+    expect(wrapper.text()).toContain('已阻断')
+    expect(wrapper.text()).toContain('eligible_factor_input_coverage_incomplete')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(0)
+  })
+
+  it('renders nested refresh failure provenance without treating it as no artifact', async () => {
+    mockSnapshot({ ...snapshot, refresh_had_collection_failures: true })
+    const wrapper = mountView(); await flushPromises()
+
+    expect(wrapper.text()).toContain('官方结果已导出，但本次刷新包含嵌套采集失败。')
+    expect(wrapper.text()).toContain('包含失败')
+  })
+
+  it('expands evidence and risk details from the persisted item', async () => {
+    mockSnapshot()
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.find('.el-table__expand-icon').trigger('click'); await flushPromises()
+
+    expect(wrapper.text()).toContain('主要依据')
+    expect(wrapper.text()).toContain('质量依据')
+    expect(wrapper.text()).toContain('风险')
+    expect(wrapper.text()).toContain('波动风险')
+  })
+
+  it('opens exact JSON and CSV artifact download URLs', async () => {
+    mockSnapshot()
+    api.selectionResearchDownloadUrl.mockImplementation((format: string) => `/api/selection/research/latest.${format}`)
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const wrapper = mountView(); await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    await buttons[1].trigger('click')
+    await buttons[2].trigger('click')
+
+    expect(api.selectionResearchDownloadUrl).toHaveBeenNthCalledWith(1, 'json')
+    expect(api.selectionResearchDownloadUrl).toHaveBeenNthCalledWith(2, 'csv')
+    expect(open).toHaveBeenNthCalledWith(1, '/api/selection/research/latest.json', '_blank')
+    expect(open).toHaveBeenNthCalledWith(2, '/api/selection/research/latest.csv', '_blank')
+  })
+
+  it('distinguishes an absent artifact from an API error and keeps disclosures visible', async () => {
+    api.getSelectionResearchLatest.mockResolvedValue({ available: false, snapshot: null })
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.text()).toContain('尚无官方导出快照')
+    expect(wrapper.text()).not.toContain('无法读取已导出的选股研究快照')
+
+    api.getSelectionResearchLatest.mockRejectedValue(new Error('offline'))
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('无法读取已导出的选股研究快照')
+
+    mockSnapshot()
+    await wrapper.get('button').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('持久化的官方选股快照')
+    expect(wrapper.text()).toContain('同日重新运行 selection daily 可以替换它')
+    expect(wrapper.text()).toContain('confidence-adjusted score 仅供展示，不构成投资建议')
+  })
+})

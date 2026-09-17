@@ -10,6 +10,7 @@ import InstrumentDetailView from '@/views/InstrumentDetailView.vue'
 import InstrumentsView from '@/views/InstrumentsView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
 import RealtimeSelectionView from '@/views/RealtimeSelectionView.vue'
+import SelectionResearchView from '@/views/SelectionResearchView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 
 const router = createRouter({
@@ -21,6 +22,7 @@ const router = createRouter({
       children: [
         { path: '', name: 'dashboard', component: DashboardView },
         { path: 'daily-selection', name: 'daily-selection', component: DailySelectionView },
+        { path: 'selection-research', name: 'selection-research', component: SelectionResearchView },
         { path: 'realtime-selection', name: 'realtime-selection', component: RealtimeSelectionView },
         { path: 'stocks', name: 'instruments', component: InstrumentsView },
         { path: 'stocks/:symbol', name: 'instrument-detail', component: InstrumentDetailView },

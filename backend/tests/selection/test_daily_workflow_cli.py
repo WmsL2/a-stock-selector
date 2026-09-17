@@ -22,7 +22,7 @@ def _forbidden(name: str):
 
 @pytest.mark.parametrize(("mode", "expected"), (("ready", 0), ("blocked", 0), ("failed_blocked", 1), ("failed_ready", 1), ("boom", 1)))
 def test_daily_cli_uses_one_shared_graph_and_maps_outcomes(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], mode: str, expected: int) -> None:
-    names = ("paths", "settings", "repository", "initialize", "now", "universe", "build_current", "provider", "refresh_service", "daily_service", "workflow_service", "workflow_run")
+    names = ("paths", "settings", "repository", "initialize", "now", "universe", "build_current", "provider", "refresh_service", "daily_service", "workflow_service", "workflow_run", "research_builder", "research_build", "research_store", "research_export")
     calls: dict[str, object] = {name: 0 for name in names}
     settings = Settings()
     provider, risk, financial, industry, valuation, adjusted = (object() for _ in range(6))
@@ -55,21 +55,35 @@ def test_daily_cli_uses_one_shared_graph_and_maps_outcomes(monkeypatch: pytest.M
             calls["workflow_run"] += 1; assert (current_at, structural) == (NOW, STRUCTURAL)
             if mode == "boom": raise ValueError("boom")
             return report
-    monkeypatch.setattr(cli.AppPaths, "from_project_root", lambda: calls.__setitem__("paths", calls["paths"] + 1) or SimpleNamespace(config_dir=Path("config")))
+    snapshot = object()
+    class Builder:
+        def __init__(self, repository_arg: object, settings_arg: object) -> None: calls["research_builder"] += 1; assert repository_arg is calls["repository_obj"] and settings_arg is settings
+        def build(self, result: object, *, refresh_had_collection_failures: bool) -> object: calls["research_build"] += 1; assert result is selection_result and refresh_had_collection_failures is report.had_collection_failures; return snapshot
+    class Store:
+        def __init__(self, paths_arg: object) -> None: calls["research_store"] += 1; assert paths_arg is calls["paths_obj"]
+        def export(self, value: object) -> object: calls["research_export"] += 1; assert value is snapshot; return SimpleNamespace(json_path="runtime/snapshots/selection/test/selection.json", csv_path="runtime/snapshots/selection/test/selection.csv")
+    def paths_factory() -> object:
+        calls["paths"] += 1; value = SimpleNamespace(config_dir=Path("config"), snapshots_dir=Path("runtime/snapshots")); calls["paths_obj"] = value; return value
+    monkeypatch.setattr(cli.AppPaths, "from_project_root", paths_factory)
     monkeypatch.setattr(cli, "load_settings", lambda _path: calls.__setitem__("settings", calls["settings"] + 1) or settings)
     def now(zone: ZoneInfo) -> datetime: calls["now"] += 1; assert zone == ZoneInfo(settings.app.timezone); return NOW
     monkeypatch.setattr(cli, "datetime", SimpleNamespace(now=now))
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository); monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe); monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
     for name, result in (("CurrentRiskStateCollector", risk), ("FinancialCollector", financial), ("IndustryCollector", industry), ("ValuationCollector", valuation), ("AdjustedDailyReturnCollector", adjusted)): monkeypatch.setattr(f"stock_selector.collection.{name}", leaf(result))
     for name, factory in (("StructuralCoreFundamentalsCollector", core_factory), ("StructuralValuationCollector", valuation_factory), ("StructuralAdjustedReturnCollector", adjusted_factory), ("StructuralSlowInputCollector", task35_factory), ("StructuralSlowInputSweepCollector", sweep_factory)): monkeypatch.setattr(f"stock_selector.collection.{name}", factory)
-    monkeypatch.setattr("stock_selector.selection.CurrentSelectionRefreshService", Refresh); monkeypatch.setattr("stock_selector.selection.DailySelectionService", Daily); monkeypatch.setattr("stock_selector.selection.CurrentDailySelectionWorkflowService", Workflow)
+    monkeypatch.setattr("stock_selector.selection.CurrentSelectionRefreshService", Refresh); monkeypatch.setattr("stock_selector.selection.DailySelectionService", Daily); monkeypatch.setattr("stock_selector.selection.CurrentDailySelectionWorkflowService", Workflow); monkeypatch.setattr("stock_selector.selection.SelectionResearchSnapshotBuilder", Builder); monkeypatch.setattr("stock_selector.selection.SelectionResearchArtifactStore", Store)
     for name in ("_run_selection_refresh_current_command", "_run_selection_run_current_command", "_run_selection_prepare_inputs_command"): monkeypatch.setattr(cli, name, _forbidden(name))
     events: list[str] = []
     monkeypatch.setattr(cli, "_print_selection_refresh_current_report", lambda _: events.append("refresh"))
     seen_selection: list[object] = []
     monkeypatch.setattr(cli, "_print_daily_selection_execution", lambda value: events.append("selection") or seen_selection.append(value))
     assert main(["selection", "daily"]) == expected
-    assert all(calls[name] == 1 for name in names)
     captured = capsys.readouterr()
-    if mode == "boom": assert "Daily selection workflow error: boom" in captured.err and events == []
-    else: assert events == ["refresh", "selection"] and seen_selection == [selection_result]
+    if mode == "boom":
+        assert all(calls[name] == 1 for name in names[:-4])
+        assert "Daily selection workflow error: boom" in captured.err and events == []
+        assert calls["research_builder"] == calls["research_build"] == calls["research_store"] == calls["research_export"] == 0
+    else:
+        assert all(calls[name] == 1 for name in names)
+        assert events == ["refresh", "selection"] and seen_selection == [selection_result]
+        assert "=== Selection research export ===" in captured.out

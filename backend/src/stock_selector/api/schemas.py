@@ -446,3 +446,23 @@ class DailySelectionResponse(APIResponseModel):
     blockers: list[str]
     diagnostics: DailySelectionDiagnosticsResponse
     items: list[DailySelectionItemResponse]
+
+
+class SelectionResearchItemResponse(DailySelectionItemResponse):
+    as_of: datetime
+
+
+class SelectionResearchSnapshotResponse(APIResponseModel):
+    schema_version: int
+    as_of: datetime
+    strategy_name: str
+    selection_ready: bool
+    blockers: list[str]
+    refresh_had_collection_failures: bool
+    diagnostics: DailySelectionDiagnosticsResponse
+    items: list[SelectionResearchItemResponse]
+
+
+class SelectionResearchLatestResponse(APIResponseModel):
+    available: bool
+    snapshot: SelectionResearchSnapshotResponse | None

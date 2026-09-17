@@ -333,6 +333,22 @@ export interface DailySelectionResponse {
   items: DailySelectionItemResponse[]
 }
 
+export interface SelectionResearchItemResponse extends DailySelectionItemResponse { as_of: string }
+export interface SelectionResearchSnapshotResponse {
+  schema_version: number
+  as_of: string
+  strategy_name: string
+  selection_ready: boolean
+  blockers: DailySelectionBlocker[]
+  refresh_had_collection_failures: boolean
+  diagnostics: DailySelectionDiagnosticsResponse
+  items: SelectionResearchItemResponse[]
+}
+export interface SelectionResearchLatestResponse {
+  available: boolean
+  snapshot: SelectionResearchSnapshotResponse | null
+}
+
 export interface RealtimeSelectionFamilyPolicyResponse {
   enabled: boolean
   weight: number

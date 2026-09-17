@@ -12,6 +12,7 @@ vi.mock('@/api/health', () => ({ getHealth: api.getHealth }))
 vi.mock('@/api/storage', () => ({ getStorageStatus: api.getStorageStatus }))
 
 import MainLayout from '@/layouts/MainLayout.vue'
+import router from '@/router'
 
 function statusStorage() {
   return {
@@ -73,5 +74,18 @@ describe('MainLayout API status and navigation', () => {
     api.getStorageStatus.mockResolvedValue(statusStorage())
     const wrapper = await mountLayout(path)
     expect(wrapper.findComponent({ name: 'ElMenu' }).props('defaultActive')).toBe(activeMenu)
+  })
+
+  it('retains the selection research route and all related sidebar entries', async () => {
+    api.getHealth.mockResolvedValue({ status: 'ok', application: 'a-stock-selector', version: '0.1.0', storage: 'ready' })
+    api.getStorageStatus.mockResolvedValue(statusStorage())
+    const wrapper = await mountLayout('/selection-research')
+
+    expect(router.resolve('/selection-research').name).toBe('selection-research')
+    expect(wrapper.text()).toContain('今日选股')
+    expect(wrapper.text()).toContain('选股研究')
+    expect(wrapper.text()).toContain('实时选股')
+    expect(wrapper.text()).toContain('因子研究')
+    expect(wrapper.text()).toContain('回测中心')
   })
 })

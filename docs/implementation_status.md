@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 46 - One-Command Daily Selection Workflow (MVP)
+Task 47 - Selection Result Export & Research View
 
 ## Status
 
 Completed
 
-`selection daily` performs Task45 current refresh followed by official daily selection within one configured-timezone `current_at`, one repository/settings context, and one provider-backed refresh graph. Task45 refresh runs first; `DailySelectionService` remains the authoritative official selection and ranking owner. If refresh returns normally, official selection still runs, including after nested refresh FAILED results. Nested refresh FAILED causes final CLI exit 1, while legitimate official blockers remain normal exit-0 completion when refresh has no nested collection failure. Supported refresh or selection exceptions use `Daily selection workflow error:`. No export, result persistence, scheduler, API/frontend change, broker, or trading was added.
+`selection daily` now exports its already-produced official result without reranking or recomputing: canonical JSON and convenience CSV are stored under `runtime/snapshots/selection/YYYY-MM-DD/`. Blocked official results are exported too. Nested refresh FAILED remains provenance in the snapshot and still causes exit 1. The research API is read-only and never runs `DailySelectionService`; `SelectionResearchView` reads only the persisted artifact, while `DailySelectionView` remains current and on-demand. There is no historical replay, forward-return labeling, effectiveness evaluation, or trading.
 
-Task46 verification: focused workflow/CLI contracts PASS (22; 1 warning), selection suite PASS (177; 11 warnings), CLI smoke PASS (85), canonical backend validation PASS (946 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (115 source files), frontend type-check/lint PASS, 44 Vitest tests PASS across 12 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task47 verification: Fix3 focused research artifact contracts PASS (18), selection suite PASS (195; 11 warnings), API suite PASS (37; 1 warning), CLI smoke PASS (85), canonical backend validation PASS (972 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (116 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 

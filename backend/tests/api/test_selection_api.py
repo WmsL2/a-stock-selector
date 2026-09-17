@@ -1,8 +1,11 @@
 """HTTP contract tests for truthful on-demand daily selection readiness."""
 
+import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 
 from stock_selector.api.app import create_app
@@ -15,7 +18,23 @@ from stock_selector.models import (
     Instrument,
     ValuationRecord,
 )
+from stock_selector.models.selection import (
+    Evidence,
+    RiskFlag,
+    RiskSeverity,
+    SelectionResult,
+    StockScore,
+)
 from stock_selector.risk import DatedRiskState
+from stock_selector.selection import (
+    DailySelectionDiagnostics,
+    DailySelectionResult,
+    SelectionBlocker,
+    SelectionResearchArtifactStore,
+    SelectionResearchExportResult,
+    SelectionResearchSnapshot,
+    SelectionResearchSnapshotBuilder,
+)
 
 _AS_OF = datetime(2026, 3, 31, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
 _CLASSIFICATION = "证监会行业分类标准（2012）"
@@ -94,6 +113,58 @@ def _seed_ready_selection(client: TestClient) -> None:
             )
         )
 
+
+def _research_result(*, blocked: bool = False) -> DailySelectionResult:
+    blockers = (
+        (SelectionBlocker.ELIGIBLE_FACTOR_INPUT_COVERAGE_INCOMPLETE,)
+        if blocked
+        else ()
+    )
+    items = () if blocked else (
+        StockScore(
+            symbol="600519.SH", as_of=_AS_OF, base_score=72.5,
+            confidence_adjusted_score=58.0, data_completeness=0.75,
+            confidence=0.8, quality_score=81.0, value_score=70.0,
+            growth_score=68.0, momentum_score=None, low_volatility_score=None,
+            market_rank=2,
+            evidence=(Evidence(code="quality", message="quality evidence"),),
+            risks=(RiskFlag(code="volatility", message="volatility risk", severity=RiskSeverity.WARNING),),
+        ),
+        StockScore(
+            symbol="000001.SZ", as_of=_AS_OF, base_score=91.0,
+            confidence_adjusted_score=None, data_completeness=0.8,
+            confidence=0.75, quality_score=90.0, value_score=89.0,
+            growth_score=88.0, momentum_score=87.0, low_volatility_score=86.0,
+            market_rank=1,
+            evidence=(Evidence(code="value", message="value evidence"),), risks=(),
+        ),
+    )
+    diagnostics = DailySelectionDiagnostics(
+        as_of=_AS_OF, selection_ready=not blocked, blockers=blockers,
+        input_instruments=2, structural_members=2, risk_records=2,
+        risk_complete_members=2, risk_coverage_ratio=1.0,
+        risk_eligible_members=2, factor_input_members=0 if blocked else 2,
+        scoreable_members=0 if blocked else 2, requested_top_n=20,
+        returned_items=len(items), price_factors_operational=True,
+    )
+    return DailySelectionResult(
+        as_of=_AS_OF, diagnostics=diagnostics,
+        selection=SelectionResult(as_of=_AS_OF, strategy_name="official", items=items),
+    )
+
+
+def _export_research_artifact(
+    client: TestClient, *, blocked: bool = False, failures: bool = False
+) -> tuple[SelectionResearchSnapshot, SelectionResearchExportResult]:
+    repository = client.app.state.repository
+    repository.save_instruments((_instrument("600519.SH"), _instrument("000001.SZ")))
+    result = _research_result(blocked=blocked)
+    snapshot = SelectionResearchSnapshotBuilder(
+        repository, client.app.state.settings
+    ).build(result, refresh_had_collection_failures=failures)
+    export = SelectionResearchArtifactStore(repository.paths).export(snapshot)
+    return snapshot, export
+
 def test_daily_selection_returns_truthful_empty_readiness(client: TestClient) -> None:
     response = client.get("/api/selection/daily")
     assert response.status_code == 200
@@ -101,6 +172,122 @@ def test_daily_selection_returns_truthful_empty_readiness(client: TestClient) ->
     assert body["selection_ready"] is False
     assert body["items"] == []
     assert body["diagnostics"]["risk_coverage_ratio"] == 0
+
+
+def test_selection_research_latest_is_truthful_when_no_artifact_exists(client: TestClient) -> None:
+    response = client.get("/api/selection/research/latest")
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "snapshot": None}
+    assert client.get("/api/selection/research/latest.json").status_code == 404
+    assert client.get("/api/selection/research/latest.csv").status_code == 404
+
+
+def test_selection_research_latest_projects_real_ready_artifact_exactly(client: TestClient) -> None:
+    _export_research_artifact(client)
+
+    response = client.get("/api/selection/research/latest")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["available"] is True
+    snapshot = body["snapshot"]
+    assert snapshot["as_of"] == _AS_OF.isoformat()
+    assert snapshot["strategy_name"] == "official"
+    assert snapshot["selection_ready"] is True
+    assert snapshot["refresh_had_collection_failures"] is False
+    assert snapshot["diagnostics"] == {
+        "input_instruments": 2, "structural_members": 2, "risk_records": 2,
+        "risk_complete_members": 2, "risk_coverage_ratio": 1.0,
+        "risk_eligible_members": 2, "factor_input_members": 2,
+        "scoreable_members": 2, "requested_top_n": 20, "returned_items": 2,
+        "price_factors_operational": True,
+    }
+    assert [(item["rank"], item["symbol"], item["base_score"]) for item in snapshot["items"]] == [
+        (2, "600519.SH", 72.5), (1, "000001.SZ", 91.0),
+    ]
+
+
+def test_selection_research_latest_projects_blockers_without_rows(client: TestClient) -> None:
+    _export_research_artifact(client, blocked=True)
+
+    response = client.get("/api/selection/research/latest")
+
+    assert response.status_code == 200
+    snapshot = response.json()["snapshot"]
+    assert snapshot["selection_ready"] is False
+    assert snapshot["blockers"] == ["eligible_factor_input_coverage_incomplete"]
+    assert snapshot["items"] == []
+    assert snapshot["diagnostics"]["returned_items"] == 0
+    assert snapshot["diagnostics"]["factor_input_members"] == 0
+
+
+def test_selection_research_latest_projects_refresh_failure_provenance(client: TestClient) -> None:
+    _export_research_artifact(client, failures=True)
+
+    response = client.get("/api/selection/research/latest")
+
+    assert response.status_code == 200
+    assert response.json()["snapshot"]["refresh_had_collection_failures"] is True
+
+
+@pytest.mark.parametrize(
+    ("suffix", "content_type"),
+    (("json", "application/json"), ("csv", "text/csv")),
+)
+def test_selection_research_downloads_exact_committed_artifacts(
+    client: TestClient, suffix: str, content_type: str
+) -> None:
+    snapshot, export = _export_research_artifact(client)
+    expected_path = getattr(export, f"{suffix}_path")
+
+    response = client.get(f"/api/selection/research/latest.{suffix}")
+
+    assert response.status_code == 200
+    assert content_type in response.headers["content-type"]
+    assert response.content == Path(expected_path).read_bytes()
+    assert f'filename="selection-{snapshot.as_of.date().isoformat()}.{suffix}"' in response.headers["content-disposition"]
+    assert str(client.app.state.repository.paths.project_root) not in response.headers["content-disposition"]
+    if suffix == "json":
+        assert json.loads(response.text)["items"][0]["symbol"] == "600519.SH"
+    else:
+        assert response.text.splitlines()[0].startswith("rank,symbol,name,board")
+        assert response.text.splitlines()[1].startswith("2,600519.SH")
+
+
+def test_selection_research_corrupt_artifact_is_a_generic_503(client: TestClient) -> None:
+    snapshot, _ = _export_research_artifact(client)
+    root = client.app.state.repository.paths.project_root
+    corrupt = client.app.state.repository.paths.snapshots_dir / "selection" / snapshot.as_of.date().isoformat() / "selection.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+
+    for path in ("/api/selection/research/latest", "/api/selection/research/latest.json"):
+        response = client.get(path)
+        assert response.status_code == 503
+        assert response.json() == {"detail": "selection research artifact unavailable"}
+        assert str(root) not in response.text
+        assert "json" not in response.text.lower()
+
+
+def test_selection_research_routes_do_not_invoke_daily_selection_or_provider(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ForbiddenProvider:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"provider must not be used: {name}")
+
+    application = create_app(
+        AppPaths.from_project_root(tmp_path), settings=Settings(),
+        realtime_provider=ForbiddenProvider(),
+    )
+    with TestClient(application) as client:
+        _export_research_artifact(client)
+        monkeypatch.setattr(
+            "stock_selector.selection.daily.DailySelectionService.build",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("daily selection must not run")),
+        )
+        assert client.get("/api/selection/research/latest").status_code == 200
+        assert client.get("/api/selection/research/latest.json").status_code == 200
+        assert client.get("/api/selection/research/latest.csv").status_code == 200
 
 
 def test_daily_selection_rejects_naive_as_of(client: TestClient) -> None:
