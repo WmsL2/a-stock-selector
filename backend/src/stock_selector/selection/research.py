@@ -198,15 +198,25 @@ class SelectionResearchArtifactStore:
         )
 
     def load_latest(self) -> SelectionResearchSnapshot | None:
+        snapshots = self.load_all()
+        return snapshots[-1] if snapshots else None
+
+    def load_all(self) -> tuple[SelectionResearchSnapshot, ...]:
+        """Load only canonical date-scoped JSON snapshots in chronological order."""
         if not self._root.exists():
-            return None
+            return ()
         snapshots: list[SelectionResearchSnapshot] = []
         for json_path in self._root.glob("*/selection.json"):
             try:
-                snapshots.append(SelectionResearchSnapshot.model_validate_json(json_path.read_text(encoding="utf-8")))
+                snapshot = SelectionResearchSnapshot.model_validate_json(
+                    json_path.read_text(encoding="utf-8")
+                )
             except (OSError, ValueError) as exc:
                 raise SelectionResearchError("corrupt selection research artifact") from exc
-        return max(snapshots, key=lambda item: item.as_of) if snapshots else None
+            if json_path.parent.name != snapshot.as_of.date().isoformat():
+                raise SelectionResearchError("misplaced selection research artifact")
+            snapshots.append(snapshot)
+        return tuple(sorted(snapshots, key=lambda item: item.as_of))
 
     def latest_json_path(self) -> Path | None:
         snapshot = self.load_latest()

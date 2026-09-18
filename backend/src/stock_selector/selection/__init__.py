@@ -31,6 +31,10 @@ from .research import (
     SelectionResearchSnapshot,
     SelectionResearchSnapshotBuilder,
 )
+from .research_return_history import (
+    SelectionResearchReturnHistory,
+    SelectionResearchReturnHistoryBuilder,
+)
 from .research_returns import (
     SelectionResearchReturnAvailability,
     SelectionResearchReturnItem,
@@ -63,6 +67,8 @@ __all__ = [
     "SelectionResearchExportResult",
     "SelectionResearchItem",
     "SelectionResearchReturnAvailability",
+    "SelectionResearchReturnHistory",
+    "SelectionResearchReturnHistoryBuilder",
     "SelectionResearchReturnItem",
     "SelectionResearchReturnLabel",
     "SelectionResearchReturnLabeler",

@@ -64,6 +64,42 @@ def test_store_round_trip_is_deterministic_and_csv_is_header_only_when_blocked(t
     assert Path(exported.json_path).is_file() and Path(exported.csv_path).read_text(encoding="utf-8").splitlines()[0].startswith("rank,")
 
 
+def test_load_all_is_chronological_and_load_latest_reuses_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = SelectionResearchArtifactStore(AppPaths.from_project_root(tmp_path))
+    original = SelectionResearchSnapshotBuilder(Repository(), Settings()).build(_result(), refresh_had_collection_failures=False)  # type: ignore[arg-type]
+    later_at = NOW.replace(day=17)
+    later = original.model_copy(update={
+        "as_of": later_at,
+        "diagnostics": original.diagnostics.model_copy(update={"as_of": later_at}),
+        "items": tuple(item.model_copy(update={"as_of": later_at}) for item in original.items),
+    })
+    store.export(later)
+    store.export(original)
+
+    assert store.load_all() == (original, later)
+    monkeypatch.setattr(store, "load_all", lambda: (original, later))
+    assert store.load_latest() == later
+
+
+def test_load_all_rejects_corrupt_or_misplaced_canonical_json(tmp_path: Path) -> None:
+    paths = AppPaths.from_project_root(tmp_path)
+    store = SelectionResearchArtifactStore(paths)
+    snapshot = SelectionResearchSnapshotBuilder(Repository(), Settings()).build(_result(), refresh_had_collection_failures=False)  # type: ignore[arg-type]
+    root = paths.snapshots_dir / "selection"
+    corrupt = root / "2026-09-15" / "selection.json"
+    corrupt.parent.mkdir(parents=True)
+    corrupt.write_text("not json", encoding="utf-8")
+    with pytest.raises(SelectionResearchError, match="corrupt"):
+        store.load_all()
+    corrupt.unlink()
+    misplaced = root / "2026-09-15" / "selection.json"
+    misplaced.write_text(store.canonical_json(snapshot), encoding="utf-8")
+    (root / "2026-09-16" / ".selection.json.tmp").parent.mkdir(parents=True, exist_ok=True)
+    (root / "2026-09-16" / ".selection.json.tmp").write_text("ignored", encoding="utf-8")
+    with pytest.raises(SelectionResearchError, match="misplaced"):
+        store.load_all()
+
+
 def test_stray_csv_is_not_a_committed_snapshot_and_corrupt_json_is_explicit(tmp_path: Path) -> None:
     root = AppPaths.from_project_root(tmp_path).snapshots_dir / "selection" / "2026-09-16"
     root.mkdir(parents=True)
