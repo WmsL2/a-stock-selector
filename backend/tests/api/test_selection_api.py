@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from stock_selector.api.app import create_app
 from stock_selector.config import AppPaths, Settings
 from stock_selector.models import (
+    AdjustedDailyReturn,
+    AdjustmentType,
     Board,
     Exchange,
     FinancialRecord,
@@ -37,6 +39,7 @@ from stock_selector.selection import (
 )
 
 _AS_OF = datetime(2026, 3, 31, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+_EVALUATED_AT = _AS_OF + timedelta(days=90)
 _CLASSIFICATION = "证监会行业分类标准（2012）"
 
 
@@ -165,6 +168,58 @@ def _export_research_artifact(
     export = SelectionResearchArtifactStore(repository.paths).export(snapshot)
     return snapshot, export
 
+
+def _research_effectiveness(
+    client: TestClient,
+    *,
+    evaluated_at: datetime = _EVALUATED_AT,
+    start_date: date | None = None,
+    end_date: date | None = None,
+):
+    params: dict[str, str] = {"evaluated_at": evaluated_at.isoformat()}
+    if start_date is not None:
+        params["start_date"] = start_date.isoformat()
+    if end_date is not None:
+        params["end_date"] = end_date.isoformat()
+    return client.get("/api/selection/research/effectiveness", params=params)
+
+
+def _seed_adjusted_returns(
+    client: TestClient,
+    symbol: str,
+    *,
+    fraction: float = 0.01,
+    observed_at: datetime = _AS_OF + timedelta(days=70),
+) -> None:
+    previous = _AS_OF.date()
+    records: list[AdjustedDailyReturn] = []
+    for offset in range(1, 61):
+        trade_date = _AS_OF.date() + timedelta(days=offset)
+        records.append(AdjustedDailyReturn(
+            symbol=symbol,
+            trade_date=trade_date,
+            previous_trade_date=previous,
+            return_fraction=fraction,
+            adjustment=AdjustmentType.HFQ,
+            observed_at=observed_at,
+            source="synthetic",
+        ))
+        previous = trade_date
+    client.app.state.repository.upsert_adjusted_daily_returns(tuple(records))
+
+
+def _empty_effectiveness_body(evaluated_at: datetime) -> dict[str, object]:
+    return {
+        "evaluated_at": evaluated_at.isoformat(),
+        "start_date": None,
+        "end_date": None,
+        "snapshot_count": 0,
+        "empty_snapshot_count": 0,
+        "item_observation_count": 0,
+        "ranks": [],
+        "cutoffs": [],
+    }
+
 def test_daily_selection_returns_truthful_empty_readiness(client: TestClient) -> None:
     response = client.get("/api/selection/daily")
     assert response.status_code == 200
@@ -180,6 +235,136 @@ def test_selection_research_latest_is_truthful_when_no_artifact_exists(client: T
     assert response.json() == {"available": False, "snapshot": None}
     assert client.get("/api/selection/research/latest.json").status_code == 404
     assert client.get("/api/selection/research/latest.csv").status_code == 404
+
+
+def test_selection_research_effectiveness_requires_aware_explicit_time(client: TestClient) -> None:
+    assert client.get("/api/selection/research/effectiveness").status_code == 422
+    naive = client.get(
+        "/api/selection/research/effectiveness",
+        params={"evaluated_at": "2026-06-29T16:00:00"},
+    )
+    assert naive.status_code == 422
+    assert "evaluated_at" in naive.json()["detail"]
+
+
+def test_selection_research_effectiveness_returns_fixed_empty_history(client: TestClient) -> None:
+    response = _research_effectiveness(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {key: body[key] for key in _empty_effectiveness_body(_EVALUATED_AT)} == _empty_effectiveness_body(_EVALUATED_AT)
+    assert [item["horizon_sessions"] for item in body["overall_horizons"]] == [5, 20, 60]
+    assert all(
+        item["total_labels"] == 0
+        and item["availability_rate"] is None
+        and item["mean_return_fraction"] is None
+        and item["median_return_fraction"] is None
+        for item in body["overall_horizons"]
+    )
+
+
+def test_selection_research_effectiveness_respects_time_and_date_range_filters(client: TestClient) -> None:
+    _export_research_artifact(client)
+
+    before = _research_effectiveness(client, evaluated_at=_AS_OF - timedelta(seconds=1))
+    excluded = _research_effectiveness(
+        client,
+        start_date=_AS_OF.date() + timedelta(days=1),
+        end_date=_AS_OF.date() + timedelta(days=2),
+    )
+    invalid = _research_effectiveness(
+        client,
+        start_date=_AS_OF.date() + timedelta(days=2),
+        end_date=_AS_OF.date() + timedelta(days=1),
+    )
+
+    assert before.status_code == excluded.status_code == 200
+    assert before.json()["snapshot_count"] == excluded.json()["snapshot_count"] == 0
+    assert invalid.status_code == 422
+
+
+def test_selection_research_effectiveness_projects_blocked_and_ready_history(client: TestClient) -> None:
+    _export_research_artifact(client, blocked=True)
+
+    blocked = _research_effectiveness(client)
+
+    assert blocked.status_code == 200
+    assert blocked.json()["snapshot_count"] == 1
+    assert blocked.json()["empty_snapshot_count"] == 1
+    assert blocked.json()["item_observation_count"] == 0
+    assert blocked.json()["ranks"] == []
+    assert blocked.json()["cutoffs"] == []
+
+
+def test_selection_research_effectiveness_projects_exact_ranks_cutoffs_and_pit_returns(client: TestClient) -> None:
+    snapshot, _ = _export_research_artifact(client)
+    _seed_adjusted_returns(client, "600519.SH")
+    _seed_adjusted_returns(client, "000001.SZ")
+    revision = AdjustedDailyReturn(
+        symbol="000001.SZ",
+        trade_date=_AS_OF.date() + timedelta(days=1),
+        previous_trade_date=_AS_OF.date(),
+        return_fraction=0.10,
+        adjustment=AdjustmentType.HFQ,
+        observed_at=_AS_OF + timedelta(days=80),
+        source="synthetic-revision",
+    )
+    client.app.state.repository.upsert_adjusted_daily_returns((revision,))
+
+    before_revision = _research_effectiveness(client, evaluated_at=_AS_OF + timedelta(days=75))
+    response = _research_effectiveness(client)
+
+    assert before_revision.status_code == response.status_code == 200
+    body = response.json()
+    assert body["snapshot_count"] == snapshot.schema_version == 1
+    assert body["item_observation_count"] == 2
+    assert body["empty_snapshot_count"] == 0
+    assert [item["horizon_sessions"] for item in body["overall_horizons"]] == [5, 20, 60]
+    assert [item["rank"] for item in body["ranks"]] == [1, 2]
+    assert [item["cutoff_rank"] for item in body["cutoffs"]] == [1, 2]
+    assert [item["included_ranks"] for item in body["cutoffs"]] == [[1], [1, 2]]
+    assert body["overall_horizons"][0]["mean_return_fraction"] != before_revision.json()["overall_horizons"][0]["mean_return_fraction"]
+    assert "items" not in body
+
+
+def test_selection_research_effectiveness_preserves_sparse_rank_http_projection(
+    client: TestClient,
+) -> None:
+    snapshot, _ = _export_research_artifact(client)
+    payload = snapshot.model_dump()
+    payload["items"] = [
+        item.model_dump() | {"rank": rank}
+        for item, rank in zip(snapshot.items, (3, 1), strict=True)
+    ]
+    sparse_snapshot = SelectionResearchSnapshot.model_validate(payload)
+    SelectionResearchArtifactStore(client.app.state.repository.paths).export(
+        sparse_snapshot
+    )
+
+    response = _research_effectiveness(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["rank"] for item in body["ranks"]] == [1, 3]
+    assert [item["cutoff_rank"] for item in body["cutoffs"]] == [1, 3]
+    assert body["cutoffs"][0]["included_ranks"] == [1]
+    assert body["cutoffs"][1]["included_ranks"] == [1, 3]
+    assert 2 not in [item["rank"] for item in body["ranks"]]
+    assert 2 not in [item["cutoff_rank"] for item in body["cutoffs"]]
+
+
+def test_selection_research_effectiveness_corrupt_artifact_is_generic_503(client: TestClient) -> None:
+    snapshot, _ = _export_research_artifact(client)
+    root = client.app.state.repository.paths.project_root
+    corrupt = client.app.state.repository.paths.snapshots_dir / "selection" / snapshot.as_of.date().isoformat() / "selection.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+
+    response = _research_effectiveness(client)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "selection research artifact unavailable"}
+    assert str(root) not in response.text
+    assert "json" not in response.text.lower()
 
 
 def test_selection_research_latest_projects_real_ready_artifact_exactly(client: TestClient) -> None:
@@ -285,9 +470,14 @@ def test_selection_research_routes_do_not_invoke_daily_selection_or_provider(
             "stock_selector.selection.daily.DailySelectionService.build",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("daily selection must not run")),
         )
+        monkeypatch.setattr(
+            "stock_selector.selection.research.SelectionResearchArtifactStore.export",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("artifact export must not run")),
+        )
         assert client.get("/api/selection/research/latest").status_code == 200
         assert client.get("/api/selection/research/latest.json").status_code == 200
         assert client.get("/api/selection/research/latest.csv").status_code == 200
+        assert _research_effectiveness(client).status_code == 200
 
 
 def test_daily_selection_rejects_naive_as_of(client: TestClient) -> None:

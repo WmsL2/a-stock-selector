@@ -1,6 +1,6 @@
 """Read-only on-demand daily BaseScore selection route."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -20,20 +20,96 @@ from stock_selector.api.schemas import (
     EvidenceResponse,
     RealtimeSelectionResponse,
     RiskFlagResponse,
+    SelectionResearchEffectivenessResponse,
+    SelectionResearchHorizonEffectivenessResponse,
     SelectionResearchItemResponse,
     SelectionResearchLatestResponse,
+    SelectionResearchRankCutoffEffectivenessResponse,
+    SelectionResearchRankEffectivenessResponse,
     SelectionResearchSnapshotResponse,
 )
 from stock_selector.api.services import ReadOnlyMarketService
 from stock_selector.config import Settings
+from stock_selector.models.common import ensure_aware_datetime
 from stock_selector.providers.base import RealtimeMarketDataProvider
 from stock_selector.selection import (
     SelectionResearchArtifactStore,
+    SelectionResearchEffectivenessAnalyzer,
     SelectionResearchError,
+    SelectionResearchHorizonEffectiveness,
+    SelectionResearchRankCutoffEffectivenessAnalyzer,
+    SelectionResearchRankEffectivenessAnalyzer,
+    SelectionResearchReturnHistoryBuilder,
+    SelectionResearchReturnLabeler,
 )
 from stock_selector.storage import LocalMarketRepository
 
 router = APIRouter(prefix="/selection", tags=["selection"])
+
+
+def _horizon_effectiveness_response(
+    horizon: SelectionResearchHorizonEffectiveness,
+) -> SelectionResearchHorizonEffectivenessResponse:
+    return SelectionResearchHorizonEffectivenessResponse(**horizon.model_dump())
+
+
+def _research_effectiveness_response(
+    repository: LocalMarketRepository,
+    evaluated_at: datetime,
+    start_date: date | None,
+    end_date: date | None,
+) -> SelectionResearchEffectivenessResponse:
+    try:
+        store = SelectionResearchArtifactStore(repository.paths)
+        labeler = SelectionResearchReturnLabeler(repository)
+        history = SelectionResearchReturnHistoryBuilder(store, labeler).build(
+            evaluated_at,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except SelectionResearchError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="selection research artifact unavailable",
+        ) from exc
+    overall = SelectionResearchEffectivenessAnalyzer().analyze(history)
+    ranks = SelectionResearchRankEffectivenessAnalyzer().analyze(history)
+    cutoffs = SelectionResearchRankCutoffEffectivenessAnalyzer().analyze(history)
+    return SelectionResearchEffectivenessResponse(
+        evaluated_at=overall.evaluated_at,
+        start_date=overall.start_date,
+        end_date=overall.end_date,
+        snapshot_count=overall.snapshot_count,
+        empty_snapshot_count=overall.empty_snapshot_count,
+        item_observation_count=overall.item_observation_count,
+        overall_horizons=[
+            _horizon_effectiveness_response(horizon)
+            for horizon in overall.horizons
+        ],
+        ranks=[
+            SelectionResearchRankEffectivenessResponse(
+                rank=rank.rank,
+                observation_count=rank.observation_count,
+                horizons=[
+                    _horizon_effectiveness_response(horizon)
+                    for horizon in rank.horizons
+                ],
+            )
+            for rank in ranks.ranks
+        ],
+        cutoffs=[
+            SelectionResearchRankCutoffEffectivenessResponse(
+                cutoff_rank=cutoff.cutoff_rank,
+                included_ranks=list(cutoff.included_ranks),
+                observation_count=cutoff.observation_count,
+                horizons=[
+                    _horizon_effectiveness_response(horizon)
+                    for horizon in cutoff.horizons
+                ],
+            )
+            for cutoff in cutoffs.cutoffs
+        ],
+    )
 
 
 def _research_response(repository: LocalMarketRepository) -> SelectionResearchLatestResponse:
@@ -63,6 +139,28 @@ def get_selection_research_latest(
     repository: Annotated[LocalMarketRepository, Depends(get_repository)],
 ) -> SelectionResearchLatestResponse:
     return _research_response(repository)
+
+
+@router.get("/research/effectiveness", response_model=SelectionResearchEffectivenessResponse)
+def get_selection_research_effectiveness(
+    evaluated_at: Annotated[datetime, Query()],
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+) -> SelectionResearchEffectivenessResponse:
+    """Project one explicit-time read-only research-label history into summaries."""
+    try:
+        resolved_evaluated_at = ensure_aware_datetime(evaluated_at, "evaluated_at")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must not follow end_date")
+    return _research_effectiveness_response(
+        repository,
+        resolved_evaluated_at,
+        start_date,
+        end_date,
+    )
 
 
 @router.get("/research/latest.json")

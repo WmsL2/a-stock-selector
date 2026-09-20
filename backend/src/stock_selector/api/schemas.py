@@ -466,3 +466,44 @@ class SelectionResearchSnapshotResponse(APIResponseModel):
 class SelectionResearchLatestResponse(APIResponseModel):
     available: bool
     snapshot: SelectionResearchSnapshotResponse | None
+
+
+class SelectionResearchHorizonEffectivenessResponse(APIResponseModel):
+    horizon_sessions: int
+    total_labels: int
+    available_labels: int
+    anchor_unavailable_labels: int
+    insufficient_future_returns_labels: int
+    non_contiguous_return_evidence_labels: int
+    availability_rate: float | None
+    positive_return_labels: int
+    zero_return_labels: int
+    negative_return_labels: int
+    positive_return_rate: float | None
+    mean_return_fraction: float | None
+    median_return_fraction: float | None
+
+
+class SelectionResearchRankEffectivenessResponse(APIResponseModel):
+    rank: int
+    observation_count: int
+    horizons: list[SelectionResearchHorizonEffectivenessResponse]
+
+
+class SelectionResearchRankCutoffEffectivenessResponse(APIResponseModel):
+    cutoff_rank: int
+    included_ranks: list[int]
+    observation_count: int
+    horizons: list[SelectionResearchHorizonEffectivenessResponse]
+
+
+class SelectionResearchEffectivenessResponse(APIResponseModel):
+    evaluated_at: datetime
+    start_date: date | None
+    end_date: date | None
+    snapshot_count: int
+    empty_snapshot_count: int
+    item_observation_count: int
+    overall_horizons: list[SelectionResearchHorizonEffectivenessResponse]
+    ranks: list[SelectionResearchRankEffectivenessResponse]
+    cutoffs: list[SelectionResearchRankCutoffEffectivenessResponse]

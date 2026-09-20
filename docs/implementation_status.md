@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 52 - Observed Rank-Cutoff Selection Effectiveness Foundation
+Task 53 - Selection Research Effectiveness API Foundation
 
 ## Status
 
 Completed
 
-Task52 computes deterministic cumulative descriptive effectiveness metrics for every exact observed official-rank cutoff in a Task49 return-label history. It retains sparse observed-rank prefixes without synthesis, preserves original history metadata and blocked snapshots, constructs validated rank-less-than-or-equal-to-cutoff histories in original item order, and delegates each cutoff to Task50 for fixed 5, 20, and 60-session arithmetic. It does not recompute ranking, selection, labels, returns, market data, portfolios, or trading performance.
+Task53 exposes the existing Task49 through Task52 research effectiveness chain through one read-only endpoint: `GET /api/selection/research/effectiveness`. Every request requires one explicit timezone-aware `evaluated_at`, builds one shared return-label history, then projects Task50 overall horizons, Task51 exact ranks, and Task52 observed rank cutoffs through explicit HTTP DTOs. It adds no metric, selection run, provider activity, export, persistence write, clock default, frontend, or trading behavior.
 
-Task52 verification: focused observed rank-cutoff effectiveness contracts PASS (7), selection suite PASS (239; 11 warnings), canonical backend validation PASS (1016 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (121 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task53 verification: focused selection research API contracts PASS (18; 1 warning), selection suite PASS (239; 11 warnings), canonical backend validation PASS (1022 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (121 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 
