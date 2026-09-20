@@ -31,6 +31,11 @@ from .research import (
     SelectionResearchSnapshot,
     SelectionResearchSnapshotBuilder,
 )
+from .research_effectiveness import (
+    SelectionResearchEffectivenessAnalyzer,
+    SelectionResearchEffectivenessReport,
+    SelectionResearchHorizonEffectiveness,
+)
 from .research_return_history import (
     SelectionResearchReturnHistory,
     SelectionResearchReturnHistoryBuilder,
@@ -63,8 +68,11 @@ __all__ = [
     "SelectionDataError",
     "SelectionError",
     "SelectionResearchArtifactStore",
+    "SelectionResearchEffectivenessAnalyzer",
+    "SelectionResearchEffectivenessReport",
     "SelectionResearchError",
     "SelectionResearchExportResult",
+    "SelectionResearchHorizonEffectiveness",
     "SelectionResearchItem",
     "SelectionResearchReturnAvailability",
     "SelectionResearchReturnHistory",

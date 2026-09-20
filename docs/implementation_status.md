@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 49 - Persisted Selection History Labeling
+Task 50 - Selection Effectiveness Metrics Foundation
 
 ## Status
 
 Completed
 
-Task49 builds a deterministic, read-only chronological sequence from actual persisted Task47 canonical selection snapshots and delegates each visible snapshot to the Task48 `SelectionResearchReturnLabeler` at one explicit timezone-aware `evaluated_at`. It reads only canonical `selection.json` artifacts, preserves snapshot chronology and official item order, includes blocked snapshots as empty reports, and neither synthesizes missing dates nor labels snapshots after the evaluation instant. This is labeling only: it does not replay selection, refresh, collection, factors, scoring, ranking, providers, benchmarks, performance evaluation, or trading.
+Task50 computes deterministic descriptive effectiveness metrics from an already-built Task49 return-label history. The pure analyzer is item-observation weighted, preserves every Task48 availability state, and reports fixed 5, 20, and 60-session availability and return-distribution summaries. It consumes labels only: it does not load artifacts or market data, reconstruct selection, use providers or collectors, construct portfolios, calculate benchmarks or excess returns, or evaluate trading performance.
 
-Task49 verification: focused persisted-research/history-label contracts PASS (41), selection suite PASS (218; 11 warnings), canonical backend validation PASS (995 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (118 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task50 verification: focused effectiveness-metric contracts PASS (7), selection suite PASS (225; 11 warnings), canonical backend validation PASS (1002 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (119 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 
