@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 51 - Exact-Rank Selection Effectiveness Foundation
+Task 52 - Observed Rank-Cutoff Selection Effectiveness Foundation
 
 ## Status
 
 Completed
 
-Task51 computes deterministic descriptive effectiveness metrics for only the exact official ranks already present in a Task49 return-label history. It retains sparse ranks without synthesis, preserves original history metadata and blocked snapshots, and delegates each validated rank-filtered history to Task50 for fixed 5, 20, and 60-session arithmetic. It does not recompute ranking, selection, labels, returns, market data, portfolios, or trading performance.
+Task52 computes deterministic cumulative descriptive effectiveness metrics for every exact observed official-rank cutoff in a Task49 return-label history. It retains sparse observed-rank prefixes without synthesis, preserves original history metadata and blocked snapshots, constructs validated rank-less-than-or-equal-to-cutoff histories in original item order, and delegates each cutoff to Task50 for fixed 5, 20, and 60-session arithmetic. It does not recompute ranking, selection, labels, returns, market data, portfolios, or trading performance.
 
-Task51 verification: focused exact-rank effectiveness contracts PASS (7), selection suite PASS (232; 11 warnings), canonical backend validation PASS (1009 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (120 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task52 verification: focused observed rank-cutoff effectiveness contracts PASS (7), selection suite PASS (239; 11 warnings), canonical backend validation PASS (1016 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (121 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 
