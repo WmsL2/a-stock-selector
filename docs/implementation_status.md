@@ -10,7 +10,7 @@ Completed
 
 Task53 exposes the existing Task49 through Task52 research effectiveness chain through one read-only endpoint: `GET /api/selection/research/effectiveness`. Every request requires one explicit timezone-aware `evaluated_at`, builds one shared return-label history, then projects Task50 overall horizons, Task51 exact ranks, and Task52 observed rank cutoffs through explicit HTTP DTOs. It adds no metric, selection run, provider activity, export, persistence write, clock default, frontend, or trading behavior.
 
-Task53 verification: focused selection research API contracts PASS (18; 1 warning), selection suite PASS (239; 11 warnings), canonical backend validation PASS (1022 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (121 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task53 verification: focused selection research API contracts PASS (18; 1 warning), selection suite PASS (239; 11 warnings), canonical backend validation PASS (1023 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (121 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 
