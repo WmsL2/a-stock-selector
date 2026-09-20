@@ -2,15 +2,15 @@
 
 ## Current Task
 
-Task 50 - Selection Effectiveness Metrics Foundation
+Task 51 - Exact-Rank Selection Effectiveness Foundation
 
 ## Status
 
 Completed
 
-Task50 computes deterministic descriptive effectiveness metrics from an already-built Task49 return-label history. The pure analyzer is item-observation weighted, preserves every Task48 availability state, and reports fixed 5, 20, and 60-session availability and return-distribution summaries. It consumes labels only: it does not load artifacts or market data, reconstruct selection, use providers or collectors, construct portfolios, calculate benchmarks or excess returns, or evaluate trading performance.
+Task51 computes deterministic descriptive effectiveness metrics for only the exact official ranks already present in a Task49 return-label history. It retains sparse ranks without synthesis, preserves original history metadata and blocked snapshots, and delegates each validated rank-filtered history to Task50 for fixed 5, 20, and 60-session arithmetic. It does not recompute ranking, selection, labels, returns, market data, portfolios, or trading performance.
 
-Task50 verification: focused effectiveness-metric contracts PASS (7), selection suite PASS (225; 11 warnings), canonical backend validation PASS (1002 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (119 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
+Task51 verification: focused exact-rank effectiveness contracts PASS (7), selection suite PASS (232; 11 warnings), canonical backend validation PASS (1009 tests; 91% coverage; 12 warnings), Ruff PASS, mypy PASS (120 source files), frontend type-check/lint PASS, 51 Vitest tests PASS across 13 files, production build PASS, and canonical exit code 0. No live provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 
