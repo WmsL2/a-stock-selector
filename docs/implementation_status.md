@@ -2,15 +2,18 @@
 
 ## Current Task
 
-Task 54 - Selection Research Effectiveness Vue/UI Integration
+Task 55 - Selection Research History View
 
 ## Status
 
 Completed
 
-Task54 presents the Task53 effectiveness API only after explicit user action. It requires a caller-entered timezone-aware `evaluated_at`, displays Task50 overall horizons plus Task51 exact-rank and Task52 observed-cutoff summaries, and performs display formatting only. It adds no metric, provider activity, persistence, selection recomputation, portfolio return, or backtest behavior.
+Task55 exposes persisted Task47 canonical snapshots through read-only history browsing. It supports optional inclusive date-range filtering, preserves canonical snapshot ordering and persisted item ordering, and reuses stored artifact truth. It adds no selection recomputation, provider/network market-data activity, persistence write, effectiveness metric, or portfolio/backtest/trading behavior.
 
-Task54 verification: focused research UI/API contracts PASS (12), frontend type-check/lint PASS, 55 Vitest tests PASS across 13 files, and production build PASS. No live provider call or real runtime market-data write was performed during automated validation.
+Task55 verification: focused backend API contracts PASS (26), Ruff PASS, and mypy PASS (121
+source files). Frontend type-check and lint PASS; focused API/research-view Vitest PASS (17), full
+Vitest PASS (60 across 13 files), and production build PASS. No live provider call or real runtime
+market-data write was performed during automated validation.
 
 ## Completed
 

@@ -169,6 +169,34 @@ def _export_research_artifact(
     return snapshot, export
 
 
+def _export_research_artifact_at(
+    client: TestClient,
+    as_of: datetime,
+    *,
+    blocked: bool = False,
+    failures: bool = False,
+) -> SelectionResearchSnapshot:
+    repository = client.app.state.repository
+    repository.save_instruments(
+        (_instrument("600519.SH"), _instrument("000001.SZ"))
+    )
+    snapshot = SelectionResearchSnapshotBuilder(
+        repository, client.app.state.settings
+    ).build(
+        _research_result(blocked=blocked),
+        refresh_had_collection_failures=failures,
+    )
+    data = snapshot.model_dump(mode="python")
+    data["as_of"] = as_of
+    data["diagnostics"] = snapshot.diagnostics.model_copy(update={"as_of": as_of})
+    data["items"] = tuple(
+        item.model_copy(update={"as_of": as_of}) for item in snapshot.items
+    )
+    historical = SelectionResearchSnapshot.model_validate(data)
+    SelectionResearchArtifactStore(repository.paths).export(historical)
+    return historical
+
+
 def _research_effectiveness(
     client: TestClient,
     *,
@@ -415,6 +443,115 @@ def test_selection_research_latest_projects_refresh_failure_provenance(client: T
     assert response.json()["snapshot"]["refresh_had_collection_failures"] is True
 
 
+def test_selection_research_history_returns_an_empty_success(client: TestClient) -> None:
+    response = client.get("/api/selection/research/history")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "start_date": None,
+        "end_date": None,
+        "snapshot_count": 0,
+        "snapshots": [],
+    }
+
+
+def test_selection_research_history_preserves_canonical_order_and_fidelity(
+    client: TestClient,
+) -> None:
+    earlier = _export_research_artifact_at(
+        client, datetime(2026, 9, 15, 16, tzinfo=ZoneInfo("Asia/Shanghai")), failures=True
+    )
+    later = _export_research_artifact_at(
+        client, datetime(2026, 9, 16, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+
+    response = client.get("/api/selection/research/history")
+
+    assert response.status_code == 200
+    snapshots = response.json()["snapshots"]
+    assert [item["as_of"] for item in snapshots] == [
+        earlier.as_of.isoformat(), later.as_of.isoformat()
+    ]
+    first = snapshots[0]
+    assert first["selection_ready"] is True
+    assert first["blockers"] == []
+    assert first["refresh_had_collection_failures"] is True
+    assert first["diagnostics"]["returned_items"] == 2
+    assert [item["rank"] for item in first["items"]] == [2, 1]
+    assert first["items"][0]["evidence"][0]["code"] == "quality"
+    assert first["items"][0]["risks"][0]["code"] == "volatility"
+
+
+@pytest.mark.parametrize(
+    ("params", "expected_dates"),
+    [
+        ({"start_date": "2026-09-16"}, ["2026-09-16", "2026-09-17"]),
+        ({"end_date": "2026-09-16"}, ["2026-09-15", "2026-09-16"]),
+        (
+            {"start_date": "2026-09-16", "end_date": "2026-09-16"},
+            ["2026-09-16"],
+        ),
+    ],
+)
+def test_selection_research_history_date_filters_are_inclusive(
+    client: TestClient, params: dict[str, str], expected_dates: list[str]
+) -> None:
+    for day in (15, 16, 17):
+        _export_research_artifact_at(
+            client, datetime(2026, 9, day, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+        )
+
+    response = client.get("/api/selection/research/history", params=params)
+
+    assert response.status_code == 200
+    assert [item["as_of"][:10] for item in response.json()["snapshots"]] == expected_dates
+
+
+def test_selection_research_history_rejects_an_invalid_date_range(client: TestClient) -> None:
+    response = client.get(
+        "/api/selection/research/history",
+        params={"start_date": "2026-09-17", "end_date": "2026-09-16"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_selection_research_history_projects_blocked_snapshots(client: TestClient) -> None:
+    _export_research_artifact_at(
+        client,
+        datetime(2026, 9, 16, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
+        blocked=True,
+        failures=True,
+    )
+
+    response = client.get("/api/selection/research/history")
+
+    assert response.status_code == 200
+    snapshot = response.json()["snapshots"][0]
+    assert snapshot["selection_ready"] is False
+    assert snapshot["blockers"] == ["eligible_factor_input_coverage_incomplete"]
+    assert snapshot["refresh_had_collection_failures"] is True
+    assert snapshot["diagnostics"]["returned_items"] == 0
+
+
+def test_selection_research_history_corrupt_artifact_is_a_generic_503(
+    client: TestClient,
+) -> None:
+    snapshot, _ = _export_research_artifact(client)
+    corrupt = (
+        client.app.state.repository.paths.snapshots_dir
+        / "selection"
+        / snapshot.as_of.date().isoformat()
+        / "selection.json"
+    )
+    corrupt.write_text("{not valid json", encoding="utf-8")
+
+    response = client.get("/api/selection/research/history")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "selection research artifact unavailable"}
+
+
 @pytest.mark.parametrize(
     ("suffix", "content_type"),
     (("json", "application/json"), ("csv", "text/csv")),
@@ -477,6 +614,7 @@ def test_selection_research_routes_do_not_invoke_daily_selection_or_provider(
         assert client.get("/api/selection/research/latest").status_code == 200
         assert client.get("/api/selection/research/latest.json").status_code == 200
         assert client.get("/api/selection/research/latest.csv").status_code == 200
+        assert client.get("/api/selection/research/history").status_code == 200
         assert _research_effectiveness(client).status_code == 200
 
 

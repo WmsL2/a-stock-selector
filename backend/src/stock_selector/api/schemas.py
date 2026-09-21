@@ -468,6 +468,13 @@ class SelectionResearchLatestResponse(APIResponseModel):
     snapshot: SelectionResearchSnapshotResponse | None
 
 
+class SelectionResearchHistoryResponse(APIResponseModel):
+    start_date: date | None
+    end_date: date | None
+    snapshot_count: int
+    snapshots: list[SelectionResearchSnapshotResponse]
+
+
 class SelectionResearchHorizonEffectivenessResponse(APIResponseModel):
     horizon_sessions: int
     total_labels: int

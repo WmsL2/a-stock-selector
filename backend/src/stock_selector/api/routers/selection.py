@@ -21,6 +21,7 @@ from stock_selector.api.schemas import (
     RealtimeSelectionResponse,
     RiskFlagResponse,
     SelectionResearchEffectivenessResponse,
+    SelectionResearchHistoryResponse,
     SelectionResearchHorizonEffectivenessResponse,
     SelectionResearchItemResponse,
     SelectionResearchLatestResponse,
@@ -41,6 +42,7 @@ from stock_selector.selection import (
     SelectionResearchRankEffectivenessAnalyzer,
     SelectionResearchReturnHistoryBuilder,
     SelectionResearchReturnLabeler,
+    SelectionResearchSnapshot,
 )
 from stock_selector.storage import LocalMarketRepository
 
@@ -119,19 +121,39 @@ def _research_response(repository: LocalMarketRepository) -> SelectionResearchLa
         raise HTTPException(status_code=503, detail="selection research artifact unavailable") from exc
     if snapshot is None:
         return SelectionResearchLatestResponse(available=False, snapshot=None)
+    return SelectionResearchLatestResponse(available=True, snapshot=_research_snapshot_response(snapshot))
+
+
+def _research_snapshot_response(
+    snapshot: SelectionResearchSnapshot,
+) -> SelectionResearchSnapshotResponse:
     diagnostics = snapshot.diagnostics
-    return SelectionResearchLatestResponse(available=True, snapshot=SelectionResearchSnapshotResponse(
-        schema_version=snapshot.schema_version, as_of=snapshot.as_of,
-        strategy_name=snapshot.strategy_name, selection_ready=snapshot.selection_ready,
+    return SelectionResearchSnapshotResponse(
+        schema_version=snapshot.schema_version,
+        as_of=snapshot.as_of,
+        strategy_name=snapshot.strategy_name,
+        selection_ready=snapshot.selection_ready,
         blockers=[item.value for item in snapshot.blockers],
         refresh_had_collection_failures=snapshot.refresh_had_collection_failures,
-        diagnostics=DailySelectionDiagnosticsResponse(**diagnostics.model_dump(exclude={"as_of", "selection_ready", "blockers"})),
-        items=[SelectionResearchItemResponse(
-            **item.model_dump(exclude={"evidence", "risks"}),
-            evidence=[EvidenceResponse(**value.model_dump()) for value in item.evidence],
-            risks=[RiskFlagResponse(code=value.code, message=value.message, severity=value.severity.value) for value in item.risks],
-        ) for item in snapshot.items],
-    ))
+        diagnostics=DailySelectionDiagnosticsResponse(
+            **diagnostics.model_dump(exclude={"as_of", "selection_ready", "blockers"})
+        ),
+        items=[
+            SelectionResearchItemResponse(
+                **item.model_dump(exclude={"evidence", "risks"}),
+                evidence=[EvidenceResponse(**value.model_dump()) for value in item.evidence],
+                risks=[
+                    RiskFlagResponse(
+                        code=value.code,
+                        message=value.message,
+                        severity=value.severity.value,
+                    )
+                    for value in item.risks
+                ],
+            )
+            for item in snapshot.items
+        ],
+    )
 
 
 @router.get("/research/latest", response_model=SelectionResearchLatestResponse)
@@ -139,6 +161,32 @@ def get_selection_research_latest(
     repository: Annotated[LocalMarketRepository, Depends(get_repository)],
 ) -> SelectionResearchLatestResponse:
     return _research_response(repository)
+
+
+@router.get("/research/history", response_model=SelectionResearchHistoryResponse)
+def get_selection_research_history(
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+) -> SelectionResearchHistoryResponse:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must not follow end_date")
+    try:
+        snapshots = SelectionResearchArtifactStore(repository.paths).load_all()
+    except SelectionResearchError as exc:
+        raise HTTPException(status_code=503, detail="selection research artifact unavailable") from exc
+    filtered = tuple(
+        snapshot
+        for snapshot in snapshots
+        if (start_date is None or snapshot.as_of.date() >= start_date)
+        and (end_date is None or snapshot.as_of.date() <= end_date)
+    )
+    return SelectionResearchHistoryResponse(
+        start_date=start_date,
+        end_date=end_date,
+        snapshot_count=len(filtered),
+        snapshots=[_research_snapshot_response(snapshot) for snapshot in filtered],
+    )
 
 
 @router.get("/research/effectiveness", response_model=SelectionResearchEffectivenessResponse)

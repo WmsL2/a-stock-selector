@@ -348,6 +348,12 @@ export interface SelectionResearchLatestResponse {
   available: boolean
   snapshot: SelectionResearchSnapshotResponse | null
 }
+export interface SelectionResearchHistoryResponse {
+  start_date: string | null
+  end_date: string | null
+  snapshot_count: number
+  snapshots: SelectionResearchSnapshotResponse[]
+}
 
 export interface SelectionResearchHorizonEffectivenessResponse {
   horizon_sessions: number

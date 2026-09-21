@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { getSelectionResearchEffectiveness, getSelectionResearchLatest, selectionResearchDownloadUrl } from '@/api/selection'
-import type { SelectionResearchEffectivenessResponse, SelectionResearchLatestResponse } from '@/api/types'
+import { getSelectionResearchEffectiveness, getSelectionResearchHistory, getSelectionResearchLatest, selectionResearchDownloadUrl } from '@/api/selection'
+import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 
 const loading = ref(false)
@@ -15,6 +15,11 @@ const endDate = ref('')
 const effectivenessLoading = ref(false)
 const effectivenessError = ref<string | null>(null)
 const effectiveness = ref<SelectionResearchEffectivenessResponse | null>(null)
+const historyStartDate = ref('')
+const historyEndDate = ref('')
+const historyLoading = ref(false)
+const historyError = ref<string | null>(null)
+const historyResponse = ref<SelectionResearchHistoryResponse | null>(null)
 const canLoadEffectiveness = computed(() => evaluatedAt.value.trim().length > 0)
 
 function score(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
@@ -36,6 +41,23 @@ async function loadEffectiveness(): Promise<void> {
   try { effectiveness.value = await getSelectionResearchEffectiveness({ evaluated_at, ...(start_date ? { start_date } : {}), ...(end_date ? { end_date } : {}) }) }
   catch { effectivenessError.value = '无法读取选股研究有效性；请确认评估时点包含时区且日期范围有效。' }
   finally { effectivenessLoading.value = false }
+}
+async function loadHistory(): Promise<void> {
+  const start_date = historyStartDate.value.trim()
+  const end_date = historyEndDate.value.trim()
+  historyLoading.value = true
+  historyError.value = null
+  historyResponse.value = null
+  try {
+    historyResponse.value = await getSelectionResearchHistory({
+      ...(start_date ? { start_date } : {}),
+      ...(end_date ? { end_date } : {}),
+    })
+  } catch {
+    historyError.value = '无法读取历史选股研究快照。'
+  } finally {
+    historyLoading.value = false
+  }
 }
 async function load(): Promise<void> {
   loading.value = true; error.value = null
@@ -84,5 +106,35 @@ onMounted(() => void load())
       <h3>整体期限</h3><el-table :data="effectiveness.overall_horizons" data-testid="overall-horizons"><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="total_labels" label="标签数" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="anchor_unavailable_labels" label="锚点不可用" /><el-table-column prop="insufficient_future_returns_labels" label="未来不足" /><el-table-column prop="non_contiguous_return_evidence_labels" label="不连续" /><el-table-column prop="positive_return_labels" label="正" /><el-table-column prop="zero_return_labels" label="零" /><el-table-column prop="negative_return_labels" label="负" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table>
       <el-tabs><el-tab-pane label="精确排名"><el-table :data="rankRows()" data-testid="exact-ranks"><el-table-column label="排名"><template #default="scope"><span :data-testid="`effectiveness-rank-${scope.row.rank}`">{{ scope.row.rank }}</span></template></el-table-column><el-table-column prop="observation_count" label="观测数" /><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="total_labels" label="标签数" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table></el-tab-pane><el-tab-pane label="观测排名截止"><el-table :data="cutoffRows()" data-testid="rank-cutoffs"><el-table-column label="截止排名"><template #default="scope"><span :data-testid="`effectiveness-cutoff-${scope.row.cutoff_rank}`">{{ scope.row.cutoff_rank }}</span></template></el-table-column><el-table-column label="包含排名"><template #default="scope">{{ scope.row.included_ranks.join(', ') }}</template></el-table-column><el-table-column prop="observation_count" label="观测数" /><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="total_labels" label="标签数" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table></el-tab-pane></el-tabs>
     </template>
+  </section>
+  <section class="panel" data-testid="history-panel">
+    <h2>历史选股快照</h2>
+    <p class="provenance">仅浏览持久化的官方快照；不会重新选股、访问行情或写入数据。</p>
+    <el-input v-model="historyStartDate" data-testid="history-start-date-input" placeholder="开始日期" />
+    <el-input v-model="historyEndDate" data-testid="history-end-date-input" placeholder="结束日期" />
+    <el-button data-testid="load-history" :loading="historyLoading" @click="loadHistory">读取历史</el-button>
+    <el-alert v-if="historyError" :title="historyError" type="error" :closable="false" />
+    <p v-if="historyResponse?.snapshot_count === 0" data-testid="history-empty">所选日期范围内没有持久化的选股研究快照。</p>
+    <article
+      v-for="(historySnapshot, snapshotIndex) in historyResponse?.snapshots ?? []"
+      :key="historySnapshot.as_of"
+      class="panel"
+      :data-testid="`history-snapshot-${snapshotIndex}`"
+    >
+      <h3>{{ historySnapshot.as_of }} · {{ historySnapshot.strategy_name }}</h3>
+      <p>官方选股状态：{{ historySnapshot.selection_ready ? '已就绪' : '已阻断' }}</p>
+      <p>阻断：{{ historySnapshot.blockers.join(', ') || 'none' }}</p>
+      <p>刷新采集：{{ historySnapshot.refresh_had_collection_failures ? '包含失败' : '无嵌套失败' }}</p>
+      <p>返回选股项：{{ historySnapshot.diagnostics.returned_items }}</p>
+      <el-table :data="historySnapshot.items" class="instrument-table">
+        <el-table-column prop="rank" label="排名" width="66" />
+        <el-table-column prop="symbol" label="代码" min-width="112" />
+        <el-table-column prop="name" label="名称" min-width="112" />
+        <el-table-column label="BaseScore" width="100"><template #default="scope">{{ score(scope.row.base_score) }}</template></el-table-column>
+        <el-table-column label="Confidence Adj." width="126"><template #default="scope">{{ score(scope.row.confidence_adjusted_score) }}</template></el-table-column>
+        <el-table-column label="完整度" width="85"><template #default="scope">{{ percent(scope.row.data_completeness) }}</template></el-table-column>
+        <el-table-column label="置信度" width="85"><template #default="scope">{{ percent(scope.row.confidence) }}</template></el-table-column>
+      </el-table>
+    </article>
   </section>
 </template>
