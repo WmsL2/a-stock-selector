@@ -349,6 +349,44 @@ export interface SelectionResearchLatestResponse {
   snapshot: SelectionResearchSnapshotResponse | null
 }
 
+export interface SelectionResearchHorizonEffectivenessResponse {
+  horizon_sessions: number
+  total_labels: number
+  available_labels: number
+  anchor_unavailable_labels: number
+  insufficient_future_returns_labels: number
+  non_contiguous_return_evidence_labels: number
+  availability_rate: number | null
+  positive_return_labels: number
+  zero_return_labels: number
+  negative_return_labels: number
+  positive_return_rate: number | null
+  mean_return_fraction: number | null
+  median_return_fraction: number | null
+}
+export interface SelectionResearchRankEffectivenessResponse {
+  rank: number
+  observation_count: number
+  horizons: SelectionResearchHorizonEffectivenessResponse[]
+}
+export interface SelectionResearchRankCutoffEffectivenessResponse {
+  cutoff_rank: number
+  included_ranks: number[]
+  observation_count: number
+  horizons: SelectionResearchHorizonEffectivenessResponse[]
+}
+export interface SelectionResearchEffectivenessResponse {
+  evaluated_at: string
+  start_date: string | null
+  end_date: string | null
+  snapshot_count: number
+  empty_snapshot_count: number
+  item_observation_count: number
+  overall_horizons: SelectionResearchHorizonEffectivenessResponse[]
+  ranks: SelectionResearchRankEffectivenessResponse[]
+  cutoffs: SelectionResearchRankCutoffEffectivenessResponse[]
+}
+
 export interface RealtimeSelectionFamilyPolicyResponse {
   enabled: boolean
   weight: number

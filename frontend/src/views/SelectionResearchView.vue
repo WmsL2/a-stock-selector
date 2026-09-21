@@ -1,17 +1,42 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { getSelectionResearchLatest, selectionResearchDownloadUrl } from '@/api/selection'
-import type { SelectionResearchLatestResponse } from '@/api/types'
+import { getSelectionResearchEffectiveness, getSelectionResearchLatest, selectionResearchDownloadUrl } from '@/api/selection'
+import type { SelectionResearchEffectivenessResponse, SelectionResearchLatestResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 const response = ref<SelectionResearchLatestResponse | null>(null)
 const snapshot = computed(() => response.value?.snapshot ?? null)
+const evaluatedAt = ref('')
+const startDate = ref('')
+const endDate = ref('')
+const effectivenessLoading = ref(false)
+const effectivenessError = ref<string | null>(null)
+const effectiveness = ref<SelectionResearchEffectivenessResponse | null>(null)
+const canLoadEffectiveness = computed(() => evaluatedAt.value.trim().length > 0)
 
 function score(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
 function percent(value: number): string { return `${(value * 100).toFixed(0)}%` }
+function researchPercent(value: number | null): string { return value === null ? '—' : `${(value * 100).toFixed(2)}%` }
+function metric(value: number | null): string { return value === null ? '—' : `${(value * 100).toFixed(2)}%` }
+function rankRows() {
+  return effectiveness.value?.ranks.flatMap(item => item.horizons.map(horizon => ({ ...horizon, rank: item.rank, observation_count: item.observation_count }))) ?? []
+}
+function cutoffRows() {
+  return effectiveness.value?.cutoffs.flatMap(item => item.horizons.map(horizon => ({ ...horizon, cutoff_rank: item.cutoff_rank, included_ranks: item.included_ranks, observation_count: item.observation_count }))) ?? []
+}
+async function loadEffectiveness(): Promise<void> {
+  const evaluated_at = evaluatedAt.value.trim()
+  if (!evaluated_at) return
+  const start_date = startDate.value.trim()
+  const end_date = endDate.value.trim()
+  effectivenessLoading.value = true; effectivenessError.value = null; effectiveness.value = null
+  try { effectiveness.value = await getSelectionResearchEffectiveness({ evaluated_at, ...(start_date ? { start_date } : {}), ...(end_date ? { end_date } : {}) }) }
+  catch { effectivenessError.value = '无法读取选股研究有效性；请确认评估时点包含时区且日期范围有效。' }
+  finally { effectivenessLoading.value = false }
+}
 async function load(): Promise<void> {
   loading.value = true; error.value = null
   try { response.value = await getSelectionResearchLatest() }
@@ -48,4 +73,16 @@ onMounted(() => void load())
       </el-table>
     </section>
   </template>
+  <section class="panel" data-testid="effectiveness-panel">
+    <h2>历史选股有效性</h2>
+    <p class="provenance">评估时点是显式的点时证据截止；必须包含时区，浏览器不会自动填入当前时间。统计按历史选股 item-observation 汇总，不是按交易日等权，也不是组合收益；仅为描述性研究，不代表组合收益、NAV、PnL、回测或交易建议。</p>
+    <el-form label-position="top"><el-form-item label="评估时点（含时区 ISO 8601）"><el-input v-model="evaluatedAt" data-testid="evaluated-at-input" placeholder="2026-09-20T16:00:00+08:00" /></el-form-item><el-form-item label="开始日期（可选）"><el-input v-model="startDate" data-testid="start-date-input" placeholder="YYYY-MM-DD" /></el-form-item><el-form-item label="结束日期（可选）"><el-input v-model="endDate" data-testid="end-date-input" placeholder="YYYY-MM-DD" /></el-form-item><el-button data-testid="load-effectiveness" type="primary" :disabled="!canLoadEffectiveness" :loading="effectivenessLoading" @click="loadEffectiveness">读取有效性</el-button></el-form>
+    <el-alert v-if="effectivenessError" :title="effectivenessError" type="error" :closable="false" show-icon />
+    <template v-if="effectiveness">
+      <el-descriptions :column="3" border><el-descriptions-item label="评估时点">{{ effectiveness.evaluated_at }}</el-descriptions-item><el-descriptions-item label="开始日期">{{ effectiveness.start_date ?? '—' }}</el-descriptions-item><el-descriptions-item label="结束日期">{{ effectiveness.end_date ?? '—' }}</el-descriptions-item><el-descriptions-item label="快照数">{{ effectiveness.snapshot_count }}</el-descriptions-item><el-descriptions-item label="空快照数">{{ effectiveness.empty_snapshot_count }}</el-descriptions-item><el-descriptions-item label="选股项观测数">{{ effectiveness.item_observation_count }}</el-descriptions-item></el-descriptions>
+      <p v-if="effectiveness.snapshot_count === 0" data-testid="effectiveness-empty">所选评估时点和日期范围内没有持久化的选股研究快照。</p><p v-else-if="effectiveness.item_observation_count === 0" data-testid="effectiveness-blocked">范围内存在持久化快照，但没有可用于收益标签统计的选股项；快照可能为阻断或空结果。</p>
+      <h3>整体期限</h3><el-table :data="effectiveness.overall_horizons" data-testid="overall-horizons"><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="total_labels" label="标签数" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="anchor_unavailable_labels" label="锚点不可用" /><el-table-column prop="insufficient_future_returns_labels" label="未来不足" /><el-table-column prop="non_contiguous_return_evidence_labels" label="不连续" /><el-table-column prop="positive_return_labels" label="正" /><el-table-column prop="zero_return_labels" label="零" /><el-table-column prop="negative_return_labels" label="负" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table>
+      <el-tabs><el-tab-pane label="精确排名"><el-table :data="rankRows()" data-testid="exact-ranks"><el-table-column label="排名"><template #default="scope"><span :data-testid="`effectiveness-rank-${scope.row.rank}`">{{ scope.row.rank }}</span></template></el-table-column><el-table-column prop="observation_count" label="观测数" /><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="total_labels" label="标签数" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table></el-tab-pane><el-tab-pane label="观测排名截止"><el-table :data="cutoffRows()" data-testid="rank-cutoffs"><el-table-column label="截止排名"><template #default="scope"><span :data-testid="`effectiveness-cutoff-${scope.row.cutoff_rank}`">{{ scope.row.cutoff_rank }}</span></template></el-table-column><el-table-column label="包含排名"><template #default="scope">{{ scope.row.included_ranks.join(', ') }}</template></el-table-column><el-table-column prop="observation_count" label="观测数" /><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="total_labels" label="标签数" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table></el-tab-pane></el-tabs>
+    </template>
+  </section>
 </template>
