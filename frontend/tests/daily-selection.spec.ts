@@ -183,7 +183,7 @@ describe('DailySelectionView', () => {
     })
   })
 
-  it('expands structured evidence and data limitations with severity presentation', async () => {
+  it('expands the shared structured explainability presentation', async () => {
     api.getDailySelection.mockResolvedValue(readyResponse)
     const wrapper = mountView()
     await flushPromises()
@@ -191,7 +191,10 @@ describe('DailySelectionView', () => {
     await wrapper.find('.el-table__expand-icon').trigger('click')
     await nextTick()
 
-    expect(wrapper.text()).toContain('主要依据')
+    expect(wrapper.find('[data-testid="selection-item-explainability"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('官方排名与评分')
+    expect(wrapper.text()).toContain('五因子评分')
+    expect(wrapper.text()).toContain('family_quality_contribution')
     expect(wrapper.text()).toContain('数据与模型限制')
     expect(wrapper.text()).toContain('Quality 得分 85.0')
     expect(wrapper.text()).toContain('Momentum 和 LowVol 未参与 BaseScore')

@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { getDailySelection } from '@/api/selection'
 import type { DailySelectionBlocker, DailySelectionItemResponse, DailySelectionResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
+import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -29,11 +30,6 @@ function score(value: number | null): string {
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(0)}%`
-}
-
-function riskTagType(severity: DailySelectionItemResponse['risks'][number]['severity']): 'danger' | 'warning' | 'info' {
-  if (severity === 'high') return 'danger'
-  return severity
 }
 
 function openInstrument(row: DailySelectionItemResponse): void {
@@ -91,24 +87,7 @@ onMounted(() => void loadSelection())
       <el-table v-loading="loading" :data="selection?.items ?? []" class="instrument-table" @row-click="openInstrument">
         <el-table-column type="expand">
           <template #default="scope">
-            <div class="selection-explanation">
-              <div>
-                <h3>主要依据</h3>
-                <ul>
-                  <li v-for="evidence in scope.row.evidence" :key="evidence.code">{{ evidence.message }}</li>
-                </ul>
-              </div>
-              <div>
-                <h3>数据与模型限制</h3>
-                <template v-if="scope.row.risks.length">
-                  <p v-for="risk in scope.row.risks" :key="risk.code">
-                    <el-tag size="small" :type="riskTagType(risk.severity)">{{ risk.severity }}</el-tag>
-                    {{ risk.message }}
-                  </p>
-                </template>
-                <p v-else>未生成额外数据/模型限制标签；不代表证券无投资风险。</p>
-              </div>
-            </div>
+            <SelectionItemExplainability :item="scope.row" />
           </template>
         </el-table-column>
         <el-table-column prop="rank" label="排名" width="66" />

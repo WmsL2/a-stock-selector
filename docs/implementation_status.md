@@ -2,18 +2,21 @@
 
 ## Current Task
 
-Task 55 - Selection Research History View
+Task 56 - Selection Result Explainability Enhancement
 
 ## Status
 
 Completed
 
-Task55 exposes persisted Task47 canonical snapshots through read-only history browsing. It supports optional inclusive date-range filtering, preserves canonical snapshot ordering and persisted item ordering, and reuses stored artifact truth. It adds no selection recomputation, provider/network market-data activity, persistence write, effectiveness metric, or portfolio/backtest/trading behavior.
+Task56 introduces a shared display-only selection explainability component. It exposes official
+BaseScore/rank context, fixed factor scores, structured evidence fields, and raw limitation
+codes/severities for current selection and persisted latest/history snapshots. It preserves
+backend-provided order and values, and adds no scoring, ranking, or explanation calculation;
+provider, storage, or API behavior; or portfolio, backtest, or trading behavior.
 
-Task55 verification: focused backend API contracts PASS (26), Ruff PASS, and mypy PASS (121
-source files). Frontend type-check and lint PASS; focused API/research-view Vitest PASS (17), full
-Vitest PASS (60 across 13 files), and production build PASS. No live provider call or real runtime
-market-data write was performed during automated validation.
+Task56 verification: frontend type-check and lint PASS; focused explainability/daily/research
+Vitest PASS (30), full Vitest PASS (63 across 14 files), and production build PASS. No live
+provider call or real runtime market-data write was performed during automated validation.
 
 ## Completed
 

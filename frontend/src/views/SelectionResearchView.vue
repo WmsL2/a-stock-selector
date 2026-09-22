@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { getSelectionResearchEffectiveness, getSelectionResearchHistory, getSelectionResearchLatest, selectionResearchDownloadUrl } from '@/api/selection'
 import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
+import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -89,7 +90,7 @@ onMounted(() => void load())
     <section class="panel">
       <p class="provenance">这是持久化的官方选股快照；同日重新运行 selection daily 可以替换它。排名保持官方原始 BaseScore 顺序，confidence-adjusted score 仅供展示，不构成投资建议。</p>
       <el-table :data="snapshot.items" class="instrument-table">
-        <el-table-column type="expand"><template #default="scope"><div class="selection-explanation"><div><h3>主要依据</h3><ul><li v-for="item in scope.row.evidence" :key="item.code">{{ item.message }}</li></ul></div><div><h3>风险</h3><ul><li v-for="item in scope.row.risks" :key="item.code">{{ item.message }}</li></ul></div></div></template></el-table-column>
+        <el-table-column type="expand"><template #default="scope"><SelectionItemExplainability :item="scope.row" /></template></el-table-column>
         <el-table-column prop="rank" label="排名" width="66" /><el-table-column prop="symbol" label="代码" min-width="112" /><el-table-column prop="name" label="名称" min-width="112" /><el-table-column prop="board" label="板块" width="90" /><el-table-column label="行业" min-width="130"><template #default="scope">{{ scope.row.industry_name ?? '—' }}</template></el-table-column>
         <el-table-column label="BaseScore" width="100"><template #default="scope">{{ score(scope.row.base_score) }}</template></el-table-column><el-table-column label="Confidence Adj." width="126"><template #default="scope">{{ score(scope.row.confidence_adjusted_score) }}</template></el-table-column><el-table-column label="完整度" width="85"><template #default="scope">{{ percent(scope.row.data_completeness) }}</template></el-table-column><el-table-column label="置信度" width="85"><template #default="scope">{{ percent(scope.row.confidence) }}</template></el-table-column><el-table-column label="Quality" width="85"><template #default="scope">{{ score(scope.row.quality_score) }}</template></el-table-column><el-table-column label="Value" width="80"><template #default="scope">{{ score(scope.row.value_score) }}</template></el-table-column><el-table-column label="Growth" width="84"><template #default="scope">{{ score(scope.row.growth_score) }}</template></el-table-column><el-table-column label="Momentum" width="95"><template #default="scope">{{ score(scope.row.momentum_score) }}</template></el-table-column><el-table-column label="LowVol" width="84"><template #default="scope">{{ score(scope.row.low_volatility_score) }}</template></el-table-column>
       </el-table>
@@ -127,6 +128,7 @@ onMounted(() => void load())
       <p>刷新采集：{{ historySnapshot.refresh_had_collection_failures ? '包含失败' : '无嵌套失败' }}</p>
       <p>返回选股项：{{ historySnapshot.diagnostics.returned_items }}</p>
       <el-table :data="historySnapshot.items" class="instrument-table">
+        <el-table-column type="expand"><template #default="scope"><SelectionItemExplainability :item="scope.row" /></template></el-table-column>
         <el-table-column prop="rank" label="排名" width="66" />
         <el-table-column prop="symbol" label="代码" min-width="112" />
         <el-table-column prop="name" label="名称" min-width="112" />

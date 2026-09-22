@@ -137,14 +137,16 @@ describe('SelectionResearchView', () => {
     expect(wrapper.text()).toContain('包含失败')
   })
 
-  it('expands evidence and risk details from the persisted item', async () => {
+  it('expands the shared explainability presentation from the latest persisted item', async () => {
     mockSnapshot()
     const wrapper = mountView(); await flushPromises()
     await wrapper.find('.el-table__expand-icon').trigger('click'); await flushPromises()
 
-    expect(wrapper.text()).toContain('主要依据')
+    expect(wrapper.find('[data-testid="selection-item-explainability"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('五因子评分')
+    expect(wrapper.text()).toContain('quality')
     expect(wrapper.text()).toContain('质量依据')
-    expect(wrapper.text()).toContain('风险')
+    expect(wrapper.text()).toContain('volatility')
     expect(wrapper.text()).toContain('波动风险')
   })
 
@@ -223,6 +225,16 @@ describe('SelectionResearchView', () => {
     expect(first.text()).toContain('2026-09-16')
     expect(second.text()).toContain('2026-09-17')
     expect(first.text().indexOf('600519.SH')).toBeLessThan(first.text().indexOf('000001.SZ'))
+    expect(api.getSelectionResearchLatest).toHaveBeenCalledTimes(1)
+    expect(api.getSelectionResearchHistory).toHaveBeenCalledTimes(1)
+    expect(api.getSelectionResearchEffectiveness).not.toHaveBeenCalled()
+    await first.find('.el-table__expand-icon').trigger('click'); await flushPromises()
+    expect(first.find('[data-testid="selection-item-explainability"]').exists()).toBe(true)
+    expect(first.text()).toContain('quality')
+    expect(first.text()).toContain('volatility')
+    expect(api.getSelectionResearchLatest).toHaveBeenCalledTimes(1)
+    expect(api.getSelectionResearchHistory).toHaveBeenCalledTimes(1)
+    expect(api.getSelectionResearchEffectiveness).not.toHaveBeenCalled()
   })
 
   it('shows blocked history snapshots and raw blocker codes', async () => {
