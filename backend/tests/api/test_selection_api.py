@@ -175,6 +175,8 @@ def _export_research_artifact_at(
     *,
     blocked: bool = False,
     failures: bool = False,
+    strategy_name: str = "official",
+    item_specs: tuple[tuple[str, int], ...] | None = None,
 ) -> SelectionResearchSnapshot:
     repository = client.app.state.repository
     repository.save_instruments(
@@ -188,10 +190,21 @@ def _export_research_artifact_at(
     )
     data = snapshot.model_dump(mode="python")
     data["as_of"] = as_of
+    data["strategy_name"] = strategy_name
     data["diagnostics"] = snapshot.diagnostics.model_copy(update={"as_of": as_of})
-    data["items"] = tuple(
+    items = tuple(
         item.model_copy(update={"as_of": as_of}) for item in snapshot.items
     )
+    if item_specs is not None:
+        by_symbol = {item.symbol: item for item in items}
+        items = tuple(
+            by_symbol[symbol].model_copy(update={"rank": rank})
+            for symbol, rank in item_specs
+        )
+        data["diagnostics"] = data["diagnostics"].model_copy(
+            update={"returned_items": len(items)}
+        )
+    data["items"] = items
     historical = SelectionResearchSnapshot.model_validate(data)
     SelectionResearchArtifactStore(repository.paths).export(historical)
     return historical
@@ -552,6 +565,111 @@ def test_selection_research_history_corrupt_artifact_is_a_generic_503(
     assert response.json() == {"detail": "selection research artifact unavailable"}
 
 
+def test_selection_research_stability_returns_empty_and_single_reports(
+    client: TestClient,
+) -> None:
+    empty = client.get("/api/selection/research/stability")
+    assert empty.status_code == 200
+    assert empty.json() == {
+        "start_date": None,
+        "end_date": None,
+        "snapshot_count": 0,
+        "transition_count": 0,
+        "comparable_transition_count": 0,
+        "transitions": [],
+    }
+    _export_research_artifact_at(
+        client, datetime(2026, 9, 15, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    single = client.get("/api/selection/research/stability")
+    assert single.status_code == 200
+    assert single.json()["snapshot_count"] == 1
+    assert single.json()["transitions"] == []
+
+
+def test_selection_research_stability_projects_ready_order_and_filters(
+    client: TestClient,
+) -> None:
+    _export_research_artifact_at(
+        client,
+        datetime(2026, 9, 15, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
+        item_specs=(("600519.SH", 3), ("000001.SZ", 1)),
+    )
+    _export_research_artifact_at(
+        client,
+        datetime(2026, 9, 16, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
+        item_specs=(("000001.SZ", 2),),
+    )
+    _export_research_artifact_at(
+        client,
+        datetime(2026, 9, 17, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
+        item_specs=(("000001.SZ", 1), ("600519.SH", 4)),
+    )
+
+    response = client.get("/api/selection/research/stability")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [(item["previous_as_of"][:10], item["current_as_of"][:10]) for item in body["transitions"]] == [
+        ("2026-09-15", "2026-09-16"), ("2026-09-16", "2026-09-17")
+    ]
+    first = body["transitions"][0]
+    assert (first["retained_count"], first["entered_count"], first["exited_count"]) == (1, 0, 1)
+    assert (first["retention_rate"], first["overlap_rate"]) == (0.5, 0.5)
+    assert [item["symbol"] for item in first["movements"]] == ["000001.SZ", "600519.SH"]
+    assert [item["status"] for item in first["movements"]] == ["retained", "exited"]
+    assert first["movements"][0]["rank_change"] == -1
+    filtered = client.get("/api/selection/research/stability", params={"start_date": "2026-09-16"})
+    assert filtered.status_code == 200
+    assert filtered.json()["transition_count"] == 1
+
+
+def test_selection_research_stability_handles_blocked_strategy_changed_and_errors(
+    client: TestClient,
+) -> None:
+    _export_research_artifact_at(
+        client, datetime(2026, 9, 15, 16, tzinfo=ZoneInfo("Asia/Shanghai")), blocked=True
+    )
+    _export_research_artifact_at(
+        client, datetime(2026, 9, 16, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    blocked = client.get("/api/selection/research/stability")
+    assert blocked.status_code == 200
+    transition = blocked.json()["transitions"][0]
+    assert transition["comparable"] is False
+    assert transition["comparison_blockers"] == ["previous_selection_blocked"]
+    assert transition["previous_blockers"] == ["eligible_factor_input_coverage_incomplete"]
+    assert transition["movements"] == []
+    invalid = client.get(
+        "/api/selection/research/stability",
+        params={"start_date": "2026-09-17", "end_date": "2026-09-16"},
+    )
+    assert invalid.status_code == 422
+
+
+def test_selection_research_stability_strategy_change_and_corrupt_artifact(
+    client: TestClient,
+) -> None:
+    first = _export_research_artifact_at(
+        client, datetime(2026, 9, 15, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    )
+    _export_research_artifact_at(
+        client,
+        datetime(2026, 9, 16, 16, tzinfo=ZoneInfo("Asia/Shanghai")),
+        strategy_name="other-official",
+    )
+    changed = client.get("/api/selection/research/stability")
+    assert changed.json()["transitions"][0]["comparison_blockers"] == ["strategy_changed"]
+    corrupt = (
+        client.app.state.repository.paths.snapshots_dir / "selection"
+        / first.as_of.date().isoformat() / "selection.json"
+    )
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    unavailable = client.get("/api/selection/research/stability")
+    assert unavailable.status_code == 503
+    assert unavailable.json() == {"detail": "selection research artifact unavailable"}
+
+
 @pytest.mark.parametrize(
     ("suffix", "content_type"),
     (("json", "application/json"), ("csv", "text/csv")),
@@ -615,6 +733,7 @@ def test_selection_research_routes_do_not_invoke_daily_selection_or_provider(
         assert client.get("/api/selection/research/latest.json").status_code == 200
         assert client.get("/api/selection/research/latest.csv").status_code == 200
         assert client.get("/api/selection/research/history").status_code == 200
+        assert client.get("/api/selection/research/stability").status_code == 200
         assert _research_effectiveness(client).status_code == 200
 
 

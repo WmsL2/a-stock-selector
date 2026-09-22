@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { getSelectionResearchEffectiveness, getSelectionResearchHistory, getSelectionResearchLatest, selectionResearchDownloadUrl } from '@/api/selection'
-import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse } from '@/api/types'
+import { getSelectionResearchEffectiveness, getSelectionResearchHistory, getSelectionResearchLatest, getSelectionResearchStability, selectionResearchDownloadUrl } from '@/api/selection'
+import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse, SelectionResearchStabilityResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
 
@@ -21,12 +21,19 @@ const historyEndDate = ref('')
 const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
 const historyResponse = ref<SelectionResearchHistoryResponse | null>(null)
+const stabilityStartDate = ref('')
+const stabilityEndDate = ref('')
+const stabilityLoading = ref(false)
+const stabilityError = ref<string | null>(null)
+const stabilityResponse = ref<SelectionResearchStabilityResponse | null>(null)
 const canLoadEffectiveness = computed(() => evaluatedAt.value.trim().length > 0)
 
 function score(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
 function percent(value: number): string { return `${(value * 100).toFixed(0)}%` }
 function researchPercent(value: number | null): string { return value === null ? '—' : `${(value * 100).toFixed(2)}%` }
 function metric(value: number | null): string { return value === null ? '—' : `${(value * 100).toFixed(2)}%` }
+function stabilityPercent(value: number | null): string { return value === null ? '—' : `${(value * 100).toFixed(2)}%` }
+function rankChange(value: number | null): string { return value === null ? '—' : value > 0 ? `+${value}` : String(value) }
 function rankRows() {
   return effectiveness.value?.ranks.flatMap(item => item.horizons.map(horizon => ({ ...horizon, rank: item.rank, observation_count: item.observation_count }))) ?? []
 }
@@ -58,6 +65,23 @@ async function loadHistory(): Promise<void> {
     historyError.value = '无法读取历史选股研究快照。'
   } finally {
     historyLoading.value = false
+  }
+}
+async function loadStability(): Promise<void> {
+  const start_date = stabilityStartDate.value.trim()
+  const end_date = stabilityEndDate.value.trim()
+  stabilityLoading.value = true
+  stabilityError.value = null
+  stabilityResponse.value = null
+  try {
+    stabilityResponse.value = await getSelectionResearchStability({
+      ...(start_date ? { start_date } : {}),
+      ...(end_date ? { end_date } : {}),
+    })
+  } catch {
+    stabilityError.value = '无法读取选股稳定性分析。'
+  } finally {
+    stabilityLoading.value = false
   }
 }
 async function load(): Promise<void> {
@@ -106,6 +130,45 @@ onMounted(() => void load())
       <p v-if="effectiveness.snapshot_count === 0" data-testid="effectiveness-empty">所选评估时点和日期范围内没有持久化的选股研究快照。</p><p v-else-if="effectiveness.item_observation_count === 0" data-testid="effectiveness-blocked">范围内存在持久化快照，但没有可用于收益标签统计的选股项；快照可能为阻断或空结果。</p>
       <h3>整体期限</h3><el-table :data="effectiveness.overall_horizons" data-testid="overall-horizons"><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="total_labels" label="标签数" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="anchor_unavailable_labels" label="锚点不可用" /><el-table-column prop="insufficient_future_returns_labels" label="未来不足" /><el-table-column prop="non_contiguous_return_evidence_labels" label="不连续" /><el-table-column prop="positive_return_labels" label="正" /><el-table-column prop="zero_return_labels" label="零" /><el-table-column prop="negative_return_labels" label="负" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table>
       <el-tabs><el-tab-pane label="精确排名"><el-table :data="rankRows()" data-testid="exact-ranks"><el-table-column label="排名"><template #default="scope"><span :data-testid="`effectiveness-rank-${scope.row.rank}`">{{ scope.row.rank }}</span></template></el-table-column><el-table-column prop="observation_count" label="观测数" /><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="total_labels" label="标签数" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table></el-tab-pane><el-tab-pane label="观测排名截止"><el-table :data="cutoffRows()" data-testid="rank-cutoffs"><el-table-column label="截止排名"><template #default="scope"><span :data-testid="`effectiveness-cutoff-${scope.row.cutoff_rank}`">{{ scope.row.cutoff_rank }}</span></template></el-table-column><el-table-column label="包含排名"><template #default="scope">{{ scope.row.included_ranks.join(', ') }}</template></el-table-column><el-table-column prop="observation_count" label="观测数" /><el-table-column prop="horizon_sessions" label="期限" /><el-table-column prop="available_labels" label="可用" /><el-table-column prop="total_labels" label="标签数" /><el-table-column label="可用率"><template #default="scope">{{ researchPercent(scope.row.availability_rate) }}</template></el-table-column><el-table-column label="正收益率"><template #default="scope">{{ researchPercent(scope.row.positive_return_rate) }}</template></el-table-column><el-table-column label="均值"><template #default="scope">{{ metric(scope.row.mean_return_fraction) }}</template></el-table-column><el-table-column label="中位数"><template #default="scope">{{ metric(scope.row.median_return_fraction) }}</template></el-table-column></el-table></el-tab-pane></el-tabs>
+    </template>
+  </section>
+  <section class="panel" data-testid="stability-panel">
+    <h2>选股稳定性 / 排名变化</h2>
+    <p class="provenance">稳定性分析比较所选日期范围内相邻的持久化官方快照。排名变化 = 前一期排名 - 当前排名；正数表示排名上升。阻断快照或策略名称变化不会被当作可比较的选股变动。这是描述性选股研究，不是组合换手或交易活动。</p>
+    <el-input v-model="stabilityStartDate" data-testid="stability-start-date-input" placeholder="开始日期" />
+    <el-input v-model="stabilityEndDate" data-testid="stability-end-date-input" placeholder="结束日期" />
+    <el-button data-testid="load-stability" :loading="stabilityLoading" @click="loadStability">读取稳定性</el-button>
+    <el-alert v-if="stabilityError" :title="stabilityError" type="error" :closable="false" />
+    <template v-if="stabilityResponse">
+      <el-descriptions :column="3" border>
+        <el-descriptions-item label="快照数">{{ stabilityResponse.snapshot_count }}</el-descriptions-item>
+        <el-descriptions-item label="相邻区间数">{{ stabilityResponse.transition_count }}</el-descriptions-item>
+        <el-descriptions-item label="可比较区间数">{{ stabilityResponse.comparable_transition_count }}</el-descriptions-item>
+      </el-descriptions>
+      <p v-if="stabilityResponse.snapshot_count === 0" data-testid="stability-empty">所选日期范围内没有持久化的选股研究快照。</p>
+      <p v-else-if="stabilityResponse.snapshot_count === 1" data-testid="stability-single-snapshot">所选日期范围内只有一个持久化快照，没有相邻快照可比较。</p>
+      <p v-else-if="stabilityResponse.comparable_transition_count === 0" data-testid="stability-no-comparable">存在相邻快照，但由于选股阻断或策略变化，没有可比较的稳定性区间。</p>
+      <article v-for="(transition, transitionIndex) in stabilityResponse.transitions" :key="transition.current_as_of" class="panel" :data-testid="`stability-transition-${transitionIndex}`">
+        <h3>{{ transition.previous_as_of }} → {{ transition.current_as_of }}</h3>
+        <p>策略：{{ transition.previous_strategy_name }} → {{ transition.current_strategy_name }}</p>
+        <p>可比较：{{ transition.comparable ? '是' : '否' }}</p>
+        <p>比较阻断：{{ transition.comparison_blockers.join(', ') || 'none' }}</p>
+        <p>前期官方阻断：{{ transition.previous_blockers.join(', ') || 'none' }}</p>
+        <p>当前官方阻断：{{ transition.current_blockers.join(', ') || 'none' }}</p>
+        <p>前期 / 当前选股项：{{ transition.previous_item_count }} / {{ transition.current_item_count }}</p>
+        <template v-if="transition.comparable">
+          <p>保留 / 新进入选股名单 / 退出选股名单：{{ transition.retained_count }} / {{ transition.entered_count }} / {{ transition.exited_count }}</p>
+          <p>保留率：{{ stabilityPercent(transition.retention_rate) }}；重叠率：{{ stabilityPercent(transition.overlap_rate) }}</p>
+          <el-table :data="transition.movements" class="instrument-table">
+            <el-table-column label="状态"><template #default="scope"><span :data-testid="`stability-movement-${scope.$index}`">{{ scope.row.status }}</span></template></el-table-column>
+            <el-table-column prop="symbol" label="代码" /><el-table-column prop="name" label="名称" />
+            <el-table-column label="前期排名"><template #default="scope">{{ scope.row.previous_rank ?? '—' }}</template></el-table-column>
+            <el-table-column label="当前排名"><template #default="scope">{{ scope.row.current_rank ?? '—' }}</template></el-table-column>
+            <el-table-column label="排名变化"><template #default="scope">{{ rankChange(scope.row.rank_change) }}</template></el-table-column>
+          </el-table>
+        </template>
+        <p v-else data-testid="stability-unavailable">该相邻快照不可进行排名稳定性比较。</p>
+      </article>
     </template>
   </section>
   <section class="panel" data-testid="history-panel">

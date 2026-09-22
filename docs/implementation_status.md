@@ -2,21 +2,24 @@
 
 ## Current Task
 
-Task 56 - Selection Result Explainability Enhancement
+Task 57 - Selection Stability / Rank Change Analysis
 
 ## Status
 
 Completed
 
-Task56 introduces a shared display-only selection explainability component. It exposes official
-BaseScore/rank context, fixed factor scores, structured evidence fields, and raw limitation
-codes/severities for current selection and persisted latest/history snapshots. It preserves
-backend-provided order and values, and adds no scoring, ranking, or explanation calculation;
-provider, storage, or API behavior; or portfolio, backtest, or trading behavior.
+Task57 performs deterministic pairwise analysis over adjacent canonical persisted selection
+snapshots. It calculates retained/entered/exited membership, retention and overlap rates, and
+official rank changes; blocked snapshots and strategy changes are explicitly not comparable.
+Canonical snapshot and item order are preserved through a read-only API and display-only UI. It
+performs no selection rerun, provider access, artifact write, forward-return analysis, or
+portfolio/backtest/trading behavior.
 
-Task56 verification: frontend type-check and lint PASS; focused explainability/daily/research
-Vitest PASS (30), full Vitest PASS (63 across 14 files), and production build PASS. No live
-provider call or real runtime market-data write was performed during automated validation.
+Task57 verification: focused stability/API pytest PASS (39; one external TestClient deprecation
+warning), Ruff PASS, and mypy PASS (122 source files). Frontend type-check and lint PASS; focused
+API/research-view Vitest PASS (20), full Vitest PASS (66 across 14 files), and production build
+PASS. No live provider call or real runtime market-data write was performed during automated
+validation.
 
 ## Completed
 

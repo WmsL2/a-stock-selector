@@ -355,6 +355,52 @@ export interface SelectionResearchHistoryResponse {
   snapshots: SelectionResearchSnapshotResponse[]
 }
 
+export type SelectionResearchRankMovementStatus = 'retained' | 'entered' | 'exited'
+
+export type SelectionResearchStabilityComparisonBlocker =
+  | 'previous_selection_blocked'
+  | 'current_selection_blocked'
+  | 'strategy_changed'
+
+export interface SelectionResearchRankMovementResponse {
+  symbol: string
+  name: string
+  status: SelectionResearchRankMovementStatus
+  previous_rank: number | null
+  current_rank: number | null
+  rank_change: number | null
+}
+
+export interface SelectionResearchStabilityTransitionResponse {
+  previous_as_of: string
+  current_as_of: string
+  previous_strategy_name: string
+  current_strategy_name: string
+  previous_selection_ready: boolean
+  current_selection_ready: boolean
+  previous_blockers: string[]
+  current_blockers: string[]
+  comparable: boolean
+  comparison_blockers: SelectionResearchStabilityComparisonBlocker[]
+  previous_item_count: number
+  current_item_count: number
+  retained_count: number | null
+  entered_count: number | null
+  exited_count: number | null
+  retention_rate: number | null
+  overlap_rate: number | null
+  movements: SelectionResearchRankMovementResponse[]
+}
+
+export interface SelectionResearchStabilityResponse {
+  start_date: string | null
+  end_date: string | null
+  snapshot_count: number
+  transition_count: number
+  comparable_transition_count: number
+  transitions: SelectionResearchStabilityTransitionResponse[]
+}
+
 export interface SelectionResearchHorizonEffectivenessResponse {
   horizon_sessions: number
   total_labels: number

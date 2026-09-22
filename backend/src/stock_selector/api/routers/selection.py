@@ -27,7 +27,10 @@ from stock_selector.api.schemas import (
     SelectionResearchLatestResponse,
     SelectionResearchRankCutoffEffectivenessResponse,
     SelectionResearchRankEffectivenessResponse,
+    SelectionResearchRankMovementResponse,
     SelectionResearchSnapshotResponse,
+    SelectionResearchStabilityResponse,
+    SelectionResearchStabilityTransitionResponse,
 )
 from stock_selector.api.services import ReadOnlyMarketService
 from stock_selector.config import Settings
@@ -43,6 +46,9 @@ from stock_selector.selection import (
     SelectionResearchReturnHistoryBuilder,
     SelectionResearchReturnLabeler,
     SelectionResearchSnapshot,
+    SelectionResearchStabilityAnalyzer,
+    SelectionResearchStabilityReport,
+    SelectionResearchStabilityTransition,
 )
 from stock_selector.storage import LocalMarketRepository
 
@@ -156,6 +162,57 @@ def _research_snapshot_response(
     )
 
 
+def _research_stability_transition_response(
+    transition: SelectionResearchStabilityTransition,
+) -> SelectionResearchStabilityTransitionResponse:
+    return SelectionResearchStabilityTransitionResponse(
+        previous_as_of=transition.previous_as_of,
+        current_as_of=transition.current_as_of,
+        previous_strategy_name=transition.previous_strategy_name,
+        current_strategy_name=transition.current_strategy_name,
+        previous_selection_ready=transition.previous_selection_ready,
+        current_selection_ready=transition.current_selection_ready,
+        previous_blockers=[item.value for item in transition.previous_blockers],
+        current_blockers=[item.value for item in transition.current_blockers],
+        comparable=transition.comparable,
+        comparison_blockers=[item.value for item in transition.comparison_blockers],
+        previous_item_count=transition.previous_item_count,
+        current_item_count=transition.current_item_count,
+        retained_count=transition.retained_count,
+        entered_count=transition.entered_count,
+        exited_count=transition.exited_count,
+        retention_rate=transition.retention_rate,
+        overlap_rate=transition.overlap_rate,
+        movements=[
+            SelectionResearchRankMovementResponse(
+                symbol=item.symbol,
+                name=item.name,
+                status=item.status.value,
+                previous_rank=item.previous_rank,
+                current_rank=item.current_rank,
+                rank_change=item.rank_change,
+            )
+            for item in transition.movements
+        ],
+    )
+
+
+def _research_stability_response(
+    report: SelectionResearchStabilityReport,
+) -> SelectionResearchStabilityResponse:
+    return SelectionResearchStabilityResponse(
+        start_date=report.start_date,
+        end_date=report.end_date,
+        snapshot_count=report.snapshot_count,
+        transition_count=report.transition_count,
+        comparable_transition_count=report.comparable_transition_count,
+        transitions=[
+            _research_stability_transition_response(item)
+            for item in report.transitions
+        ],
+    )
+
+
 @router.get("/research/latest", response_model=SelectionResearchLatestResponse)
 def get_selection_research_latest(
     repository: Annotated[LocalMarketRepository, Depends(get_repository)],
@@ -187,6 +244,26 @@ def get_selection_research_history(
         snapshot_count=len(filtered),
         snapshots=[_research_snapshot_response(snapshot) for snapshot in filtered],
     )
+
+
+@router.get("/research/stability", response_model=SelectionResearchStabilityResponse)
+def get_selection_research_stability(
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+) -> SelectionResearchStabilityResponse:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must not follow end_date")
+    try:
+        snapshots = SelectionResearchArtifactStore(repository.paths).load_all()
+    except SelectionResearchError as exc:
+        raise HTTPException(status_code=503, detail="selection research artifact unavailable") from exc
+    report = SelectionResearchStabilityAnalyzer().analyze(
+        snapshots,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return _research_stability_response(report)
 
 
 @router.get("/research/effectiveness", response_model=SelectionResearchEffectivenessResponse)

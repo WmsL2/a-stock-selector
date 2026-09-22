@@ -475,6 +475,45 @@ class SelectionResearchHistoryResponse(APIResponseModel):
     snapshots: list[SelectionResearchSnapshotResponse]
 
 
+class SelectionResearchRankMovementResponse(APIResponseModel):
+    symbol: str
+    name: str
+    status: str
+    previous_rank: int | None
+    current_rank: int | None
+    rank_change: int | None
+
+
+class SelectionResearchStabilityTransitionResponse(APIResponseModel):
+    previous_as_of: datetime
+    current_as_of: datetime
+    previous_strategy_name: str
+    current_strategy_name: str
+    previous_selection_ready: bool
+    current_selection_ready: bool
+    previous_blockers: list[str]
+    current_blockers: list[str]
+    comparable: bool
+    comparison_blockers: list[str]
+    previous_item_count: int
+    current_item_count: int
+    retained_count: int | None
+    entered_count: int | None
+    exited_count: int | None
+    retention_rate: float | None
+    overlap_rate: float | None
+    movements: list[SelectionResearchRankMovementResponse]
+
+
+class SelectionResearchStabilityResponse(APIResponseModel):
+    start_date: date | None
+    end_date: date | None
+    snapshot_count: int
+    transition_count: int
+    comparable_transition_count: int
+    transitions: list[SelectionResearchStabilityTransitionResponse]
+
+
 class SelectionResearchHorizonEffectivenessResponse(APIResponseModel):
     horizon_sessions: int
     total_labels: int

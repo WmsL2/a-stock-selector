@@ -1,13 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchSnapshotResponse } from '@/api/types'
+import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchSnapshotResponse, SelectionResearchStabilityResponse } from '@/api/types'
 
 const api = vi.hoisted(() => ({
   getDailySelection: vi.fn(),
   getSelectionResearchEffectiveness: vi.fn(),
   getSelectionResearchHistory: vi.fn(),
   getSelectionResearchLatest: vi.fn(),
+  getSelectionResearchStability: vi.fn(),
   selectionResearchDownloadUrl: vi.fn(),
 }))
 vi.mock('@/api/selection', () => api)
@@ -36,6 +37,13 @@ const horizon = (sessions: number, value: number | null = null) => ({ horizon_se
 const effectiveness: SelectionResearchEffectivenessResponse = { evaluated_at: '2026-09-20T16:00:00+08:00', start_date: null, end_date: null, snapshot_count: 1, empty_snapshot_count: 0, item_observation_count: 2, overall_horizons: [horizon(5, 0.125), horizon(20), horizon(60)], ranks: [{ rank: 1, observation_count: 1, horizons: [horizon(5, 0.125), horizon(20), horizon(60)] }, { rank: 3, observation_count: 1, horizons: [horizon(5, 0.125), horizon(20), horizon(60)] }], cutoffs: [{ cutoff_rank: 1, included_ranks: [1], observation_count: 1, horizons: [horizon(5, 0.125), horizon(20), horizon(60)] }, { cutoff_rank: 3, included_ranks: [1, 3], observation_count: 2, horizons: [horizon(5, 0.125), horizon(20), horizon(60)] }] }
 const historySnapshot = (as_of: string, value: SelectionResearchSnapshotResponse = snapshot): SelectionResearchSnapshotResponse => ({ ...value, as_of })
 const history = (snapshots: SelectionResearchSnapshotResponse[]): SelectionResearchHistoryResponse => ({ start_date: null, end_date: null, snapshot_count: snapshots.length, snapshots })
+const stability: SelectionResearchStabilityResponse = {
+  start_date: null, end_date: null, snapshot_count: 9, transition_count: 2, comparable_transition_count: 1,
+  transitions: [
+    { previous_as_of: '2026-09-17T16:00:00+08:00', current_as_of: '2026-09-20T16:00:00+08:00', previous_strategy_name: 'official', current_strategy_name: 'official', previous_selection_ready: true, current_selection_ready: true, previous_blockers: [], current_blockers: [], comparable: true, comparison_blockers: [], previous_item_count: 4, current_item_count: 4, retained_count: 3, entered_count: 1, exited_count: 1, retention_rate: 0.75, overlap_rate: 0.6, movements: [{ status: 'exited', symbol: 'Z', name: 'Zed', previous_rank: 2, current_rank: null, rank_change: null }, { status: 'retained', symbol: 'A', name: 'Alpha', previous_rank: 5, current_rank: 2, rank_change: 3 }, { status: 'retained', symbol: 'B', name: 'Beta', previous_rank: 2, current_rank: 5, rank_change: -3 }, { status: 'retained', symbol: 'C', name: 'Gamma', previous_rank: 4, current_rank: 4, rank_change: 0 }] },
+    { previous_as_of: '2026-09-15T16:00:00+08:00', current_as_of: '2026-09-16T16:00:00+08:00', previous_strategy_name: 'official', current_strategy_name: 'other', previous_selection_ready: false, current_selection_ready: true, previous_blockers: ['eligible_factor_input_coverage_incomplete'], current_blockers: [], comparable: false, comparison_blockers: ['previous_selection_blocked', 'strategy_changed'], previous_item_count: 0, current_item_count: 2, retained_count: null, entered_count: null, exited_count: null, retention_rate: null, overlap_rate: null, movements: [] },
+  ],
+}
 
 function mountView() { return mount(SelectionResearchView, { global: { plugins: [ElementPlus] } }) }
 function mockSnapshot(value: SelectionResearchSnapshotResponse = snapshot) {
@@ -54,6 +62,7 @@ describe('SelectionResearchView', () => {
     expect(api.getDailySelection).not.toHaveBeenCalled()
     expect(api.getSelectionResearchEffectiveness).not.toHaveBeenCalled()
     expect(api.getSelectionResearchHistory).not.toHaveBeenCalled()
+    expect(api.getSelectionResearchStability).not.toHaveBeenCalled()
     expect(text.indexOf('600519.SH')).toBeLessThan(text.indexOf('000001.SZ'))
     expect(text).toContain('72.5')
     expect(text).toContain('91.0')
@@ -260,6 +269,64 @@ describe('SelectionResearchView', () => {
     api.getSelectionResearchHistory.mockRejectedValue(new Error('offline'))
     await wrapper.get('[data-testid="load-history"]').trigger('click'); await flushPromises()
     expect(wrapper.text()).toContain('无法读取历史选股研究快照。')
+    expect(wrapper.text()).toContain('600519.SH')
+  })
+
+  it('loads stability only explicitly and sends trimmed date filters without conversion', async () => {
+    mockSnapshot(); api.getSelectionResearchStability.mockResolvedValue(stability)
+    const wrapper = mountView(); await flushPromises()
+    expect(api.getSelectionResearchStability).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="stability-start-date-input"]').setValue('')
+    await wrapper.get('[data-testid="stability-end-date-input"]').setValue('')
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(api.getSelectionResearchStability).toHaveBeenLastCalledWith({})
+    await wrapper.get('[data-testid="stability-start-date-input"]').setValue(' 2026-06-01 ')
+    await wrapper.get('[data-testid="stability-end-date-input"]').setValue(' 2026-09-20 ')
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(api.getSelectionResearchStability).toHaveBeenLastCalledWith({ start_date: '2026-06-01', end_date: '2026-09-20' })
+    await wrapper.get('[data-testid="stability-end-date-input"]').setValue('')
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(api.getSelectionResearchStability).toHaveBeenLastCalledWith({ start_date: '2026-06-01' })
+    await wrapper.get('[data-testid="stability-start-date-input"]').setValue('')
+    await wrapper.get('[data-testid="stability-end-date-input"]').setValue('2026-09-20')
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(api.getSelectionResearchStability).toHaveBeenLastCalledWith({ end_date: '2026-09-20' })
+  })
+
+  it('renders API stability order, supplied counts, rank changes, and unavailable facts', async () => {
+    mockSnapshot(); api.getSelectionResearchStability.mockResolvedValue(stability)
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    const first = wrapper.get('[data-testid="stability-transition-0"]')
+    const second = wrapper.get('[data-testid="stability-transition-1"]')
+    expect(wrapper.text()).toContain('9')
+    expect(wrapper.text()).toContain('2')
+    expect(first.text().indexOf('Z')).toBeLessThan(first.text().indexOf('A'))
+    expect(first.text()).toContain('+3')
+    expect(first.text()).toContain('-3')
+    expect(first.text()).toContain('0')
+    expect(first.text()).toContain('—')
+    expect(second.text()).toContain('previous_selection_blocked')
+    expect(second.text()).toContain('strategy_changed')
+    expect(second.text()).toContain('eligible_factor_input_coverage_incomplete')
+    expect(second.find('[data-testid="stability-unavailable"]').exists()).toBe(true)
+    expect(api.getSelectionResearchLatest).toHaveBeenCalledTimes(1)
+    expect(api.getSelectionResearchHistory).not.toHaveBeenCalled()
+    expect(api.getSelectionResearchEffectiveness).not.toHaveBeenCalled()
+  })
+
+  it('distinguishes stability empty states and preserves latest snapshot on failure', async () => {
+    mockSnapshot()
+    api.getSelectionResearchStability.mockResolvedValue({ ...stability, snapshot_count: 0, transition_count: 0, comparable_transition_count: 0, transitions: [] })
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid="stability-empty"]').exists()).toBe(true)
+    api.getSelectionResearchStability.mockResolvedValue({ ...stability, snapshot_count: 1, transition_count: 0, comparable_transition_count: 0, transitions: [] })
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid="stability-single-snapshot"]').exists()).toBe(true)
+    api.getSelectionResearchStability.mockRejectedValue(new Error('offline'))
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('无法读取选股稳定性分析。')
     expect(wrapper.text()).toContain('600519.SH')
   })
 })

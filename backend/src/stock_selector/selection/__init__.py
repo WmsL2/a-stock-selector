@@ -57,6 +57,14 @@ from .research_returns import (
     SelectionResearchReturnLabeler,
     SelectionResearchReturnReport,
 )
+from .research_stability import (
+    SelectionResearchRankMovement,
+    SelectionResearchRankMovementStatus,
+    SelectionResearchStabilityAnalyzer,
+    SelectionResearchStabilityComparisonBlocker,
+    SelectionResearchStabilityReport,
+    SelectionResearchStabilityTransition,
+)
 
 __all__ = [
     "CurrentDailySelectionWorkflowReport",
@@ -90,6 +98,8 @@ __all__ = [
     "SelectionResearchRankEffectiveness",
     "SelectionResearchRankEffectivenessAnalyzer",
     "SelectionResearchRankEffectivenessReport",
+    "SelectionResearchRankMovement",
+    "SelectionResearchRankMovementStatus",
     "SelectionResearchReturnAvailability",
     "SelectionResearchReturnHistory",
     "SelectionResearchReturnHistoryBuilder",
@@ -99,4 +109,8 @@ __all__ = [
     "SelectionResearchReturnReport",
     "SelectionResearchSnapshot",
     "SelectionResearchSnapshotBuilder",
+    "SelectionResearchStabilityAnalyzer",
+    "SelectionResearchStabilityComparisonBlocker",
+    "SelectionResearchStabilityReport",
+    "SelectionResearchStabilityTransition",
 ]

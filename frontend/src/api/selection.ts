@@ -1,5 +1,5 @@
 import client from './client'
-import type { DailySelectionResponse, RealtimeSelectionResponse, SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse } from './types'
+import type { DailySelectionResponse, RealtimeSelectionResponse, SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse, SelectionResearchStabilityResponse } from './types'
 
 export async function getDailySelection(): Promise<DailySelectionResponse> {
   const response = await client.get<DailySelectionResponse>('/selection/daily')
@@ -28,10 +28,22 @@ export interface SelectionResearchHistoryParams {
   end_date?: string
 }
 
+export interface SelectionResearchStabilityParams {
+  start_date?: string
+  end_date?: string
+}
+
 export async function getSelectionResearchHistory(
   params: SelectionResearchHistoryParams,
 ): Promise<SelectionResearchHistoryResponse> {
   const response = await client.get<SelectionResearchHistoryResponse>('/selection/research/history', { params })
+  return response.data
+}
+
+export async function getSelectionResearchStability(
+  params: SelectionResearchStabilityParams,
+): Promise<SelectionResearchStabilityResponse> {
+  const response = await client.get<SelectionResearchStabilityResponse>('/selection/research/stability', { params })
   return response.data
 }
 
