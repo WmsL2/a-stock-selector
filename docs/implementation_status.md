@@ -2,24 +2,23 @@
 
 ## Current Task
 
-Task 57 - Selection Stability / Rank Change Analysis
+Task 58 - Research Filtering / Comparison / Export
 
 ## Status
 
 Completed
 
-Task57 performs deterministic pairwise analysis over adjacent canonical persisted selection
-snapshots. It calculates retained/entered/exited membership, retention and overlap rates, and
-official rank changes; blocked snapshots and strategy changes are explicitly not comparable.
-Canonical snapshot and item order are preserved through a read-only API and display-only UI. It
-performs no selection rerun, provider access, artifact write, forward-return analysis, or
-portfolio/backtest/trading behavior.
+Task58 adds backend-authoritative filtering of canonical persisted research item observations while
+preserving canonical snapshot and item order. It provides exact two-date snapshot comparison by
+reusing Task57 transition semantics, plus in-memory filtered JSON/CSV downloads. It writes no
+artifacts and performs no selection, scoring, return, or effectiveness recomputation; the frontend
+only submits filters and displays API truth.
 
-Task57 verification: focused stability/API pytest PASS (39; one external TestClient deprecation
-warning), Ruff PASS, and mypy PASS (122 source files). Frontend type-check and lint PASS; focused
-API/research-view Vitest PASS (20), full Vitest PASS (66 across 14 files), and production build
-PASS. No live provider call or real runtime market-data write was performed during automated
-validation.
+Task58 verification: focused query/API pytest PASS (34; one external TestClient deprecation
+warning), Ruff PASS, and mypy PASS (123 source files). Frontend type-check and lint PASS; focused
+API/research-view/explorer Vitest PASS (23). No live provider call or real runtime market-data
+write was performed during automated validation. Full Vitest PASS (69 across 15 files), and the
+production build PASS (with the existing chunk-size advisory).
 
 ## Completed
 

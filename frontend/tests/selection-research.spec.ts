@@ -7,9 +7,12 @@ const api = vi.hoisted(() => ({
   getDailySelection: vi.fn(),
   getSelectionResearchEffectiveness: vi.fn(),
   getSelectionResearchHistory: vi.fn(),
+  getSelectionResearchItems: vi.fn(),
+  getSelectionResearchCompare: vi.fn(),
   getSelectionResearchLatest: vi.fn(),
   getSelectionResearchStability: vi.fn(),
   selectionResearchDownloadUrl: vi.fn(),
+  selectionResearchItemsDownloadUrl: vi.fn(),
 }))
 vi.mock('@/api/selection', () => api)
 import SelectionResearchView from '@/views/SelectionResearchView.vue'
@@ -63,6 +66,9 @@ describe('SelectionResearchView', () => {
     expect(api.getSelectionResearchEffectiveness).not.toHaveBeenCalled()
     expect(api.getSelectionResearchHistory).not.toHaveBeenCalled()
     expect(api.getSelectionResearchStability).not.toHaveBeenCalled()
+    expect(api.getSelectionResearchItems).not.toHaveBeenCalled()
+    expect(api.getSelectionResearchCompare).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="research-explorer"]').exists()).toBe(true)
     expect(text.indexOf('600519.SH')).toBeLessThan(text.indexOf('000001.SZ'))
     expect(text).toContain('72.5')
     expect(text).toContain('91.0')

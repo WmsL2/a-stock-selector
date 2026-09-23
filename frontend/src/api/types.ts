@@ -354,6 +354,26 @@ export interface SelectionResearchHistoryResponse {
   snapshot_count: number
   snapshots: SelectionResearchSnapshotResponse[]
 }
+export interface SelectionResearchItemObservationResponse {
+  snapshot_as_of: string
+  strategy_name: string
+  refresh_had_collection_failures: boolean
+  item: SelectionResearchItemResponse
+}
+export interface SelectionResearchItemQueryResponse {
+  schema_version: number
+  start_date: string | null
+  end_date: string | null
+  strategy_name: string | null
+  q: string | null
+  board: string | null
+  industry_code: string | null
+  max_rank: number | null
+  snapshot_count: number
+  matching_snapshot_count: number
+  item_observation_count: number
+  observations: SelectionResearchItemObservationResponse[]
+}
 
 export type SelectionResearchRankMovementStatus = 'retained' | 'entered' | 'exited'
 
@@ -399,6 +419,11 @@ export interface SelectionResearchStabilityResponse {
   transition_count: number
   comparable_transition_count: number
   transitions: SelectionResearchStabilityTransitionResponse[]
+}
+export interface SelectionResearchComparisonResponse {
+  previous_snapshot: SelectionResearchSnapshotResponse
+  current_snapshot: SelectionResearchSnapshotResponse
+  transition: SelectionResearchStabilityTransitionResponse
 }
 
 export interface SelectionResearchHorizonEffectivenessResponse {

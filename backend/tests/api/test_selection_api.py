@@ -274,6 +274,28 @@ def test_selection_research_latest_is_truthful_when_no_artifact_exists(client: T
     response = client.get("/api/selection/research/latest")
     assert response.status_code == 200
     assert response.json() == {"available": False, "snapshot": None}
+
+
+def test_selection_research_items_empty_exports_and_missing_comparison_are_read_only(
+    client: TestClient,
+) -> None:
+    items = client.get("/api/selection/research/items", params={"q": "  茅台  "})
+    assert items.status_code == 200
+    assert items.json()["q"] == "茅台"
+    assert items.json()["snapshot_count"] == 0
+    exported = client.get("/api/selection/research/items.json", params={"q": "  茅台  "})
+    assert exported.status_code == 200
+    assert exported.json() == items.json()
+    csv_export = client.get("/api/selection/research/items.csv")
+    assert csv_export.status_code == 200
+    assert csv_export.headers["content-disposition"] == 'attachment; filename="selection-research-items.csv"'
+    assert len(csv_export.text.splitlines()) == 1
+    comparison = client.get(
+        "/api/selection/research/compare",
+        params={"previous_date": "2026-09-10", "current_date": "2026-09-20"},
+    )
+    assert comparison.status_code == 404
+    assert comparison.json() == {"detail": "selection research snapshot not found"}
     assert client.get("/api/selection/research/latest.json").status_code == 404
     assert client.get("/api/selection/research/latest.csv").status_code == 404
 

@@ -1,5 +1,5 @@
 import client from './client'
-import type { DailySelectionResponse, RealtimeSelectionResponse, SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse, SelectionResearchStabilityResponse } from './types'
+import type { DailySelectionResponse, RealtimeSelectionResponse, SelectionResearchComparisonResponse, SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchItemQueryResponse, SelectionResearchLatestResponse, SelectionResearchStabilityResponse } from './types'
 
 export async function getDailySelection(): Promise<DailySelectionResponse> {
   const response = await client.get<DailySelectionResponse>('/selection/daily')
@@ -32,6 +32,19 @@ export interface SelectionResearchStabilityParams {
   start_date?: string
   end_date?: string
 }
+export interface SelectionResearchItemsParams {
+  start_date?: string
+  end_date?: string
+  strategy_name?: string
+  q?: string
+  board?: string
+  industry_code?: string
+  max_rank?: number
+}
+export interface SelectionResearchCompareParams {
+  previous_date: string
+  current_date: string
+}
 
 export async function getSelectionResearchHistory(
   params: SelectionResearchHistoryParams,
@@ -47,6 +60,20 @@ export async function getSelectionResearchStability(
   return response.data
 }
 
+export async function getSelectionResearchItems(
+  params: SelectionResearchItemsParams,
+): Promise<SelectionResearchItemQueryResponse> {
+  const response = await client.get<SelectionResearchItemQueryResponse>('/selection/research/items', { params })
+  return response.data
+}
+
+export async function getSelectionResearchCompare(
+  params: SelectionResearchCompareParams,
+): Promise<SelectionResearchComparisonResponse> {
+  const response = await client.get<SelectionResearchComparisonResponse>('/selection/research/compare', { params })
+  return response.data
+}
+
 export async function getSelectionResearchEffectiveness(
   params: SelectionResearchEffectivenessParams,
 ): Promise<SelectionResearchEffectivenessResponse> {
@@ -59,4 +86,20 @@ export async function getSelectionResearchEffectiveness(
 
 export function selectionResearchDownloadUrl(format: 'json' | 'csv'): string {
   return `/api/selection/research/latest.${format}`
+}
+
+export function selectionResearchItemsDownloadUrl(
+  format: 'json' | 'csv',
+  params: SelectionResearchItemsParams,
+): string {
+  const search = new URLSearchParams()
+  const keys: (keyof SelectionResearchItemsParams)[] = [
+    'start_date', 'end_date', 'strategy_name', 'q', 'board', 'industry_code', 'max_rank',
+  ]
+  for (const key of keys) {
+    const value = params[key]
+    if (value !== undefined) search.set(key, String(value))
+  }
+  const suffix = search.toString()
+  return `/api/selection/research/items.${format}${suffix ? `?${suffix}` : ''}`
 }

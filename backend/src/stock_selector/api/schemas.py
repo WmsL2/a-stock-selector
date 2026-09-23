@@ -475,6 +475,28 @@ class SelectionResearchHistoryResponse(APIResponseModel):
     snapshots: list[SelectionResearchSnapshotResponse]
 
 
+class SelectionResearchItemObservationResponse(APIResponseModel):
+    snapshot_as_of: datetime
+    strategy_name: str
+    refresh_had_collection_failures: bool
+    item: SelectionResearchItemResponse
+
+
+class SelectionResearchItemQueryResponse(APIResponseModel):
+    schema_version: int
+    start_date: date | None
+    end_date: date | None
+    strategy_name: str | None
+    q: str | None
+    board: str | None
+    industry_code: str | None
+    max_rank: int | None
+    snapshot_count: int
+    matching_snapshot_count: int
+    item_observation_count: int
+    observations: list[SelectionResearchItemObservationResponse]
+
+
 class SelectionResearchRankMovementResponse(APIResponseModel):
     symbol: str
     name: str
@@ -512,6 +534,12 @@ class SelectionResearchStabilityResponse(APIResponseModel):
     transition_count: int
     comparable_transition_count: int
     transitions: list[SelectionResearchStabilityTransitionResponse]
+
+
+class SelectionResearchComparisonResponse(APIResponseModel):
+    previous_snapshot: SelectionResearchSnapshotResponse
+    current_snapshot: SelectionResearchSnapshotResponse
+    transition: SelectionResearchStabilityTransitionResponse
 
 
 class SelectionResearchHorizonEffectivenessResponse(APIResponseModel):

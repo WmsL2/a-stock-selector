@@ -36,6 +36,13 @@ from .research_effectiveness import (
     SelectionResearchEffectivenessReport,
     SelectionResearchHorizonEffectiveness,
 )
+from .research_query import (
+    SelectionResearchItemObservation,
+    SelectionResearchItemQueryAnalyzer,
+    SelectionResearchItemQueryReport,
+    selection_research_item_query_csv,
+    selection_research_item_query_json,
+)
 from .research_rank_cutoff_effectiveness import (
     SelectionResearchRankCutoffEffectiveness,
     SelectionResearchRankCutoffEffectivenessAnalyzer,
@@ -92,6 +99,9 @@ __all__ = [
     "SelectionResearchExportResult",
     "SelectionResearchHorizonEffectiveness",
     "SelectionResearchItem",
+    "SelectionResearchItemObservation",
+    "SelectionResearchItemQueryAnalyzer",
+    "SelectionResearchItemQueryReport",
     "SelectionResearchRankCutoffEffectiveness",
     "SelectionResearchRankCutoffEffectivenessAnalyzer",
     "SelectionResearchRankCutoffEffectivenessReport",
@@ -113,4 +123,6 @@ __all__ = [
     "SelectionResearchStabilityComparisonBlocker",
     "SelectionResearchStabilityReport",
     "SelectionResearchStabilityTransition",
+    "selection_research_item_query_csv",
+    "selection_research_item_query_json",
 ]

@@ -5,7 +5,7 @@ import { getDailyBars, getInstrument, getLatestRealtime, listInstruments } from 
 import { getUniverseStatus } from '@/api/universe'
 import { getQualityStatus } from '@/api/quality'
 import { getDailyStatus } from '@/api/daily'
-import { getDailySelection, getRealtimeSelection, getSelectionResearchEffectiveness, getSelectionResearchStability } from '@/api/selection'
+import { getDailySelection, getRealtimeSelection, getSelectionResearchCompare, getSelectionResearchEffectiveness, getSelectionResearchItems, getSelectionResearchStability, selectionResearchItemsDownloadUrl } from '@/api/selection'
 
 describe('local API client', () => {
   it('uses the relative API base URL', () => {
@@ -26,6 +26,8 @@ describe('local API client', () => {
     await getRealtimeSelection()
     await getSelectionResearchEffectiveness({ evaluated_at: '2026-09-20T16:00:00+08:00', start_date: '2026-06-01', end_date: '2026-09-20' })
     await getSelectionResearchStability({ start_date: '2026-06-01', end_date: '2026-09-20' })
+    await getSelectionResearchItems({ q: ' 茅台 / A+B ', max_rank: 7 })
+    await getSelectionResearchCompare({ previous_date: '2026-09-10', current_date: '2026-09-20' })
     expect(get).toHaveBeenNthCalledWith(1, '/instruments', {
       params: { q: '茅台', limit: 50, offset: 0 },
     })
@@ -45,5 +47,14 @@ describe('local API client', () => {
     expect(get).toHaveBeenNthCalledWith(11, '/selection/research/stability', {
       params: { start_date: '2026-06-01', end_date: '2026-09-20' },
     })
+    expect(get).toHaveBeenNthCalledWith(12, '/selection/research/items', {
+      params: { q: ' 茅台 / A+B ', max_rank: 7 },
+    })
+    expect(get).toHaveBeenNthCalledWith(13, '/selection/research/compare', {
+      params: { previous_date: '2026-09-10', current_date: '2026-09-20' },
+    })
+    expect(selectionResearchItemsDownloadUrl('csv', { q: ' 茅台 / A+B ', max_rank: 7 })).toBe(
+      '/api/selection/research/items.csv?q=+%E8%8C%85%E5%8F%B0+%2F+A%2BB+&max_rank=7',
+    )
   })
 })

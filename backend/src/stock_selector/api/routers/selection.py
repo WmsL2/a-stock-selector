@@ -5,7 +5,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from stock_selector.api.dependencies import (
     aware_timestamp,
@@ -20,9 +20,12 @@ from stock_selector.api.schemas import (
     EvidenceResponse,
     RealtimeSelectionResponse,
     RiskFlagResponse,
+    SelectionResearchComparisonResponse,
     SelectionResearchEffectivenessResponse,
     SelectionResearchHistoryResponse,
     SelectionResearchHorizonEffectivenessResponse,
+    SelectionResearchItemObservationResponse,
+    SelectionResearchItemQueryResponse,
     SelectionResearchItemResponse,
     SelectionResearchLatestResponse,
     SelectionResearchRankCutoffEffectivenessResponse,
@@ -41,6 +44,8 @@ from stock_selector.selection import (
     SelectionResearchEffectivenessAnalyzer,
     SelectionResearchError,
     SelectionResearchHorizonEffectiveness,
+    SelectionResearchItemQueryAnalyzer,
+    SelectionResearchItemQueryReport,
     SelectionResearchRankCutoffEffectivenessAnalyzer,
     SelectionResearchRankEffectivenessAnalyzer,
     SelectionResearchReturnHistoryBuilder,
@@ -49,6 +54,7 @@ from stock_selector.selection import (
     SelectionResearchStabilityAnalyzer,
     SelectionResearchStabilityReport,
     SelectionResearchStabilityTransition,
+    selection_research_item_query_csv,
 )
 from stock_selector.storage import LocalMarketRepository
 
@@ -213,6 +219,70 @@ def _research_stability_response(
     )
 
 
+def _research_item_query_response(
+    report: SelectionResearchItemQueryReport,
+) -> SelectionResearchItemQueryResponse:
+    return SelectionResearchItemQueryResponse(
+        schema_version=report.schema_version,
+        start_date=report.start_date,
+        end_date=report.end_date,
+        strategy_name=report.strategy_name,
+        q=report.q,
+        board=report.board,
+        industry_code=report.industry_code,
+        max_rank=report.max_rank,
+        snapshot_count=report.snapshot_count,
+        matching_snapshot_count=report.matching_snapshot_count,
+        item_observation_count=report.item_observation_count,
+        observations=[
+            SelectionResearchItemObservationResponse(
+                snapshot_as_of=observation.snapshot_as_of,
+                strategy_name=observation.strategy_name,
+                refresh_had_collection_failures=observation.refresh_had_collection_failures,
+                item=SelectionResearchItemResponse(
+                    **observation.item.model_dump(exclude={"evidence", "risks"}),
+                    evidence=[EvidenceResponse(**value.model_dump()) for value in observation.item.evidence],
+                    risks=[
+                        RiskFlagResponse(code=value.code, message=value.message, severity=value.severity.value)
+                        for value in observation.item.risks
+                    ],
+                ),
+            )
+            for observation in report.observations
+        ],
+    )
+
+
+def _research_item_query(
+    repository: LocalMarketRepository,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+    strategy_name: str | None,
+    q: str | None,
+    board: str | None,
+    industry_code: str | None,
+    max_rank: int | None,
+) -> SelectionResearchItemQueryReport:
+    try:
+        snapshots = SelectionResearchArtifactStore(repository.paths).load_all()
+    except SelectionResearchError as exc:
+        raise HTTPException(status_code=503, detail="selection research artifact unavailable") from exc
+    try:
+        return SelectionResearchItemQueryAnalyzer().analyze(
+            snapshots,
+            start_date=start_date,
+            end_date=end_date,
+            strategy_name=strategy_name,
+            q=q,
+            board=board,
+            industry_code=industry_code,
+            max_rank=max_rank,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/research/latest", response_model=SelectionResearchLatestResponse)
 def get_selection_research_latest(
     repository: Annotated[LocalMarketRepository, Depends(get_repository)],
@@ -243,6 +313,90 @@ def get_selection_research_history(
         end_date=end_date,
         snapshot_count=len(filtered),
         snapshots=[_research_snapshot_response(snapshot) for snapshot in filtered],
+    )
+
+
+@router.get("/research/items", response_model=SelectionResearchItemQueryResponse)
+def get_selection_research_items(
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+    strategy_name: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
+    board: Annotated[str | None, Query()] = None,
+    industry_code: Annotated[str | None, Query()] = None,
+    max_rank: Annotated[int | None, Query()] = None,
+) -> SelectionResearchItemQueryResponse:
+    return _research_item_query_response(_research_item_query(
+        repository, start_date=start_date, end_date=end_date, strategy_name=strategy_name,
+        q=q, board=board, industry_code=industry_code, max_rank=max_rank,
+    ))
+
+
+@router.get("/research/items.json")
+def download_selection_research_items_json(
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+    strategy_name: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
+    board: Annotated[str | None, Query()] = None,
+    industry_code: Annotated[str | None, Query()] = None,
+    max_rank: Annotated[int | None, Query()] = None,
+) -> JSONResponse:
+    response = _research_item_query_response(_research_item_query(
+        repository, start_date=start_date, end_date=end_date, strategy_name=strategy_name,
+        q=q, board=board, industry_code=industry_code, max_rank=max_rank,
+    ))
+    return JSONResponse(
+        content=response.model_dump(mode="json"),
+        headers={"Content-Disposition": 'attachment; filename="selection-research-items.json"'},
+    )
+
+
+@router.get("/research/items.csv")
+def download_selection_research_items_csv(
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
+    strategy_name: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
+    board: Annotated[str | None, Query()] = None,
+    industry_code: Annotated[str | None, Query()] = None,
+    max_rank: Annotated[int | None, Query()] = None,
+) -> PlainTextResponse:
+    report = _research_item_query(
+        repository, start_date=start_date, end_date=end_date, strategy_name=strategy_name,
+        q=q, board=board, industry_code=industry_code, max_rank=max_rank,
+    )
+    return PlainTextResponse(
+        selection_research_item_query_csv(report),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="selection-research-items.csv"'},
+    )
+
+
+@router.get("/research/compare", response_model=SelectionResearchComparisonResponse)
+def get_selection_research_compare(
+    repository: Annotated[LocalMarketRepository, Depends(get_repository)],
+    previous_date: Annotated[date, Query()],
+    current_date: Annotated[date, Query()],
+) -> SelectionResearchComparisonResponse:
+    if previous_date >= current_date:
+        raise HTTPException(status_code=422, detail="previous_date must precede current_date")
+    try:
+        snapshots = SelectionResearchArtifactStore(repository.paths).load_all()
+    except SelectionResearchError as exc:
+        raise HTTPException(status_code=503, detail="selection research artifact unavailable") from exc
+    previous = next((item for item in snapshots if item.as_of.date() == previous_date), None)
+    current = next((item for item in snapshots if item.as_of.date() == current_date), None)
+    if previous is None or current is None:
+        raise HTTPException(status_code=404, detail="selection research snapshot not found")
+    transition = SelectionResearchStabilityAnalyzer().analyze((previous, current)).transitions[0]
+    return SelectionResearchComparisonResponse(
+        previous_snapshot=_research_snapshot_response(previous),
+        current_snapshot=_research_snapshot_response(current),
+        transition=_research_stability_transition_response(transition),
     )
 
 

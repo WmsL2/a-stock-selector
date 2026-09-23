@@ -5,6 +5,7 @@ import { getSelectionResearchEffectiveness, getSelectionResearchHistory, getSele
 import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryResponse, SelectionResearchLatestResponse, SelectionResearchStabilityResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
+import SelectionResearchExplorer from '@/components/SelectionResearchExplorer.vue'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -120,6 +121,7 @@ onMounted(() => void load())
       </el-table>
     </section>
   </template>
+  <SelectionResearchExplorer />
   <section class="panel" data-testid="effectiveness-panel">
     <h2>历史选股有效性</h2>
     <p class="provenance">评估时点是显式的点时证据截止；必须包含时区，浏览器不会自动填入当前时间。统计按历史选股 item-observation 汇总，不是按交易日等权，也不是组合收益；仅为描述性研究，不代表组合收益、NAV、PnL、回测或交易建议。</p>
