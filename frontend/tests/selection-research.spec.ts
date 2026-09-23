@@ -52,10 +52,120 @@ function mountView() { return mount(SelectionResearchView, { global: { plugins: 
 function mockSnapshot(value: SelectionResearchSnapshotResponse = snapshot) {
   api.getSelectionResearchLatest.mockResolvedValue({ available: true, snapshot: value })
 }
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
 
 afterEach(() => { vi.resetAllMocks(); vi.restoreAllMocks() })
 
 describe('SelectionResearchView', () => {
+  it('keeps latest snapshot B after stale latest completion and rejection', async () => {
+    const first = deferred<{ available: boolean; snapshot: SelectionResearchSnapshotResponse | null }>()
+    const second = deferred<{ available: boolean; snapshot: SelectionResearchSnapshotResponse | null }>()
+    api.getSelectionResearchLatest.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView()
+    await wrapper.get('button').trigger('click')
+    second.resolve({ available: true, snapshot: { ...snapshot, as_of: '2026-09-22T16:00:00+08:00', strategy_name: 'B' } })
+    await flushPromises(); expect(wrapper.text()).toContain('2026-09-22')
+    first.reject(new Error('stale'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('2026-09-22')
+    expect(wrapper.text()).not.toContain('无法读取已导出的选股研究快照。')
+  })
+
+  it('suppresses stale latest success after newer latest success', async () => {
+    const first = deferred<{ available: boolean; snapshot: SelectionResearchSnapshotResponse | null }>(); const second = deferred<{ available: boolean; snapshot: SelectionResearchSnapshotResponse | null }>()
+    api.getSelectionResearchLatest.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await wrapper.get('button').trigger('click')
+    second.resolve({ available: true, snapshot: { ...snapshot, as_of: '2026-09-22T16:00:00+08:00' } }); await flushPromises()
+    first.resolve({ available: true, snapshot: { ...snapshot, as_of: '2026-09-21T16:00:00+08:00' } }); await flushPromises()
+    expect(wrapper.text()).toContain('2026-09-22'); expect(wrapper.text()).not.toContain('2026-09-21')
+  })
+
+  it('suppresses stale latest rejection while newer latest is pending', async () => {
+    const first = deferred<{ available: boolean; snapshot: SelectionResearchSnapshotResponse | null }>(); const second = deferred<{ available: boolean; snapshot: SelectionResearchSnapshotResponse | null }>()
+    api.getSelectionResearchLatest.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await wrapper.get('button').trigger('click'); first.reject(new Error('stale')); await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(true); expect(wrapper.text()).not.toContain('无法读取已导出的选股研究快照。')
+    second.resolve({ available: true, snapshot: { ...snapshot, as_of: '2026-09-22T16:00:00+08:00' } }); await flushPromises(); expect(wrapper.text()).toContain('2026-09-22')
+  })
+
+  it('preserves successful effectiveness, history, and stability reports on replacement failure', async () => {
+    mockSnapshot(); api.getSelectionResearchEffectiveness.mockResolvedValue(effectiveness); api.getSelectionResearchHistory.mockResolvedValue(history([historySnapshot('2026-09-16T16:00:00+08:00')])); api.getSelectionResearchStability.mockResolvedValue(stability)
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="evaluated-at-input"]').setValue('2026-09-20T16:00:00+08:00')
+    await wrapper.get('[data-testid="load-effectiveness"]').trigger('click'); await wrapper.get('[data-testid="load-history"]').trigger('click'); await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    api.getSelectionResearchEffectiveness.mockRejectedValue(new Error('offline')); api.getSelectionResearchHistory.mockRejectedValue(new Error('offline')); api.getSelectionResearchStability.mockRejectedValue(new Error('offline'))
+    await wrapper.get('[data-testid="load-effectiveness"]').trigger('click'); await wrapper.get('[data-testid="load-history"]').trigger('click'); await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid="effectiveness-preserved-result"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="history-preserved-result"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stability-preserved-result"]').exists()).toBe(true)
+  })
+
+  it('suppresses stale effectiveness success after B resolves', async () => {
+    mockSnapshot(); const first = deferred<SelectionResearchEffectivenessResponse>(); const second = deferred<SelectionResearchEffectivenessResponse>()
+    api.getSelectionResearchEffectiveness.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await flushPromises(); await wrapper.get('[data-testid="evaluated-at-input"]').setValue('x')
+    const state = (wrapper.vm.$ as unknown as { setupState: { loadEffectiveness: () => Promise<void> } }).setupState
+    void state.loadEffectiveness(); void state.loadEffectiveness(); second.resolve({ ...effectiveness, evaluated_at: 'B-2026', snapshot_count: 202 }); await flushPromises()
+    first.resolve({ ...effectiveness, evaluated_at: 'A-2026', snapshot_count: 101 }); await flushPromises()
+    expect(wrapper.text()).toContain('B-2026'); expect(wrapper.text()).not.toContain('A-2026')
+  })
+
+  it('suppresses stale effectiveness rejection while newer request is pending', async () => {
+    mockSnapshot(); const first = deferred<SelectionResearchEffectivenessResponse>(); const second = deferred<SelectionResearchEffectivenessResponse>()
+    api.getSelectionResearchEffectiveness.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await flushPromises(); await wrapper.get('[data-testid="evaluated-at-input"]').setValue('x')
+    const state = (wrapper.vm.$ as unknown as { setupState: { loadEffectiveness: () => Promise<void> } }).setupState
+    void state.loadEffectiveness(); void state.loadEffectiveness(); first.reject(new Error('stale')); await flushPromises()
+    expect(wrapper.text()).not.toContain('无法读取选股研究有效性')
+    expect(wrapper.get('[data-testid="load-effectiveness"]').classes()).toContain('is-loading')
+    second.resolve({ ...effectiveness, evaluated_at: 'B-effectiveness', snapshot_count: 202 }); await flushPromises()
+    expect(wrapper.text()).toContain('B-effectiveness'); expect(wrapper.text()).not.toContain('无法读取选股研究有效性')
+  })
+
+  it('suppresses stale history success after B resolves', async () => {
+    mockSnapshot(); const first = deferred<SelectionResearchHistoryResponse>(); const second = deferred<SelectionResearchHistoryResponse>()
+    api.getSelectionResearchHistory.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await flushPromises(); const state = (wrapper.vm.$ as unknown as { setupState: { loadHistory: () => Promise<void> } }).setupState
+    void state.loadHistory(); void state.loadHistory(); second.resolve(history([historySnapshot('B-2026')])); await flushPromises()
+    first.resolve(history([historySnapshot('A-2026')])); await flushPromises()
+    expect(wrapper.text()).toContain('B-2026'); expect(wrapper.text()).not.toContain('A-2026')
+  })
+
+  it('suppresses stale history rejection while newer request is pending', async () => {
+    mockSnapshot(); const first = deferred<SelectionResearchHistoryResponse>(); const second = deferred<SelectionResearchHistoryResponse>()
+    api.getSelectionResearchHistory.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await flushPromises(); const state = (wrapper.vm.$ as unknown as { setupState: { loadHistory: () => Promise<void> } }).setupState
+    void state.loadHistory(); void state.loadHistory(); first.reject(new Error('stale')); await flushPromises()
+    expect(wrapper.text()).not.toContain('无法读取历史选股研究快照。')
+    expect(wrapper.get('[data-testid="load-history"]').classes()).toContain('is-loading')
+    second.resolve(history([historySnapshot('B-history')])); await flushPromises()
+    expect(wrapper.text()).toContain('B-history'); expect(wrapper.text()).not.toContain('无法读取历史选股研究快照。')
+  })
+
+  it('suppresses stale stability success after B resolves', async () => {
+    mockSnapshot(); const first = deferred<SelectionResearchStabilityResponse>(); const second = deferred<SelectionResearchStabilityResponse>()
+    api.getSelectionResearchStability.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await flushPromises(); const state = (wrapper.vm.$ as unknown as { setupState: { loadStability: () => Promise<void> } }).setupState
+    void state.loadStability(); void state.loadStability(); second.resolve({ ...stability, snapshot_count: 202 }); await flushPromises()
+    first.resolve({ ...stability, snapshot_count: 101 }); await flushPromises()
+    expect(wrapper.text()).toContain('202'); expect(wrapper.text()).not.toContain('101')
+  })
+
+  it('suppresses stale stability rejection while newer request is pending', async () => {
+    mockSnapshot(); const first = deferred<SelectionResearchStabilityResponse>(); const second = deferred<SelectionResearchStabilityResponse>()
+    api.getSelectionResearchStability.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await flushPromises(); const state = (wrapper.vm.$ as unknown as { setupState: { loadStability: () => Promise<void> } }).setupState
+    void state.loadStability(); void state.loadStability(); first.reject(new Error('stale')); await flushPromises()
+    expect(wrapper.text()).not.toContain('无法读取选股稳定性分析。')
+    expect(wrapper.get('[data-testid="load-stability"]').classes()).toContain('is-loading')
+    second.resolve({ ...stability, snapshot_count: 202 }); await flushPromises()
+    expect(wrapper.text()).toContain('202'); expect(wrapper.text()).not.toContain('无法读取选股稳定性分析。')
+  })
   it('does not present the no-artifact empty state while the initial request is pending', async () => {
     api.getSelectionResearchLatest.mockReturnValue(new Promise(() => undefined))
     const wrapper = mountView()
@@ -282,7 +392,9 @@ describe('SelectionResearchView', () => {
 
     api.getSelectionResearchHistory.mockRejectedValue(new Error('offline'))
     await wrapper.get('[data-testid="load-history"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid="history-empty"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('无法读取历史选股研究快照。')
+    expect(wrapper.find('[data-testid="history-preserved-result"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('600519.SH')
   })
 
@@ -327,6 +439,21 @@ describe('SelectionResearchView', () => {
     expect(api.getSelectionResearchLatest).toHaveBeenCalledTimes(1)
     expect(api.getSelectionResearchHistory).not.toHaveBeenCalled()
     expect(api.getSelectionResearchEffectiveness).not.toHaveBeenCalled()
+  })
+
+  it('keeps the successful stability result visible while its replacement is pending', async () => {
+    mockSnapshot(); const replacement = deferred<SelectionResearchStabilityResponse>()
+    api.getSelectionResearchStability.mockResolvedValueOnce(stability).mockReturnValueOnce(replacement.promise)
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="load-stability"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('9')
+    const state = (wrapper.vm.$ as unknown as { setupState: { loadStability: () => Promise<void> } }).setupState
+    void state.loadStability(); await flushPromises()
+    expect(wrapper.text()).toContain('9')
+    expect(wrapper.find('[data-testid="stability-preserved-result"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="load-stability"]').classes()).toContain('is-loading')
+    replacement.resolve({ ...stability, snapshot_count: 202 }); await flushPromises()
+    expect(wrapper.text()).toContain('202')
   })
 
   it('distinguishes stability empty states and preserves latest snapshot on failure', async () => {

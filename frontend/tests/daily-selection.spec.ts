@@ -76,12 +76,59 @@ const blockerFixtures: Record<DailySelectionBlocker, DailySelectionResponse> = {
 function mountView() {
   return mount(DailySelectionView, { global: { plugins: [ElementPlus] } })
 }
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
 
 afterEach(() => {
   vi.resetAllMocks()
 })
 
 describe('DailySelectionView', () => {
+  it('keeps initial HTTP failure distinct from a preserved result', async () => {
+    api.getDailySelection.mockRejectedValue(new Error('offline'))
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.text()).toContain('无法读取本地今日选股状态。')
+    expect(wrapper.find('[data-testid="daily-selection-preserved-result"]').exists()).toBe(false)
+    expect(wrapper.find('tbody').exists()).toBe(false)
+  })
+
+  it('keeps the latest started request authoritative across success and stale rejection', async () => {
+    const first = deferred<DailySelectionResponse>()
+    const second = deferred<DailySelectionResponse>()
+    api.getDailySelection.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView()
+    await wrapper.get('button').trigger('click')
+    second.resolve({ ...readyResponse, items: [{ ...readyResponse.items[0], symbol: 'BBB' }] })
+    await flushPromises(); expect(wrapper.text()).toContain('BBB')
+    first.reject(new Error('stale'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('BBB')
+    expect(wrapper.text()).not.toContain('无法读取本地今日选股状态。')
+  })
+
+  it('suppresses stale daily success after newer success', async () => {
+    const first = deferred<DailySelectionResponse>(); const second = deferred<DailySelectionResponse>()
+    api.getDailySelection.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await wrapper.get('button').trigger('click')
+    second.resolve({ ...readyResponse, items: [{ ...readyResponse.items[0], symbol: 'BBB' }] }); await flushPromises()
+    expect(wrapper.text()).toContain('BBB')
+    first.resolve({ ...readyResponse, items: [{ ...readyResponse.items[0], symbol: 'AAA' }] }); await flushPromises()
+    expect(wrapper.text()).toContain('BBB'); expect(wrapper.text()).not.toContain('AAA')
+  })
+
+  it('suppresses stale daily rejection while newer request is pending', async () => {
+    const first = deferred<DailySelectionResponse>(); const second = deferred<DailySelectionResponse>()
+    api.getDailySelection.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountView(); await wrapper.get('button').trigger('click')
+    first.reject(new Error('stale')); await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(true); expect(wrapper.text()).not.toContain('无法读取本地今日选股状态。')
+    second.resolve({ ...readyResponse, items: [{ ...readyResponse.items[0], symbol: 'BBB' }] }); await flushPromises()
+    expect(wrapper.text()).toContain('BBB')
+  })
   it('renders explicit not-ready risk coverage diagnostics', async () => {
     api.getDailySelection.mockResolvedValue(notReadyResponse)
     const wrapper = mountView()

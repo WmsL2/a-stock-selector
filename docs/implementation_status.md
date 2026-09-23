@@ -16,9 +16,13 @@ backend date validation. It changes no backend, API, or domain behavior and adds
 clock, retry, persistence, portfolio, backtest, or trading behavior.
 
 Task59 verification: frontend type-check and lint PASS; focused guard/daily/research/explorer
-Vitest PASS (37 across 4 files). No live provider call or real runtime market-data write was
-performed during automated validation. Full Vitest PASS (73 across 16 files), and the production
-build PASS (with the existing chunk-size advisory).
+Vitest PASS (63 across 4 files). Regression validation explicitly proves stale-success suppression,
+stale-rejection suppression while a newer request is pending, and preserved-result behavior for
+daily, latest, effectiveness, history, stability, filtered items, and comparison. It also proves
+filtered-result/export atomicity, comparison required-input gating, and raw comparison-input
+forwarding. No live provider call or real runtime market-data write was performed during automated
+validation. Full Vitest PASS (99 across 16 files), and the production build PASS (with the existing
+chunk-size advisory).
 
 ## Completed
 
