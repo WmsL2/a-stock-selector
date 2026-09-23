@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { getSelectionResearchCompare, getSelectionResearchItems, selectionResearchItemsDownloadUrl } from '@/api/selection'
 import type { SelectionResearchComparisonResponse, SelectionResearchItemQueryResponse } from '@/api/types'
 import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
+import { createLatestRequestGuard } from '@/utils/latestRequestGuard'
 
 const startDate = ref('')
 const endDate = ref('')
@@ -11,16 +12,19 @@ const strategyName = ref('')
 const query = ref('')
 const board = ref('')
 const industryCode = ref('')
-const maxRank = ref<number | undefined>()
+const maxRank = ref<number | null>(null)
 const itemsLoading = ref(false)
 const itemsError = ref<string | null>(null)
 const itemsResponse = ref<SelectionResearchItemQueryResponse | null>(null)
 const appliedItemsParams = ref<Parameters<typeof getSelectionResearchItems>[0] | null>(null)
+const itemsGuard = createLatestRequestGuard()
 const previousDate = ref('')
 const currentDate = ref('')
 const compareLoading = ref(false)
 const compareError = ref<string | null>(null)
 const compareResponse = ref<SelectionResearchComparisonResponse | null>(null)
+const comparisonGuard = createLatestRequestGuard()
+const canLoadComparison = computed(() => previousDate.value.trim().length > 0 && currentDate.value.trim().length > 0)
 
 function textParam(value: string): string | undefined {
   return value.trim() || undefined
@@ -40,21 +44,25 @@ function itemParams(): Parameters<typeof getSelectionResearchItems>[0] {
     ...(q ? { q } : {}),
     ...(item_board ? { board: item_board } : {}),
     ...(industry_code ? { industry_code } : {}),
-    ...(maxRank.value === undefined ? {} : { max_rank: maxRank.value }),
+    ...(maxRank.value === null ? {} : { max_rank: maxRank.value }),
   }
 }
 
 async function loadItems(): Promise<void> {
   const params = itemParams()
+  const token = itemsGuard.begin()
   itemsLoading.value = true
   itemsError.value = null
   try {
-    itemsResponse.value = await getSelectionResearchItems(params)
-    appliedItemsParams.value = params
+    const result = await getSelectionResearchItems(params)
+    if (itemsGuard.isCurrent(token)) {
+      itemsResponse.value = result
+      appliedItemsParams.value = params
+    }
   } catch {
-    itemsError.value = '无法读取筛选后的选股研究项。'
+    if (itemsGuard.isCurrent(token)) itemsError.value = '无法读取筛选后的选股研究项。'
   } finally {
-    itemsLoading.value = false
+    if (itemsGuard.isCurrent(token)) itemsLoading.value = false
   }
 }
 
@@ -65,17 +73,20 @@ function download(format: 'json' | 'csv'): void {
 }
 
 async function loadComparison(): Promise<void> {
+  if (!canLoadComparison.value) return
+  const token = comparisonGuard.begin()
   compareLoading.value = true
   compareError.value = null
   try {
-    compareResponse.value = await getSelectionResearchCompare({
+    const result = await getSelectionResearchCompare({
       previous_date: previousDate.value,
       current_date: currentDate.value,
     })
+    if (comparisonGuard.isCurrent(token)) compareResponse.value = result
   } catch {
-    compareError.value = '无法读取指定选股研究快照比较；请确认两个日期均存在且前一期早于当前期。'
+    if (comparisonGuard.isCurrent(token)) compareError.value = '无法读取指定选股研究快照比较；请确认两个日期均存在且前一期早于当前期。'
   } finally {
-    compareLoading.value = false
+    if (comparisonGuard.isCurrent(token)) compareLoading.value = false
   }
 }
 
@@ -101,6 +112,7 @@ function rankChange(value: number | null): string { return value === null ? '—
       <el-button :disabled="appliedItemsParams === null" data-testid="research-export-csv" @click="download('csv')">导出 CSV</el-button>
     </el-form>
     <el-alert v-if="itemsError" :title="itemsError" type="error" :closable="false" />
+    <p v-if="itemsResponse && (itemsLoading || itemsError)" data-testid="research-items-preserved-result" class="provenance">{{ itemsLoading ? '正在读取新的筛选结果；当前仍显示上一次成功读取的结果，导出仍对应该结果。' : '本次读取失败；当前仍显示上一次成功读取的筛选结果，导出仍对应该结果。' }}</p>
     <template v-if="itemsResponse">
       <el-descriptions :column="3" border>
         <el-descriptions-item label="快照数">{{ itemsResponse.snapshot_count }}</el-descriptions-item>
@@ -129,8 +141,9 @@ function rankChange(value: number | null): string { return value === null ? '—
     <h2>指定快照比较</h2>
     <el-input v-model="previousDate" data-testid="compare-previous-date-input" placeholder="前一期日期" />
     <el-input v-model="currentDate" data-testid="compare-current-date-input" placeholder="当前期日期" />
-    <el-button :loading="compareLoading" data-testid="load-research-comparison" @click="loadComparison">读取比较</el-button>
+    <el-button :disabled="!canLoadComparison" :loading="compareLoading" data-testid="load-research-comparison" @click="loadComparison">读取比较</el-button>
     <el-alert v-if="compareError" :title="compareError" type="error" :closable="false" />
+    <p v-if="compareResponse && (compareLoading || compareError)" data-testid="comparison-preserved-result" class="provenance">{{ compareLoading ? '正在读取新的快照比较；当前仍显示上一次成功读取的比较结果。' : '本次读取失败；当前仍显示上一次成功读取的快照比较。' }}</p>
     <template v-if="compareResponse">
       <p>{{ compareResponse.previous_snapshot.as_of }} → {{ compareResponse.current_snapshot.as_of }}</p>
       <p>策略：{{ compareResponse.previous_snapshot.strategy_name }} → {{ compareResponse.current_snapshot.strategy_name }}</p>

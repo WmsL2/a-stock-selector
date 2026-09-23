@@ -52,8 +52,11 @@ describe('SelectionResearchExplorer', () => {
   it('loads comparison only when requested with unchanged date strings', async () => {
     api.getSelectionResearchCompare.mockRejectedValue(new Error('not found'))
     const wrapper = mountExplorer()
+    expect(wrapper.get('[data-testid="load-research-comparison"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="compare-previous-date-input"]').setValue('2026-09-10')
+    expect(wrapper.get('[data-testid="load-research-comparison"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="compare-current-date-input"]').setValue('2026-09-20')
+    expect(wrapper.get('[data-testid="load-research-comparison"]').attributes('disabled')).toBeUndefined()
     expect(api.getSelectionResearchCompare).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="load-research-comparison"]').trigger('click')
     await flushPromises()

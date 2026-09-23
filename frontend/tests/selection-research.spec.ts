@@ -56,6 +56,14 @@ function mockSnapshot(value: SelectionResearchSnapshotResponse = snapshot) {
 afterEach(() => { vi.resetAllMocks(); vi.restoreAllMocks() })
 
 describe('SelectionResearchView', () => {
+  it('does not present the no-artifact empty state while the initial request is pending', async () => {
+    api.getSelectionResearchLatest.mockReturnValue(new Promise(() => undefined))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('尚无官方导出快照')
+    expect(wrapper.get('[role="status"]').text()).toContain('正在读取已导出的研究快照')
+  })
+
   it('uses only the persisted research API and retains exact official item order', async () => {
     api.getDailySelection.mockImplementation(() => { throw new Error('daily API must not be called') })
     mockSnapshot()

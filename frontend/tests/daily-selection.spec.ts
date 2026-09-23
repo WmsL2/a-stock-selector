@@ -167,7 +167,8 @@ describe('DailySelectionView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('无法读取本地今日选股状态。')
-    expect(wrapper.text()).not.toContain('今日选股尚未就绪')
+    expect(wrapper.text()).toContain('今日选股尚未就绪')
+    expect(wrapper.find('[data-testid="daily-selection-preserved-result"]').exists()).toBe(true)
   })
 
   it('navigates to the clicked instrument detail row', async () => {

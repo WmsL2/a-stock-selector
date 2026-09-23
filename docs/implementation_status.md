@@ -2,23 +2,23 @@
 
 ## Current Task
 
-Task 58 - Research Filtering / Comparison / Export
+Task 59 - Selection Product Hardening
 
 ## Status
 
 Completed
 
-Task58 adds backend-authoritative filtering of canonical persisted research item observations while
-preserving canonical snapshot and item order. It provides exact two-date snapshot comparison by
-reusing Task57 transition semantics, plus in-memory filtered JSON/CSV downloads. It writes no
-artifacts and performs no selection, scoring, return, or effectiveness recomputation; the frontend
-only submits filters and displays API truth.
+Task59 preserves last successful selection and research results across failed refreshes, and uses
+independent latest-request guards to prevent stale older async completions from overwriting newer
+requests. It prevents premature latest-research empty state presentation, adds explicit
+preserved-result provenance, and gates comparison on required input presence without duplicating
+backend date validation. It changes no backend, API, or domain behavior and adds no polling,
+clock, retry, persistence, portfolio, backtest, or trading behavior.
 
-Task58 verification: focused query/API pytest PASS (34; one external TestClient deprecation
-warning), Ruff PASS, and mypy PASS (123 source files). Frontend type-check and lint PASS; focused
-API/research-view/explorer Vitest PASS (23). No live provider call or real runtime market-data
-write was performed during automated validation. Full Vitest PASS (69 across 15 files), and the
-production build PASS (with the existing chunk-size advisory).
+Task59 verification: frontend type-check and lint PASS; focused guard/daily/research/explorer
+Vitest PASS (37 across 4 files). No live provider call or real runtime market-data write was
+performed during automated validation. Full Vitest PASS (73 across 16 files), and the production
+build PASS (with the existing chunk-size advisory).
 
 ## Completed
 

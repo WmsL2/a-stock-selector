@@ -6,10 +6,12 @@ import type { SelectionResearchEffectivenessResponse, SelectionResearchHistoryRe
 import EmptyState from '@/components/EmptyState.vue'
 import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
 import SelectionResearchExplorer from '@/components/SelectionResearchExplorer.vue'
+import { createLatestRequestGuard } from '@/utils/latestRequestGuard'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 const response = ref<SelectionResearchLatestResponse | null>(null)
+const latestGuard = createLatestRequestGuard()
 const snapshot = computed(() => response.value?.snapshot ?? null)
 const evaluatedAt = ref('')
 const startDate = ref('')
@@ -17,16 +19,19 @@ const endDate = ref('')
 const effectivenessLoading = ref(false)
 const effectivenessError = ref<string | null>(null)
 const effectiveness = ref<SelectionResearchEffectivenessResponse | null>(null)
+const effectivenessGuard = createLatestRequestGuard()
 const historyStartDate = ref('')
 const historyEndDate = ref('')
 const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
 const historyResponse = ref<SelectionResearchHistoryResponse | null>(null)
+const historyGuard = createLatestRequestGuard()
 const stabilityStartDate = ref('')
 const stabilityEndDate = ref('')
 const stabilityLoading = ref(false)
 const stabilityError = ref<string | null>(null)
 const stabilityResponse = ref<SelectionResearchStabilityResponse | null>(null)
+const stabilityGuard = createLatestRequestGuard()
 const canLoadEffectiveness = computed(() => evaluatedAt.value.trim().length > 0)
 
 function score(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
@@ -46,50 +51,59 @@ async function loadEffectiveness(): Promise<void> {
   if (!evaluated_at) return
   const start_date = startDate.value.trim()
   const end_date = endDate.value.trim()
-  effectivenessLoading.value = true; effectivenessError.value = null; effectiveness.value = null
-  try { effectiveness.value = await getSelectionResearchEffectiveness({ evaluated_at, ...(start_date ? { start_date } : {}), ...(end_date ? { end_date } : {}) }) }
-  catch { effectivenessError.value = '无法读取选股研究有效性；请确认评估时点包含时区且日期范围有效。' }
-  finally { effectivenessLoading.value = false }
+  const token = effectivenessGuard.begin()
+  effectivenessLoading.value = true; effectivenessError.value = null
+  try {
+    const result = await getSelectionResearchEffectiveness({ evaluated_at, ...(start_date ? { start_date } : {}), ...(end_date ? { end_date } : {}) })
+    if (effectivenessGuard.isCurrent(token)) effectiveness.value = result
+  } catch { if (effectivenessGuard.isCurrent(token)) effectivenessError.value = '无法读取选股研究有效性；请确认评估时点包含时区且日期范围有效。' }
+  finally { if (effectivenessGuard.isCurrent(token)) effectivenessLoading.value = false }
 }
 async function loadHistory(): Promise<void> {
   const start_date = historyStartDate.value.trim()
   const end_date = historyEndDate.value.trim()
+  const token = historyGuard.begin()
   historyLoading.value = true
   historyError.value = null
-  historyResponse.value = null
   try {
-    historyResponse.value = await getSelectionResearchHistory({
+    const result = await getSelectionResearchHistory({
       ...(start_date ? { start_date } : {}),
       ...(end_date ? { end_date } : {}),
     })
+    if (historyGuard.isCurrent(token)) historyResponse.value = result
   } catch {
-    historyError.value = '无法读取历史选股研究快照。'
+    if (historyGuard.isCurrent(token)) historyError.value = '无法读取历史选股研究快照。'
   } finally {
-    historyLoading.value = false
+    if (historyGuard.isCurrent(token)) historyLoading.value = false
   }
 }
 async function loadStability(): Promise<void> {
   const start_date = stabilityStartDate.value.trim()
   const end_date = stabilityEndDate.value.trim()
+  const token = stabilityGuard.begin()
   stabilityLoading.value = true
   stabilityError.value = null
-  stabilityResponse.value = null
   try {
-    stabilityResponse.value = await getSelectionResearchStability({
+    const result = await getSelectionResearchStability({
       ...(start_date ? { start_date } : {}),
       ...(end_date ? { end_date } : {}),
     })
+    if (stabilityGuard.isCurrent(token)) stabilityResponse.value = result
   } catch {
-    stabilityError.value = '无法读取选股稳定性分析。'
+    if (stabilityGuard.isCurrent(token)) stabilityError.value = '无法读取选股稳定性分析。'
   } finally {
-    stabilityLoading.value = false
+    if (stabilityGuard.isCurrent(token)) stabilityLoading.value = false
   }
 }
 async function load(): Promise<void> {
+  const token = latestGuard.begin()
   loading.value = true; error.value = null
-  try { response.value = await getSelectionResearchLatest() }
-  catch { response.value = null; error.value = '无法读取已导出的选股研究快照。' }
-  finally { loading.value = false }
+  try {
+    const result = await getSelectionResearchLatest()
+    if (latestGuard.isCurrent(token)) response.value = result
+  }
+  catch { if (latestGuard.isCurrent(token)) error.value = '无法读取已导出的选股研究快照。' }
+  finally { if (latestGuard.isCurrent(token)) loading.value = false }
 }
 function download(format: 'json' | 'csv'): void { window.open(selectionResearchDownloadUrl(format), '_blank') }
 onMounted(() => void load())
@@ -101,9 +115,10 @@ onMounted(() => void load())
     <div><el-button :loading="loading" @click="load">读取快照</el-button><el-button :disabled="!snapshot" type="primary" @click="download('json')">下载 JSON</el-button><el-button :disabled="!snapshot" @click="download('csv')">下载 CSV</el-button></div>
   </section>
   <p v-if="loading" role="status" class="provenance">正在读取已导出的研究快照…</p>
+  <p v-if="response && (loading || error)" data-testid="research-latest-preserved-result" class="provenance">{{ loading ? '正在读取新快照状态；当前仍显示上一次成功读取的结果。' : '本次读取失败；当前仍显示上一次成功读取的研究快照状态。' }}</p>
   <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-  <section v-else-if="!snapshot" class="panel"><EmptyState title="尚无官方导出快照" description="请运行 python -m stock_selector selection daily 创建官方日选股研究快照。浏览器不会创建或刷新该快照。" /></section>
-  <template v-else>
+  <section v-if="response?.available === false" class="panel"><EmptyState title="尚无官方导出快照" description="请运行 python -m stock_selector selection daily 创建官方日选股研究快照。浏览器不会创建或刷新该快照。" /></section>
+  <template v-else-if="snapshot">
     <el-alert v-if="snapshot.refresh_had_collection_failures" title="官方结果已导出，但本次刷新包含嵌套采集失败。" type="warning" :closable="false" show-icon />
     <section class="metrics-grid">
       <article class="metric-card"><span class="metric-card__label">快照时间</span><strong class="metric-card__value">{{ snapshot.as_of }}</strong><span class="metric-card__description">{{ snapshot.strategy_name }}</span></article>
@@ -127,6 +142,7 @@ onMounted(() => void load())
     <p class="provenance">评估时点是显式的点时证据截止；必须包含时区，浏览器不会自动填入当前时间。统计按历史选股 item-observation 汇总，不是按交易日等权，也不是组合收益；仅为描述性研究，不代表组合收益、NAV、PnL、回测或交易建议。</p>
     <el-form label-position="top"><el-form-item label="评估时点（含时区 ISO 8601）"><el-input v-model="evaluatedAt" data-testid="evaluated-at-input" placeholder="2026-09-20T16:00:00+08:00" /></el-form-item><el-form-item label="开始日期（可选）"><el-input v-model="startDate" data-testid="start-date-input" placeholder="YYYY-MM-DD" /></el-form-item><el-form-item label="结束日期（可选）"><el-input v-model="endDate" data-testid="end-date-input" placeholder="YYYY-MM-DD" /></el-form-item><el-button data-testid="load-effectiveness" type="primary" :disabled="!canLoadEffectiveness" :loading="effectivenessLoading" @click="loadEffectiveness">读取有效性</el-button></el-form>
     <el-alert v-if="effectivenessError" :title="effectivenessError" type="error" :closable="false" show-icon />
+    <p v-if="effectiveness && (effectivenessLoading || effectivenessError)" data-testid="effectiveness-preserved-result" class="provenance">{{ effectivenessLoading ? '正在读取新的有效性结果；当前仍显示上一次成功读取的结果。' : '本次读取失败；当前仍显示上一次成功读取的有效性结果。' }}</p>
     <template v-if="effectiveness">
       <el-descriptions :column="3" border><el-descriptions-item label="评估时点">{{ effectiveness.evaluated_at }}</el-descriptions-item><el-descriptions-item label="开始日期">{{ effectiveness.start_date ?? '—' }}</el-descriptions-item><el-descriptions-item label="结束日期">{{ effectiveness.end_date ?? '—' }}</el-descriptions-item><el-descriptions-item label="快照数">{{ effectiveness.snapshot_count }}</el-descriptions-item><el-descriptions-item label="空快照数">{{ effectiveness.empty_snapshot_count }}</el-descriptions-item><el-descriptions-item label="选股项观测数">{{ effectiveness.item_observation_count }}</el-descriptions-item></el-descriptions>
       <p v-if="effectiveness.snapshot_count === 0" data-testid="effectiveness-empty">所选评估时点和日期范围内没有持久化的选股研究快照。</p><p v-else-if="effectiveness.item_observation_count === 0" data-testid="effectiveness-blocked">范围内存在持久化快照，但没有可用于收益标签统计的选股项；快照可能为阻断或空结果。</p>
@@ -141,6 +157,7 @@ onMounted(() => void load())
     <el-input v-model="stabilityEndDate" data-testid="stability-end-date-input" placeholder="结束日期" />
     <el-button data-testid="load-stability" :loading="stabilityLoading" @click="loadStability">读取稳定性</el-button>
     <el-alert v-if="stabilityError" :title="stabilityError" type="error" :closable="false" />
+    <p v-if="stabilityResponse && (stabilityLoading || stabilityError)" data-testid="stability-preserved-result" class="provenance">{{ stabilityLoading ? '正在读取新的稳定性结果；当前仍显示上一次成功读取的结果。' : '本次读取失败；当前仍显示上一次成功读取的稳定性结果。' }}</p>
     <template v-if="stabilityResponse">
       <el-descriptions :column="3" border>
         <el-descriptions-item label="快照数">{{ stabilityResponse.snapshot_count }}</el-descriptions-item>
@@ -180,6 +197,7 @@ onMounted(() => void load())
     <el-input v-model="historyEndDate" data-testid="history-end-date-input" placeholder="结束日期" />
     <el-button data-testid="load-history" :loading="historyLoading" @click="loadHistory">读取历史</el-button>
     <el-alert v-if="historyError" :title="historyError" type="error" :closable="false" />
+    <p v-if="historyResponse && (historyLoading || historyError)" data-testid="history-preserved-result" class="provenance">{{ historyLoading ? '正在读取新的历史快照；当前仍显示上一次成功读取的结果。' : '本次读取失败；当前仍显示上一次成功读取的历史快照结果。' }}</p>
     <p v-if="historyResponse?.snapshot_count === 0" data-testid="history-empty">所选日期范围内没有持久化的选股研究快照。</p>
     <article
       v-for="(historySnapshot, snapshotIndex) in historyResponse?.snapshots ?? []"

@@ -6,11 +6,13 @@ import { getDailySelection } from '@/api/selection'
 import type { DailySelectionBlocker, DailySelectionItemResponse, DailySelectionResponse } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 import SelectionItemExplainability from '@/components/SelectionItemExplainability.vue'
+import { createLatestRequestGuard } from '@/utils/latestRequestGuard'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref<string | null>(null)
 const selection = ref<DailySelectionResponse | null>(null)
+const selectionGuard = createLatestRequestGuard()
 const diagnostics = computed(() => selection.value?.diagnostics ?? null)
 const blockerPresentation = computed(() => {
   const blocker = selection.value?.blockers[0]
@@ -37,15 +39,16 @@ function openInstrument(row: DailySelectionItemResponse): void {
 }
 
 async function loadSelection(): Promise<void> {
+  const token = selectionGuard.begin()
   loading.value = true
   error.value = null
   try {
-    selection.value = await getDailySelection()
+    const result = await getDailySelection()
+    if (selectionGuard.isCurrent(token)) selection.value = result
   } catch {
-    selection.value = null
-    error.value = '无法读取本地今日选股状态。'
+    if (selectionGuard.isCurrent(token)) error.value = '无法读取本地今日选股状态。'
   } finally {
-    loading.value = false
+    if (selectionGuard.isCurrent(token)) loading.value = false
   }
 }
 
@@ -64,8 +67,10 @@ onMounted(() => void loadSelection())
 
   <p v-if="loading" role="status" class="provenance">正在读取本地今日选股状态…</p>
 
+  <p v-if="selection && (loading || error)" data-testid="daily-selection-preserved-result" class="provenance">{{ loading ? '正在读取新结果；当前仍显示上一次成功读取的今日选股结果。' : '本次读取失败；当前仍显示上一次成功读取的今日选股结果。' }}</p>
+
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-  <template v-else-if="diagnostics">
+  <template v-if="diagnostics">
     <section class="metrics-grid">
       <article class="metric-card"><span class="metric-card__label">选股状态</span><strong class="metric-card__value">{{ selection?.selection_ready ? '已就绪' : '尚未就绪' }}</strong><span class="metric-card__description">as-of {{ selection?.as_of }}</span></article>
       <article class="metric-card"><span class="metric-card__label">结构股票池</span><strong class="metric-card__value">{{ diagnostics.structural_members }}</strong><span class="metric-card__description">输入 {{ diagnostics.input_instruments }}</span></article>
