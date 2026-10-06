@@ -1,6 +1,10 @@
 # Backend
 
-Python 3.12 backend for A Stock Selector. It contains the FastAPI read-only API, quant domain models, provider abstractions, local Parquet/DuckDB storage, bounded daily collection, structural universe, dated risk states, and point-in-time fundamentals/valuation/industry reporting.
+Python 3.12 backend for A Stock Selector. It contains the local FastAPI API, quant domain models, provider boundaries, local Parquet/DuckDB storage, bounded daily collection, structural universe, dated risk states, and point-in-time fundamentals/valuation/industry reporting.
+
+## Current capabilities
+
+The completed backend is a local research service: it provides FastAPI read APIs over provider boundaries and a Parquet/DuckDB repository; structural and risk evidence; PIT fundamentals, valuation, industry and adjusted-return evidence; factor preprocessing, factor families and BaseScore; deterministic explanation; daily and realtime selection workflows; bounded/manual refresh orchestration; and persisted selection-research snapshots with effectiveness, rank/rank-cutoff, history, stability, filtering, comparison and export analytics. It does not provide portfolio management, brokerage integration, automated trading, or an autonomous data scheduler.
 
 Install from the workspace root with:
 
@@ -108,3 +112,10 @@ from the stored ingestion timestamp using the configured 60/120-second threshold
 fresh and warning snapshots pass this single freshness gate. This is not a realtime
 scanner, intraday factor, ranker, recommendation, scheduler, or statement of full-market
 coverage.
+
+## Project documentation
+
+- [Project landing page](../README.md)
+- [Local deployment and operations](../docs/deployment.md)
+- [Final acceptance](../docs/acceptance.md)
+- [Implementation status](../docs/implementation_status.md)

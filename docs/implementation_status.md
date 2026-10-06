@@ -2,27 +2,26 @@
 
 ## Current Task
 
-Task 59 - Selection Product Hardening
+Task 60 - Final Documentation / Deployment / Acceptance
 
 ## Status
 
 Completed
 
-Task59 preserves last successful selection and research results across failed refreshes, and uses
-independent latest-request guards to prevent stale older async completions from overwriting newer
-requests. It prevents premature latest-research empty state presentation, adds explicit
-preserved-result provenance, and gates comparison on required input presence without duplicating
-backend date validation. It changes no backend, API, or domain behavior and adds no polling,
-clock, retry, persistence, portfolio, backtest, or trading behavior.
+Task60 closes the current project milestone through final documentation, a localhost-first
+deployment and operations runbook, and an explicit final acceptance contract. It updates the
+repository landing documentation to the actual completed Task59 product state without changing
+backend, frontend production, API, domain, provider, storage, collection, scoring, selection, or
+research behavior. No Docker, cloud, CI/CD, public-deployment, reverse-proxy, authentication, or
+automated-trading infrastructure was introduced.
 
-Task59 verification: frontend type-check and lint PASS; focused guard/daily/research/explorer
-Vitest PASS (63 across 4 files). Regression validation explicitly proves stale-success suppression,
-stale-rejection suppression while a newer request is pending, and preserved-result behavior for
-daily, latest, effectiveness, history, stability, filtered items, and comparison. It also proves
-filtered-result/export atomicity, comparison required-input gating, and raw comparison-input
-forwarding. No live provider call or real runtime market-data write was performed during automated
-validation. Full Vitest PASS (99 across 16 files), and the production build PASS (with the existing
-chunk-size advisory).
+Task60 verification: canonical PASS (exit 0): backend pytest 1048 passed; coverage pytest 1048
+passed with 91% coverage; Ruff PASS; mypy PASS for 123 source files; frontend type-check and lint
+PASS; Vitest PASS (16 files / 99 tests); and frontend production build PASS. Local smoke PASS:
+backend `/api/health` returned `status: ok`, `application: a-stock-selector`, and `storage: ready`;
+the Vite development server returned HTTP 200; and Vite `/api/health` proxy returned the same health
+semantics. No provider, collection, refresh, or live-market-data endpoint was invoked. Task60 made
+no `backend/src`, `frontend/src`, API, domain, provider, storage, or collection change.
 
 ## Completed
 
@@ -1230,9 +1229,10 @@ The canonical full validation entry point is `./scripts/test-all.ps1`.
   coverage); Ruff, mypy, frontend type-check, lint, 38 Vitest tests, and production build pass
   (exit code 0). No live provider call or real project runtime data write was performed.
 
-## Next Task
+## Milestone completion
 
-No subsequent task has been started.
+The planned Task00–60 milestone is complete. There is no Task61 planned by this roadmap;
+subsequent work, if any, requires a separately scoped plan.
 
 ## Roadmap
 
