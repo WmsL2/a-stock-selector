@@ -21,6 +21,7 @@ class StructuralSlowInputSweepRequest(DomainModel):
     symbols: tuple[str, ...]
     as_of: datetime
     has_more_structural_members: bool
+    include_adjusted_returns: bool = True
 
     @field_validator("symbols")
     @classmethod
@@ -43,6 +44,7 @@ class StructuralSlowInputSweepReport(DomainModel):
     as_of: datetime
     requested_symbols: tuple[str, ...]
     batch_reports: tuple[StructuralSlowInputCollectionReport, ...]
+    adjusted_returns_requested: bool = True
     factor_input_covered_after_run: int = Field(ge=0)
     batch_first_symbol: str
     batch_last_symbol: str
@@ -70,6 +72,8 @@ class StructuralSlowInputSweepReport(DomainModel):
         if tuple(symbol for report in self.batch_reports for symbol in report.requested_symbols) != self.requested_symbols:
             raise ValueError("nested reports must exactly partition requested symbols")
         for index, report in enumerate(self.batch_reports):
+            if report.adjusted_returns_requested != self.adjusted_returns_requested:
+                raise ValueError("nested adjusted-return mode must match sweep")
             if report.as_of != self.as_of or not 1 <= len(report.requested_symbols) <= 20:
                 raise ValueError("nested report must match sweep as_of and bound")
             if (
@@ -101,6 +105,7 @@ class StructuralSlowInputSweepCollector:
                 StructuralSlowInputCollectionRequest(
                     symbols=chunk,
                     as_of=request.as_of,
+                    include_adjusted_returns=request.include_adjusted_returns,
                     has_more_structural_members=(
                         index < len(chunks) - 1 or request.has_more_structural_members
                     ),
@@ -110,6 +115,7 @@ class StructuralSlowInputSweepCollector:
         )
         return StructuralSlowInputSweepReport(
             as_of=request.as_of, requested_symbols=request.symbols, batch_reports=reports,
+            adjusted_returns_requested=request.include_adjusted_returns,
             factor_input_covered_after_run=sum(report.factor_input_covered_after_run for report in reports),
             batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1],
             has_more_structural_members=request.has_more_structural_members,

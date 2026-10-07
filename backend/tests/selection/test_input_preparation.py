@@ -194,7 +194,8 @@ def _install(
             empty_count = 1 if empty else 0
             core = SimpleNamespace(financial_success=success, financial_empty=empty_count, financial_failed=failed if slow_failure == "financial" else (), industry_success=success, industry_empty=empty_count, industry_failed=failed if slow_failure == "industry" else ())
             valuation = SimpleNamespace(success_symbols=success, empty_symbols=empty_count, failed_symbols=failed if slow_failure == "valuation" else ())
-            adjusted = SimpleNamespace(success_symbols=success, empty_symbols=empty_count, failed_symbols=failed if slow_failure == "adjusted" else (), availability_as_of=NOW)
+            assert request.include_adjusted_returns is False
+            adjusted = None
             batch = SimpleNamespace(requested_symbols=request.symbols, batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1], core_report=core, valuation_report=valuation, adjusted_return_report=adjusted, factor_input_covered_after_run=len(after))
             return SimpleNamespace(batch_reports=(batch,), factor_input_covered_after_run=len(after))
 
@@ -216,11 +217,11 @@ def _install(
     monkeypatch.setattr("stock_selector.collection.FinancialCollector", base("financial"))
     monkeypatch.setattr("stock_selector.collection.IndustryCollector", base("industry"))
     monkeypatch.setattr("stock_selector.collection.ValuationCollector", base("valuation"))
-    monkeypatch.setattr("stock_selector.collection.AdjustedDailyReturnCollector", base("adjusted"))
+    monkeypatch.setattr("stock_selector.collection.AdjustedDailyReturnCollector", _forbidden)
+    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", _forbidden)
     for target, name in (
         ("StructuralCoreFundamentalsCollector", "core"),
         ("StructuralValuationCollector", "valuation"),
-        ("StructuralAdjustedReturnCollector", "adjusted"),
         ("StructuralSlowInputCollector", "task35"),
     ):
         monkeypatch.setattr(f"stock_selector.collection.{target}", wrapper(name))
@@ -273,12 +274,12 @@ def test_prepare_inputs_refreshes_risk_then_one_eligible_missing_slice(monkeypat
     assert (slow.as_of, slow.has_more_structural_members) == (NOW, False)
     dependencies = calls["base_dependencies"]
     assert isinstance(dependencies, list)
-    assert [item[0] for item in dependencies] == ["financial", "industry", "valuation", "adjusted"]
+    assert [item[0] for item in dependencies] == ["financial", "industry", "valuation"]
     assert len({id(item[1]) for item in dependencies}) == 1
     assert calls["risk_dependencies"][0] is dependencies[0][1]
     assert calls["task35"] == calls["task36_construct"] == 1
     wrappers = calls["wrappers"]
-    assert wrappers == {"core": 1, "valuation": 1, "adjusted": 1, "task35": 1}
+    assert wrappers == {"core": 1, "valuation": 1, "task35": 1}
     coverage = calls["coverage_requests"]
     readiness = calls["readiness_requests"]
     assert isinstance(coverage, list) and isinstance(readiness, list)
@@ -300,6 +301,9 @@ def test_prepare_inputs_refreshes_risk_then_one_eligible_missing_slice(monkeypat
     assert "Next eligible-missing start-after: 000002.SZ" in output
     assert "Preparation does not run DailySelectionService" in output
     assert "selection_ready" not in output
+    assert "Adjusted-return refresh: skipped (optional; does not block readiness)" in output
+    assert "Adjusted success / empty / failed" not in output
+    assert "Adjusted availability as of:" not in output
 
 
 @pytest.mark.parametrize(
@@ -352,7 +356,7 @@ def test_prepare_inputs_reports_remaining_eligible_work_without_failure(monkeypa
     assert "Post-slow upstream inputs ready: NO" in output
 
 
-@pytest.mark.parametrize("failure", ("financial", "industry", "valuation", "adjusted"))
+@pytest.mark.parametrize("failure", ("financial", "industry", "valuation"))
 def test_prepare_inputs_returns_one_for_nested_slow_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str) -> None:
     calls = _install(monkeypatch, tmp_path, slow_failure=failure)
     assert main(["selection", "prepare-inputs", "--limit", "1"]) == 1
@@ -379,3 +383,7 @@ def test_prepare_inputs_stops_before_planning_for_incomplete_risk(monkeypatch: p
     assert main(["selection", "prepare-inputs", "--limit", "1"]) == 1
     assert incomplete_calls["slow"] == 0
     assert incomplete_calls["planner"] == incomplete_calls["task36_construct"] == 0
+
+
+def _forbidden(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("optional adjusted-return graph must not be constructed")

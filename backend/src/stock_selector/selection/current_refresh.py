@@ -39,6 +39,8 @@ class CurrentSelectionRefreshStep(DomainModel):
     def exact_step(self) -> "CurrentSelectionRefreshStep":
         if self.sweep_report.requested_symbols != self.plan.selected_symbols:
             raise ValueError("sweep requested symbols must match plan selection")
+        if self.sweep_report.adjusted_returns_requested:
+            raise ValueError("selection readiness must skip optional adjusted-return collection")
         if self.sweep_report.as_of != self.plan.as_of or self.sweep_report.has_more_structural_members:
             raise ValueError("sweep must match plan and own no outer continuation")
         if self.coverage_after.as_of != self.plan.as_of or self.coverage_after.structural_symbols != self.plan.structural_symbols:
@@ -143,7 +145,8 @@ class CurrentSelectionRefreshService:
             if not plan.selected_symbols:
                 break
             sweep = self._slow_input_sweep_collector.collect(StructuralSlowInputSweepRequest(
-                symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False))
+                symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False,
+                include_adjusted_returns=False))
             coverage_after = self._audit(current_at, structural.members, risk_records, complete, risk.eligible_members)
             steps.append(CurrentSelectionRefreshStep(plan=plan, sweep_report=sweep, coverage_after=coverage_after))
             coverage = coverage_after
@@ -173,6 +176,6 @@ class CurrentSelectionRefreshService:
 def _sweep_failed(sweep: StructuralSlowInputSweepReport) -> bool:
     return any(
         batch.core_report.financial_failed or batch.core_report.industry_failed
-        or batch.valuation_report.failed_symbols or batch.adjusted_return_report.failed_symbols
+        or batch.valuation_report.failed_symbols
         for batch in sweep.batch_reports
     )

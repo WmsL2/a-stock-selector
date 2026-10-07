@@ -33,6 +33,7 @@ def _outer_payload(
 ) -> dict[str, object]:
     return {
         "as_of": report.as_of,
+        "adjusted_returns_requested": report.adjusted_returns_requested,
         "requested_symbols": report.requested_symbols,
         "batch_reports": report.batch_reports if batch_reports is None else batch_reports,
         "factor_input_covered_after_run": (
@@ -97,10 +98,11 @@ class _Task35:
             start_date=request.as_of.date() - timedelta(days=179),
             end_date=request.as_of.date(),
             **common,
-        )
+        ) if request.include_adjusted_returns else None
         return StructuralSlowInputCollectionReport.model_construct(
             as_of=request.as_of, requested_symbols=request.symbols,
             core_report=core, valuation_report=valuation, adjusted_return_report=adjusted,
+            adjusted_returns_requested=request.include_adjusted_returns,
             factor_input_covered_after_run=len(request.symbols),
             batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1],
             has_more_structural_members=request.has_more_structural_members,
@@ -108,17 +110,27 @@ class _Task35:
         )
 
 
+@pytest.mark.parametrize("include_adjusted", (True, False))
+@pytest.mark.parametrize("outer_more", (True, False))
 @pytest.mark.parametrize("count,chunks", ((1, (1,)), (20, (20,)), (21, (20, 1)), (40, (20, 20)), (41, (20, 20, 1)), (100, (20, 20, 20, 20, 20))))
-def test_validates_and_partitions_selected_symbols(count: int, chunks: tuple[int, ...]) -> None:
+def test_validates_and_partitions_selected_symbols(count: int, chunks: tuple[int, ...], include_adjusted: bool, outer_more: bool) -> None:
     symbols, calls = _symbols(count), []
     report = StructuralSlowInputSweepCollector(_Task35(calls)).collect(
-        StructuralSlowInputSweepRequest(symbols=symbols, as_of=_AS_OF, has_more_structural_members=False)
+        StructuralSlowInputSweepRequest(symbols=symbols, as_of=_AS_OF, has_more_structural_members=outer_more, include_adjusted_returns=include_adjusted)
     )
     assert tuple(len(request.symbols) for request in calls) == chunks
     assert tuple(symbol for request in calls for symbol in request.symbols) == symbols
     assert all(request.as_of == _AS_OF for request in calls)
-    assert [request.has_more_structural_members for request in calls] == [True] * (len(calls) - 1) + [False]
+    assert [request.has_more_structural_members for request in calls] == [True] * (len(calls) - 1) + [outer_more]
     assert report.factor_input_covered_after_run == count
+
+    assert all(request.include_adjusted_returns is include_adjusted for request in calls)
+    assert report.adjusted_returns_requested is include_adjusted
+    for batch in report.batch_reports:
+        assert batch.adjusted_returns_requested is include_adjusted
+        assert (batch.adjusted_return_report is not None) is include_adjusted
+        assert batch.next_start_after == (batch.batch_last_symbol if batch.has_more_structural_members else None)
+    assert report.next_start_after == (symbols[-1] if outer_more else None)
 
 
 def test_request_rejects_invalid_outer_slices() -> None:
@@ -188,3 +200,16 @@ def test_report_accepts_distinct_adjusted_availability_cutoffs() -> None:
         **_outer_payload(report, batch_reports=(report.batch_reports[0], later_batch))
     )
     assert validated.batch_reports[1].adjusted_return_report.availability_as_of > _AS_OF
+
+
+def test_report_rejects_mismatched_optional_mode() -> None:
+    report = StructuralSlowInputSweepCollector(_Task35([])).collect(
+        StructuralSlowInputSweepRequest(
+            symbols=_symbols(21), as_of=_AS_OF, has_more_structural_members=False,
+            include_adjusted_returns=False,
+        )
+    )
+    with pytest.raises(ValidationError, match="adjusted-return mode"):
+        StructuralSlowInputSweepReport(
+            **(_outer_payload(report) | {"adjusted_returns_requested": True})
+        )

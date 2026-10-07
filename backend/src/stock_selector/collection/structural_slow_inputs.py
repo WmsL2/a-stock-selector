@@ -36,6 +36,7 @@ class StructuralSlowInputCollectionRequest(DomainModel):
     symbols: tuple[str, ...]
     as_of: datetime
     has_more_structural_members: bool
+    include_adjusted_returns: bool = True
 
     @field_validator("symbols")
     @classmethod
@@ -55,13 +56,14 @@ class StructuralSlowInputCollectionRequest(DomainModel):
 
 
 class StructuralSlowInputCollectionReport(DomainModel):
-    """Typed audit trail retaining all three structural subreports."""
+    """Typed audit trail distinguishing optional work from provider outcomes."""
 
     as_of: datetime
     requested_symbols: tuple[str, ...]
     core_report: StructuralCoreCollectionReport
     valuation_report: StructuralValuationCollectionReport
-    adjusted_return_report: StructuralAdjustedReturnCollectionReport
+    adjusted_return_report: StructuralAdjustedReturnCollectionReport | None
+    adjusted_returns_requested: bool = True
     factor_input_covered_after_run: int = Field(ge=0)
     batch_first_symbol: str
     batch_last_symbol: str
@@ -87,6 +89,8 @@ class StructuralSlowInputCollectionReport(DomainModel):
     @model_validator(mode="after")
     def validate_report(self) -> "StructuralSlowInputCollectionReport":
         expected = self.requested_symbols
+        if self.adjusted_returns_requested != (self.adjusted_return_report is not None):
+            raise ValueError("adjusted-return report must match whether collection was requested")
         if self.factor_input_covered_after_run > len(expected):
             raise ValueError("factor input coverage cannot exceed requested symbols")
         if (self.batch_first_symbol, self.batch_last_symbol) != (expected[0], expected[-1]):
@@ -94,6 +98,8 @@ class StructuralSlowInputCollectionReport(DomainModel):
         if self.next_start_after != (expected[-1] if self.has_more_structural_members else None):
             raise ValueError("next cursor must match batch continuation")
         for report in (self.core_report, self.valuation_report, self.adjusted_return_report):
+            if report is None:
+                continue
             if (report.requested_symbols, report.batch_first_symbol, report.batch_last_symbol,
                 report.has_more_structural_members, report.next_start_after) != (
                 expected, self.batch_first_symbol, self.batch_last_symbol,
@@ -103,38 +109,43 @@ class StructuralSlowInputCollectionReport(DomainModel):
         if self.core_report.as_of != self.as_of.date() or self.valuation_report.as_of != self.as_of:
             raise ValueError("nested report as_of must match the structural batch")
         adjusted = self.adjusted_return_report
-        if (adjusted.as_of != self.as_of or adjusted.end_date != self.as_of.date()
+        if adjusted is not None and (adjusted.as_of != self.as_of or adjusted.end_date != self.as_of.date()
                 or adjusted.start_date != self.as_of.date() - timedelta(days=179)):
             raise ValueError("adjusted-return report window must match the structural batch")
         return self
 
 
 class StructuralSlowInputCollector:
-    """Call the three existing wrappers once, sequentially, then audit final membership."""
+    """Collect required domains, optionally adjusted returns, then audit membership."""
 
     def __init__(self, core: StructuralCoreFundamentalsCollector, valuation: StructuralValuationCollector,
-                 adjusted_returns: StructuralAdjustedReturnCollector, repository: LocalMarketRepository) -> None:
+                 adjusted_returns: StructuralAdjustedReturnCollector | None, repository: LocalMarketRepository) -> None:
         self._core = core
         self._valuation = valuation
         self._adjusted_returns = adjusted_returns
         self._repository = repository
 
     def collect(self, request: StructuralSlowInputCollectionRequest) -> StructuralSlowInputCollectionReport:
+        if request.include_adjusted_returns and self._adjusted_returns is None:
+            raise CollectionDataError("adjusted-return collector is required when requested")
         core = self._core.collect(StructuralCoreCollectionRequest(
             symbols=request.symbols, as_of=request.as_of.date(), has_more_structural_members=request.has_more_structural_members))
         _validate_subreport(core, request, "core")
         valuation = self._valuation.collect(StructuralValuationCollectionRequest(
             symbols=request.symbols, as_of=request.as_of, has_more_structural_members=request.has_more_structural_members))
         _validate_subreport(valuation, request, "valuation")
-        end_date = request.as_of.date()
-        adjusted = self._adjusted_returns.collect(StructuralAdjustedReturnCollectionRequest(
-            symbols=request.symbols, as_of=request.as_of, start_date=end_date - timedelta(days=179),
-            end_date=end_date, has_more_structural_members=request.has_more_structural_members))
-        _validate_subreport(adjusted, request, "adjusted")
+        adjusted = None
+        if request.include_adjusted_returns and self._adjusted_returns is not None:
+            end_date = request.as_of.date()
+            adjusted = self._adjusted_returns.collect(StructuralAdjustedReturnCollectionRequest(
+                symbols=request.symbols, as_of=request.as_of, start_date=end_date - timedelta(days=179),
+                end_date=end_date, has_more_structural_members=request.has_more_structural_members))
+            _validate_subreport(adjusted, request, "adjusted")
         covered = set(self._repository.load_factor_input_symbols())
         return StructuralSlowInputCollectionReport(
             as_of=request.as_of, requested_symbols=request.symbols, core_report=core,
             valuation_report=valuation, adjusted_return_report=adjusted,
+            adjusted_returns_requested=request.include_adjusted_returns,
             factor_input_covered_after_run=sum(symbol in covered for symbol in request.symbols),
             batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1],
             has_more_structural_members=request.has_more_structural_members,

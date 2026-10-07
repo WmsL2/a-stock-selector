@@ -164,3 +164,73 @@ def test_outer_report_rejects_impossible_coverage_and_cursor() -> None:
     ):
         with pytest.raises(ValidationError):
             StructuralSlowInputCollectionReport(**(valid.model_dump() | update))
+
+
+@pytest.mark.parametrize("with_forbidden_collector", (True, False))
+def test_readiness_mode_skips_adjusted_and_audits_after_valuation(with_forbidden_collector: bool) -> None:
+    calls: list[str] = []
+    repository = _Repository(set())
+    core = _Stage(_core(), calls, "core")
+    valuation = _Stage(_valuation(), calls, "valuation")
+    original = valuation.collect
+
+    def collect_valuation(request: Any) -> Any:
+        result = original(request)
+        repository.members.update(_SYMBOLS)
+        return result
+
+    valuation.collect = collect_valuation
+    forbidden = _Stage(None, calls, "adjusted", AssertionError("adjusted forbidden"))
+    report = StructuralSlowInputCollector(
+        core, valuation, forbidden if with_forbidden_collector else None, repository
+    ).collect(_request(include_adjusted_returns=False))
+    assert calls == ["core", "valuation"]
+    assert repository.calls == 1 and report.factor_input_covered_after_run == 2
+    assert report.adjusted_returns_requested is False
+    assert report.adjusted_return_report is None
+    assert report.model_dump()["adjusted_return_report"] is None
+
+
+def test_requested_adjusted_requires_collector_before_any_work() -> None:
+    calls: list[str] = []
+    repository = _Repository(set())
+    collector = StructuralSlowInputCollector(
+        _Stage(_core(), calls, "core"), _Stage(_valuation(), calls, "valuation"), None, repository
+    )
+    with pytest.raises(CollectionDataError, match="required when requested"):
+        collector.collect(_request())
+    assert calls == [] and repository.calls == 0
+
+
+@pytest.mark.parametrize("requested,has_report", ((True, False), (False, True)))
+def test_report_rejects_misrepresented_optional_work(requested: bool, has_report: bool) -> None:
+    with pytest.raises(ValidationError, match="whether collection was requested"):
+        StructuralSlowInputCollectionReport(
+            as_of=_AS_OF, requested_symbols=_SYMBOLS, core_report=_core(),
+            valuation_report=_valuation(), adjusted_return_report=_adjusted() if has_report else None,
+            adjusted_returns_requested=requested, factor_input_covered_after_run=0,
+            batch_first_symbol=_SYMBOLS[0], batch_last_symbol=_SYMBOLS[-1],
+            has_more_structural_members=True, next_start_after=_SYMBOLS[-1],
+        )
+
+
+def test_generic_adjusted_failure_is_retained_and_membership_audited() -> None:
+    calls: list[str] = []
+    repository = _Repository(set(_SYMBOLS))
+    result = AdjustedReturnSymbolResult(
+        symbol=_SYMBOLS[0], status=AdjustedReturnCollectionStatus.FAILED,
+        rows_received=0, rows_persisted=0, error_type="ProviderError", error_message="offline failure"
+    )
+    adjusted = StructuralAdjustedReturnCollectionReport.model_validate(_adjusted().model_dump() | {
+        "success_symbols": 1, "failed_symbols": 1, "rows_received": 1,
+        "rows_persisted": 1, "results": (result, _adjusted().results[1]),
+    })
+    report = StructuralSlowInputCollector(
+        _Stage(_core(), calls, "core"), _Stage(_valuation(), calls, "valuation"),
+        _Stage(adjusted, calls, "adjusted"), repository,
+    ).collect(_request())
+    assert calls == ["core", "valuation", "adjusted"] and repository.calls == 1
+    assert report.adjusted_returns_requested is True
+    assert report.adjusted_return_report is not None
+    assert report.adjusted_return_report.failed_symbols == 1
+    assert report.factor_input_covered_after_run == 2

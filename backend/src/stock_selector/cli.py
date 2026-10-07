@@ -943,13 +943,11 @@ def _format_optional_score(value: float | None) -> str:
 def _run_selection_daily_workflow_command() -> int:
     """Run current refresh followed by the official local daily selection."""
     from stock_selector.collection import (
-        AdjustedDailyReturnCollector,
         CollectionDataError,
         CollectionError,
         CurrentRiskStateCollector,
         FinancialCollector,
         IndustryCollector,
-        StructuralAdjustedReturnCollector,
         StructuralCoreFundamentalsCollector,
         StructuralSlowInputCollector,
         StructuralSlowInputSweepCollector,
@@ -981,7 +979,7 @@ def _run_selection_daily_workflow_command() -> int:
         task35 = StructuralSlowInputCollector(
             StructuralCoreFundamentalsCollector(FinancialCollector(provider, repository), IndustryCollector(provider, repository), repository),
             StructuralValuationCollector(ValuationCollector(provider, repository), repository),
-            StructuralAdjustedReturnCollector(AdjustedDailyReturnCollector(provider, repository), repository),
+            None,
             repository,
         )
         refresh = CurrentSelectionRefreshService(
@@ -1020,13 +1018,11 @@ def _run_selection_daily_workflow_command() -> int:
 def _run_selection_refresh_current_command() -> int:
     """Refresh current upstream inputs without running official selection."""
     from stock_selector.collection import (
-        AdjustedDailyReturnCollector,
         CollectionDataError,
         CollectionError,
         CurrentRiskStateCollector,
         FinancialCollector,
         IndustryCollector,
-        StructuralAdjustedReturnCollector,
         StructuralCoreFundamentalsCollector,
         StructuralSlowInputCollector,
         StructuralSlowInputSweepCollector,
@@ -1055,9 +1051,7 @@ def _run_selection_refresh_current_command() -> int:
                 repository,
             ),
             StructuralValuationCollector(ValuationCollector(provider, repository), repository),
-            StructuralAdjustedReturnCollector(
-                AdjustedDailyReturnCollector(provider, repository), repository
-            ),
+            None,
             repository,
         )
         service = CurrentSelectionRefreshService(
@@ -1103,7 +1097,7 @@ def _print_selection_refresh_current_report(
         sweep = step.sweep_report
         failed = any(
             batch.core_report.financial_failed or batch.core_report.industry_failed
-            or batch.valuation_report.failed_symbols or batch.adjusted_return_report.failed_symbols
+            or batch.valuation_report.failed_symbols
             for batch in sweep.batch_reports
         )
         print(
@@ -1117,7 +1111,7 @@ def _print_selection_refresh_current_report(
     print(f"Final upstream inputs ready: {'YES' if final_readiness.upstream_inputs_ready else 'NO'}")
     print("Final blockers: " + (", ".join(item.value for item in final_readiness.blockers) or "none"))
     print(f"Collection failures: {'YES' if report.had_collection_failures else 'NO'}")
-    print("Adjusted-return evidence does not block official upstream readiness.")
+    print("Adjusted-return refresh: skipped (optional; does not block readiness)")
     print("Each missing member is attempted at most once per refresh-current invocation.")
     print("Current selection refresh does not run DailySelectionService, factors, BaseScore, Explanation, or return selection items.")
 
@@ -1125,14 +1119,12 @@ def _print_selection_refresh_current_report(
 def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -> int:
     """Refresh current risk then one bounded eligible missing slow-input slice."""
     from stock_selector.collection import (
-        AdjustedDailyReturnCollector,
         CollectionDataError,
         CollectionError,
         CurrentRiskCollectionRequest,
         CurrentRiskStateCollector,
         FinancialCollector,
         IndustryCollector,
-        StructuralAdjustedReturnCollector,
         StructuralCoreFundamentalsCollector,
         StructuralFactorInputCoverageAuditor,
         StructuralFactorInputCoverageRequest,
@@ -1196,6 +1188,7 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
         print(f"Daily-selection input preparation error: {exc}", file=sys.stderr)
         return 1
     _print_selection_prepare_pre(risk_report, pre_coverage, pre, plan)
+    print("Adjusted-return refresh: skipped (optional; does not block readiness)")
     if not plan.selected_symbols:
         if not pre.risk_eligible_members:
             print("No risk-eligible structural members after current-risk refresh.")
@@ -1215,13 +1208,12 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
             StructuralValuationCollector(
                 ValuationCollector(provider, repository), repository
             ),
-            StructuralAdjustedReturnCollector(
-                AdjustedDailyReturnCollector(provider, repository), repository
-            ),
+            None,
             repository,
         )
         slow = StructuralSlowInputSweepCollector(task35).collect(StructuralSlowInputSweepRequest(
-            symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False
+            symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False,
+            include_adjusted_returns=False,
         ))
         factor_after = repository.load_factor_input_symbols()
         post_coverage = StructuralFactorInputCoverageAuditor().audit(StructuralFactorInputCoverageRequest(as_of=current_at, structural_symbols=structural.members, factor_input_symbols=factor_after))
@@ -1235,7 +1227,6 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
         batch.core_report.financial_failed
         or batch.core_report.industry_failed
         or batch.valuation_report.failed_symbols
-        or batch.adjusted_return_report.failed_symbols
         for batch in slow.batch_reports
     ) else 0
 
@@ -1393,7 +1384,7 @@ def _run_structural_missing_slow_inputs_command(
         batch.core_report.financial_failed
         or batch.core_report.industry_failed
         or batch.valuation_report.failed_symbols
-        or batch.adjusted_return_report.failed_symbols
+        or (batch.adjusted_return_report is not None and batch.adjusted_return_report.failed_symbols)
         for batch in report.batch_reports
     ) else 0
 
@@ -1530,7 +1521,7 @@ def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | Non
         batch.core_report.financial_failed
         or batch.core_report.industry_failed
         or batch.valuation_report.failed_symbols
-        or batch.adjusted_return_report.failed_symbols
+        or (batch.adjusted_return_report is not None and batch.adjusted_return_report.failed_symbols)
         for batch in report.batch_reports
     ) else 0
 
@@ -1582,7 +1573,7 @@ def _run_structural_slow_inputs_command(limit: int, start_after: str | None) -> 
         return 1
     _print_structural_slow_input_collection_report(report, len(structural.members))
     return 1 if (report.core_report.financial_failed or report.core_report.industry_failed
-                 or report.valuation_report.failed_symbols or report.adjusted_return_report.failed_symbols) else 0
+                 or report.valuation_report.failed_symbols or (report.adjusted_return_report is not None and report.adjusted_return_report.failed_symbols)) else 0
 
 
 def _run_structural_adjusted_return_command(limit: int, start_after: str | None) -> int:
@@ -1843,7 +1834,7 @@ def _print_selection_prepare_pre(risk, coverage, readiness, plan) -> None:  # ty
 
 def _print_selection_prepare_post(slow, coverage, readiness) -> None:  # type: ignore[no-untyped-def]
     for index, batch in enumerate(slow.batch_reports, start=1):
-        core, valuation, adjusted = batch.core_report, batch.valuation_report, batch.adjusted_return_report
+        core, valuation = batch.core_report, batch.valuation_report
         print(f"Batch {index}/{len(slow.batch_reports)}")
         print(f"Batch requested: {len(batch.requested_symbols)}")
         print(f"Batch first: {batch.batch_first_symbol}")
@@ -1851,8 +1842,6 @@ def _print_selection_prepare_post(slow, coverage, readiness) -> None:  # type: i
         print(f"Financial success / empty / failed: {core.financial_success} / {core.financial_empty} / {core.financial_failed}")
         print(f"Industry success / empty / failed: {core.industry_success} / {core.industry_empty} / {core.industry_failed}")
         print(f"Valuation success / empty / failed: {valuation.success_symbols} / {valuation.empty_symbols} / {valuation.failed_symbols}")
-        print(f"Adjusted success / empty / failed: {adjusted.success_symbols} / {adjusted.empty_symbols} / {adjusted.failed_symbols}")
-        print(f"Adjusted availability as of: {adjusted.availability_as_of.isoformat()}")
         print(f"Factor input covered after batch: {batch.factor_input_covered_after_run}")
     print(f"Post-slow structural factor-input covered: {coverage.structural_factor_input_covered}")
     print(f"Post-slow structural factor-input missing: {coverage.structural_factor_input_missing}")

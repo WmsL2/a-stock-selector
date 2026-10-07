@@ -33,6 +33,7 @@ class Repository:
     def __init__(self, members: tuple[str, ...], eligible: bool = True) -> None:
         self.members, self.eligible, self.covered = members, eligible, set[str]()
         self.risk_reads = 0
+        self.adjusted = members
         self.reads = {name: 0 for name in ("financial", "valuation", "industry", "factor", "adjusted")}
 
     def load_risk_states(self, as_of: date, received: tuple[str, ...]) -> tuple[DatedRiskState, ...]:
@@ -44,7 +45,7 @@ class Repository:
     def load_valuation_symbols(self) -> tuple[str, ...]: self.reads["valuation"] += 1; return ()
     def load_industry_symbols(self) -> tuple[str, ...]: self.reads["industry"] += 1; return tuple(sorted(self.covered))
     def load_factor_input_symbols(self) -> tuple[str, ...]: self.reads["factor"] += 1; return tuple(sorted(self.covered))
-    def load_adjusted_return_symbols(self) -> tuple[str, ...]: self.reads["adjusted"] += 1; return tuple(sorted(self.covered))
+    def load_adjusted_return_symbols(self) -> tuple[str, ...]: self.reads["adjusted"] += 1; return self.adjusted
 
 
 class RiskCollector:
@@ -59,6 +60,7 @@ class Sweep:
         self.repository, self.failed, self.empty = repository, failed or set(), empty or set()
         self.requests: list[object] = []
     def collect(self, request: object) -> StructuralSlowInputSweepReport:
+        assert request.include_adjusted_returns is False
         self.requests.append(request)
         self.repository.covered.update(set(request.symbols) - self.failed - self.empty)
         failed = tuple(sorted(set(request.symbols) & self.failed))
@@ -74,9 +76,10 @@ class Sweep:
                 factor_input_covered_after_run=len(chunk) - len(chunk_failed),
                 core_report=SimpleNamespace(financial_failed=chunk_failed, industry_failed=()),
                 valuation_report=SimpleNamespace(failed_symbols=()),
-                adjusted_return_report=SimpleNamespace(failed_symbols=()),
+                adjusted_return_report=None,
+                adjusted_returns_requested=False,
             ))
-        return StructuralSlowInputSweepReport.model_construct(as_of=request.as_of, requested_symbols=request.symbols, batch_reports=tuple(batches), factor_input_covered_after_run=len(request.symbols) - len(failed), batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1], has_more_structural_members=request.has_more_structural_members, next_start_after=None)
+        return StructuralSlowInputSweepReport.model_construct(adjusted_returns_requested=False, as_of=request.as_of, requested_symbols=request.symbols, batch_reports=tuple(batches), factor_input_covered_after_run=len(request.symbols) - len(failed), batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1], has_more_structural_members=request.has_more_structural_members, next_start_after=None)
 
 
 class NoSweep:
@@ -163,9 +166,24 @@ def test_empty_member_is_not_failure_or_retry() -> None:
 
 
 def test_adjusted_return_only_evidence_does_not_change_initial_target() -> None:
-    report, _, _, _ = run(1, empty={"000001.SZ"})
+    report, repository, _, sweep = run(1, empty={"000001.SZ"})
     assert report.initial_coverage.factor_input_symbols == ()
     assert report.initial_coverage.input_readiness.eligible_factor_input_missing_symbols == ("000001.SZ",)
+    assert report.initial_coverage.adjusted_return_symbols == symbols(1)
+    assert report.final_coverage.adjusted_return_symbols == repository.adjusted == symbols(1)
+    assert repository.reads["adjusted"] == 2
+    assert not report.final_coverage.input_readiness.upstream_inputs_ready
+    assert sweep.requests[0].include_adjusted_returns is False
+
+
+def test_missing_adjusted_evidence_does_not_block_refresh_readiness() -> None:
+    repository = Repository(symbols(1))
+    repository.adjusted = ()
+    report = CurrentSelectionRefreshService(
+        repository, Settings(), RiskCollector(), Sweep(repository)
+    ).refresh(NOW, structural(symbols(1)))
+    assert report.final_coverage.adjusted_return_symbols == ()
+    assert report.final_coverage.input_readiness.upstream_inputs_ready is True
 
 
 @pytest.mark.parametrize("mutation", ("as_of", "structural", "risk_request", "first_cursor", "limit", "duplicate", "attempted", "final", "failures"))
@@ -206,8 +224,8 @@ def test_refresh_current_cli_constructs_one_shared_graph(
         def build_current(self, as_of: date) -> UniverseSnapshot: calls["build"] += 1; assert as_of == NOW.date(); return snapshot
     provider = object()
     def provider_factory() -> object: calls["provider"] += 1; return provider
-    risk_obj, financial_obj, industry_obj, valuation_obj, adjusted_obj = (object() for _ in range(5))
-    core_obj, wrapped_valuation, wrapped_adjusted, task35_obj, sweep_obj = (object() for _ in range(5))
+    risk_obj, financial_obj, industry_obj, valuation_obj = (object() for _ in range(4))
+    core_obj, wrapped_valuation, task35_obj, sweep_obj = (object() for _ in range(4))
     def leaf(result: object):
         def construct(provider_arg: object, repository_arg: object) -> object:
             assert provider_arg is provider and repository_arg is calls["repo"]
@@ -215,8 +233,7 @@ def test_refresh_current_cli_constructs_one_shared_graph(
         return construct
     def core(financial: object, industry: object, repository_arg: object) -> object: assert (financial, industry, repository_arg) == (financial_obj, industry_obj, calls["repo"]); return core_obj
     def structural_valuation(valuation: object, repository_arg: object) -> object: assert (valuation, repository_arg) == (valuation_obj, calls["repo"]); return wrapped_valuation
-    def structural_adjusted(adjusted: object, repository_arg: object) -> object: assert (adjusted, repository_arg) == (adjusted_obj, calls["repo"]); return wrapped_adjusted
-    def task35(core_arg: object, valuation_arg: object, adjusted_arg: object, repository_arg: object) -> object: assert (core_arg, valuation_arg, adjusted_arg, repository_arg) == (core_obj, wrapped_valuation, wrapped_adjusted, calls["repo"]); return task35_obj
+    def task35(core_arg: object, valuation_arg: object, adjusted_arg: object, repository_arg: object) -> object: assert (core_arg, valuation_arg, adjusted_arg, repository_arg) == (core_obj, wrapped_valuation, None, calls["repo"]); return task35_obj
     def sweep(task35_arg: object) -> object: assert task35_arg is task35_obj; return sweep_obj
     class Service:
         def __init__(self, repository: object, received_settings: Settings, risk: object, slow: object) -> None:
@@ -234,10 +251,12 @@ def test_refresh_current_cli_constructs_one_shared_graph(
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", repository_constructor)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
-    for name, result in (("CurrentRiskStateCollector", risk_obj), ("FinancialCollector", financial_obj), ("IndustryCollector", industry_obj), ("ValuationCollector", valuation_obj), ("AdjustedDailyReturnCollector", adjusted_obj)):
+    for name, result in (("CurrentRiskStateCollector", risk_obj), ("FinancialCollector", financial_obj), ("IndustryCollector", industry_obj), ("ValuationCollector", valuation_obj)):
         monkeypatch.setattr(f"stock_selector.collection.{name}", leaf(result))
-    for name, fake in (("StructuralCoreFundamentalsCollector", core), ("StructuralValuationCollector", structural_valuation), ("StructuralAdjustedReturnCollector", structural_adjusted), ("StructuralSlowInputCollector", task35), ("StructuralSlowInputSweepCollector", sweep)):
+    for name, fake in (("StructuralCoreFundamentalsCollector", core), ("StructuralValuationCollector", structural_valuation), ("StructuralSlowInputCollector", task35), ("StructuralSlowInputSweepCollector", sweep)):
         monkeypatch.setattr(f"stock_selector.collection.{name}", fake)
+    for name in ("AdjustedDailyReturnCollector", "StructuralAdjustedReturnCollector"):
+        monkeypatch.setattr(f"stock_selector.collection.{name}", _forbidden(name))
     monkeypatch.setattr("stock_selector.selection.CurrentSelectionRefreshService", Service)
     for target in ("stock_selector.selection.DailySelectionService", "stock_selector.factors.FiveFactorEngine", "stock_selector.scoring.BaseScoreEngine", "stock_selector.explanation.ExplanationEngine"):
         monkeypatch.setattr(target, _forbidden(target))
@@ -249,6 +268,7 @@ def test_refresh_current_cli_constructs_one_shared_graph(
         assert "Current selection refresh error: boom" in captured.err
         return
     output = captured.out
+    assert "Adjusted-return refresh: skipped (optional; does not block readiness)" in output
     for label in ("As of:", "Structural members:", "Refresh sweeps:", "Final upstream inputs ready:", "Collection failures:"):
         assert label in output
 

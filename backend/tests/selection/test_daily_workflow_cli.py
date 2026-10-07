@@ -11,6 +11,15 @@ from stock_selector import cli
 from stock_selector.cli import main
 from stock_selector.config import Settings
 
+from .test_daily import (
+    _AS_OF,
+    _financial,
+    _industry,
+    _repository,
+    _returns,
+    _risk,
+)
+
 NOW = datetime(2026, 9, 15, 9, tzinfo=ZoneInfo("Asia/Shanghai"))
 STRUCTURAL = SimpleNamespace(members=("000001.SZ",))
 
@@ -25,8 +34,8 @@ def test_daily_cli_uses_one_shared_graph_and_maps_outcomes(monkeypatch: pytest.M
     names = ("paths", "settings", "repository", "initialize", "now", "universe", "build_current", "provider", "refresh_service", "daily_service", "workflow_service", "workflow_run", "research_builder", "research_build", "research_store", "research_export")
     calls: dict[str, object] = {name: 0 for name in names}
     settings = Settings()
-    provider, risk, financial, industry, valuation, adjusted = (object() for _ in range(6))
-    core, structural_valuation, structural_adjusted, task35, sweep = (object() for _ in range(5))
+    provider, risk, financial, industry, valuation = (object() for _ in range(5))
+    core, structural_valuation, task35, sweep = (object() for _ in range(4))
     selection_result = SimpleNamespace(diagnostics=SimpleNamespace(selection_ready=mode in ("ready", "failed_ready"), blockers=("blocked",) if mode in ("blocked", "failed_blocked") else ()))
     report = SimpleNamespace(refresh_report=SimpleNamespace(had_collection_failures=mode.startswith("failed")), selection_result=selection_result, had_collection_failures=mode.startswith("failed"))
     class Repository:
@@ -42,8 +51,7 @@ def test_daily_cli_uses_one_shared_graph_and_maps_outcomes(monkeypatch: pytest.M
     def provider_factory() -> object: calls["provider"] += 1; return provider
     def core_factory(f: object, i: object, r: object) -> object: assert (f, i, r) == (financial, industry, calls["repository_obj"]); return core
     def valuation_factory(v: object, r: object) -> object: assert (v, r) == (valuation, calls["repository_obj"]); return structural_valuation
-    def adjusted_factory(a: object, r: object) -> object: assert (a, r) == (adjusted, calls["repository_obj"]); return structural_adjusted
-    def task35_factory(c: object, v: object, a: object, r: object) -> object: assert (c, v, a, r) == (core, structural_valuation, structural_adjusted, calls["repository_obj"]); return task35
+    def task35_factory(c: object, v: object, a: object, r: object) -> object: assert (c, v, a, r) == (core, structural_valuation, None, calls["repository_obj"]); return task35
     def sweep_factory(value: object) -> object: assert value is task35; return sweep
     class Refresh:
         def __init__(self, r: object, s: object, risk_arg: object, sweep_arg: object) -> None: calls["refresh_service"] += 1; calls["refresh_obj"] = self; assert (r, s, risk_arg, sweep_arg) == (calls["repository_obj"], settings, risk, sweep)
@@ -69,8 +77,10 @@ def test_daily_cli_uses_one_shared_graph_and_maps_outcomes(monkeypatch: pytest.M
     def now(zone: ZoneInfo) -> datetime: calls["now"] += 1; assert zone == ZoneInfo(settings.app.timezone); return NOW
     monkeypatch.setattr(cli, "datetime", SimpleNamespace(now=now))
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository); monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe); monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
-    for name, result in (("CurrentRiskStateCollector", risk), ("FinancialCollector", financial), ("IndustryCollector", industry), ("ValuationCollector", valuation), ("AdjustedDailyReturnCollector", adjusted)): monkeypatch.setattr(f"stock_selector.collection.{name}", leaf(result))
-    for name, factory in (("StructuralCoreFundamentalsCollector", core_factory), ("StructuralValuationCollector", valuation_factory), ("StructuralAdjustedReturnCollector", adjusted_factory), ("StructuralSlowInputCollector", task35_factory), ("StructuralSlowInputSweepCollector", sweep_factory)): monkeypatch.setattr(f"stock_selector.collection.{name}", factory)
+    for name, result in (("CurrentRiskStateCollector", risk), ("FinancialCollector", financial), ("IndustryCollector", industry), ("ValuationCollector", valuation)): monkeypatch.setattr(f"stock_selector.collection.{name}", leaf(result))
+    for name, factory in (("StructuralCoreFundamentalsCollector", core_factory), ("StructuralValuationCollector", valuation_factory), ("StructuralSlowInputCollector", task35_factory), ("StructuralSlowInputSweepCollector", sweep_factory)): monkeypatch.setattr(f"stock_selector.collection.{name}", factory)
+    for name in ("AdjustedDailyReturnCollector", "StructuralAdjustedReturnCollector"):
+        monkeypatch.setattr(f"stock_selector.collection.{name}", _forbidden(name))
     monkeypatch.setattr("stock_selector.selection.CurrentSelectionRefreshService", Refresh); monkeypatch.setattr("stock_selector.selection.DailySelectionService", Daily); monkeypatch.setattr("stock_selector.selection.CurrentDailySelectionWorkflowService", Workflow); monkeypatch.setattr("stock_selector.selection.SelectionResearchSnapshotBuilder", Builder); monkeypatch.setattr("stock_selector.selection.SelectionResearchArtifactStore", Store)
     for name in ("_run_selection_refresh_current_command", "_run_selection_run_current_command", "_run_selection_prepare_inputs_command"): monkeypatch.setattr(cli, name, _forbidden(name))
     events: list[str] = []
@@ -87,3 +97,91 @@ def test_daily_cli_uses_one_shared_graph_and_maps_outcomes(monkeypatch: pytest.M
         assert all(calls[name] == 1 for name in names)
         assert events == ["refresh", "selection"] and seen_selection == [selection_result]
         assert "=== Selection research export ===" in captured.out
+
+
+@pytest.mark.parametrize("command", ("prepare-inputs", "refresh-current", "daily"))
+@pytest.mark.parametrize("stored_adjusted", (True, False))
+def test_readiness_cli_real_collectors_never_fetch_hfq(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str], command: str, stored_adjusted: bool,
+) -> None:
+    """Exercise real persistence, readiness, and daily scoring with an offline provider."""
+    from datetime import date
+
+    from stock_selector.config import AppPaths
+    from stock_selector.models import ValuationRecord
+    from stock_selector.selection import DailySelectionService
+
+    symbols = ("000001.SZ", "600519.SH")
+    repository = _repository(tmp_path, symbols)
+    returns = _returns(symbols[0], 60) if stored_adjusted else ()
+    if returns:
+        repository.upsert_adjusted_daily_returns(returns)
+    assert repository.load_factor_input_symbols() == ()
+    events: list[str] = []
+
+    class Provider:
+        def get_current_risk_states(self, request: object) -> tuple:
+            events.append("risk")
+            assert request.symbols == symbols and request.as_of == _AS_OF.date()
+            return tuple(_risk(symbol) for symbol in request.symbols)
+
+        def get_financial_records(self, request: object) -> tuple:
+            events.append("financial")
+            return tuple(_financial(symbol, period, 10) for symbol in request.symbols
+                         for period in (date(2024, 12, 31), date(2025, 12, 31)))
+
+        def get_industry_records(self, request: object) -> tuple:
+            events.append("industry")
+            return tuple(_industry(symbol) for symbol in request.symbols)
+
+        def get_valuation_records(self, request: object) -> tuple:
+            events.append("valuation")
+            return tuple(ValuationRecord(symbol=symbol, as_of=request.as_of,
+                                         pe=10, pb=2, pcf=5, source="offline")
+                         for symbol in request.symbols)
+
+        get_adjusted_daily_returns = _forbidden("HFQ request")
+
+    original_paths = AppPaths.from_project_root
+    monkeypatch.setattr(cli.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
+    monkeypatch.setattr(cli, "load_settings", lambda _: Settings())
+    monkeypatch.setattr(cli, "datetime", SimpleNamespace(now=lambda _: _AS_OF))
+    monkeypatch.setattr("stock_selector.providers.AKShareProvider", Provider)
+    for name in ("AdjustedDailyReturnCollector", "StructuralAdjustedReturnCollector"):
+        monkeypatch.setattr(f"stock_selector.collection.{name}", _forbidden(name))
+    original_build = DailySelectionService.build
+    selections: list[object] = []
+
+    def build(service: DailySelectionService, as_of: datetime) -> object:
+        events.append("selection")
+        assert service._repository.load_factor_input_symbols() == symbols
+        factor_input = service._factor_input(symbols[0], as_of)
+        assert (factor_input.adjusted_return_series is not None) is stored_adjusted
+        result = original_build(service, as_of)
+        selections.append(result)
+        return result
+
+    monkeypatch.setattr(DailySelectionService, "build", build)
+    args = ["selection", command]
+    if command == "prepare-inputs":
+        args += ["--limit", "100"]
+    assert main(args) == 0
+    assert events[:7] == ["risk", "financial", "industry", "financial", "industry", "valuation", "valuation"]
+    assert repository.load_factor_input_symbols() == symbols
+    assert repository.load_adjusted_daily_returns(symbols[0]) == returns
+    assert repository.load_adjusted_return_symbols() == ((symbols[0],) if stored_adjusted else ())
+    output = capsys.readouterr().out
+    assert "Adjusted-return refresh: skipped (optional; does not block readiness)" in output
+    assert "Adjusted success / empty / failed:" not in output
+    assert "upstream inputs ready: NO" in output
+    assert "upstream inputs ready: YES" in output
+    if command == "daily":
+        assert events[-1] == "selection" and len(selections) == 1
+        result = selections[0]
+        assert result.diagnostics.selection_ready is True
+        by_symbol = {item.symbol: item for item in result.selection.items}
+        assert (by_symbol[symbols[0]].momentum_score is not None) is stored_adjusted
+        assert by_symbol[symbols[1]].momentum_score is None
+    else:
+        assert selections == []
