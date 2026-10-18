@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.10,<3",
     "pyarrow>=18,<25",
     "PyYAML>=6.0,<7",
+    "requests>=2.32,<3",
     "tzdata>=2024.1",
     "uvicorn>=0.30,<1",
 ]

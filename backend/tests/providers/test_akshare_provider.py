@@ -6,12 +6,15 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
+import requests
 
 from stock_selector.models import AdjustmentType, Board, Exchange
 from stock_selector.providers import (
     AKShareProvider,
     CurrentRiskStatesRequest,
     DailyBarsRequest,
+    FinancialRecordsRequest,
+    IndustryRecordsRequest,
     ProviderConnectionError,
     ProviderDataError,
     ProviderNotSupportedError,
@@ -19,6 +22,7 @@ from stock_selector.providers import (
     ValuationRecordsRequest,
 )
 from stock_selector.providers import akshare_provider as provider_module
+from stock_selector.providers import request_timeout as timeout_module
 
 
 def _instrument_frames() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -161,6 +165,32 @@ def test_get_instruments_maps_all_supported_boards(monkeypatch: pytest.MonkeyPat
     assert instruments[0].listing_date == date(1991, 4, 3)
 
 
+def test_provider_scope_preserves_akshare_explicit_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An AKShare-owned explicit timeout passes through the provider scope unchanged."""
+    captured: list[object] = []
+
+    def fake_request(
+        session: requests.Session, *args: object, **kwargs: object
+    ) -> requests.Response:
+        del session, args
+        captured.append(kwargs.get("timeout"))
+        return requests.Response()
+
+    def fake_sz_list(*, symbol: str) -> pd.DataFrame:
+        assert symbol == "A股列表"
+        requests.get("https://example.invalid", timeout=15)
+        return _instrument_frames()[2]
+
+    monkeypatch.setattr(timeout_module, "_ORIGINAL_SESSION_REQUEST", fake_request)
+    monkeypatch.setattr(provider_module.ak, "stock_info_sz_name_code", fake_sz_list)
+
+    AKShareProvider()._fetch_sz_list()
+
+    assert captured == [15]
+
+
 @pytest.mark.parametrize("scenario", ["missing", "empty", "unknown_board", "duplicate"])
 def test_get_instruments_rejects_bad_listing_data(
     monkeypatch: pytest.MonkeyPatch, scenario: str
@@ -211,6 +241,7 @@ def test_get_daily_bars_maps_and_normalizes_volume(monkeypatch: pytest.MonkeyPat
         "start_date": "20260803",
         "end_date": "20260807",
         "adjust": "",
+        "timeout": 15.0,
     }
     assert [bar.trade_date for bar in bars] == [date(2026, 8, 3), date(2026, 8, 4)]
     assert bars[0].volume == 20_000
@@ -236,7 +267,7 @@ def test_get_daily_bars_handles_empty_and_invalid_data(monkeypatch: pytest.Monke
 def test_get_daily_bars_translates_third_party_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Connection failure in both daily sources becomes one provider connection error."""
     def raise_connection(**kwargs: str) -> pd.DataFrame:
-        raise RuntimeError("offline")
+        raise requests.Timeout("synthetic")
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", raise_connection)
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_daily", raise_connection)
@@ -255,7 +286,7 @@ def test_get_daily_bars_falls_back_to_sina_on_connection_failure(
 ) -> None:
     """Sina is used only when the Eastmoney daily request boundary is unavailable."""
     def raise_connection(**kwargs: str) -> pd.DataFrame:
-        raise RuntimeError("Eastmoney offline")
+        raise requests.Timeout("synthetic")
 
     captured: dict[str, str] = {}
 
@@ -356,7 +387,7 @@ def test_get_valuation_records_retries_one_transient_pe_request_once(
         assert (symbol, period) == ("000001", "全部")
         calls.append(indicator)
         if indicator == "市盈率(TTM)" and calls.count(indicator) == 1:
-            raise ConnectionError("synthetic connection reset")
+            raise requests.Timeout("synthetic")
         return frames[indicator]
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
@@ -398,7 +429,7 @@ def test_get_valuation_records_fails_after_two_attempts_without_later_indicators
     def fake_valuation(*, symbol: str, indicator: str, period: str) -> pd.DataFrame:
         assert (symbol, period) == ("000001", "全部")
         calls.append(indicator)
-        raise ConnectionError("synthetic connection reset")
+        raise requests.Timeout("synthetic")
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_valuation_baidu", fake_valuation)
 
@@ -506,7 +537,7 @@ def test_get_realtime_quotes_translates_third_party_errors(
 ) -> None:
     """A failure in both realtime sources becomes one provider connection error."""
     def raise_connection() -> pd.DataFrame:
-        raise RuntimeError("offline")
+        raise requests.Timeout("synthetic")
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot_em", raise_connection)
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot", raise_connection)
@@ -520,7 +551,7 @@ def test_get_realtime_quotes_falls_back_to_sina_on_connection_failure(
 ) -> None:
     """Sina is used only after the Eastmoney request boundary fails."""
     def raise_connection() -> pd.DataFrame:
-        raise RuntimeError("Eastmoney offline")
+        raise requests.Timeout("synthetic")
 
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot_em", raise_connection)
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_spot", _sina_realtime_frame)
@@ -616,7 +647,8 @@ def test_current_risk_provider_falls_back_only_on_connection_failure(
     monkeypatch.setattr(
         provider_module.ak,
         "stock_zh_a_spot_em",
-        lambda: calls.__setitem__("em", calls["em"] + 1) or (_ for _ in ()).throw(RuntimeError("offline")),
+        lambda: calls.__setitem__("em", calls["em"] + 1)
+        or (_ for _ in ()).throw(requests.Timeout("synthetic")),
     )
     monkeypatch.setattr(
         provider_module.ak,
@@ -628,6 +660,29 @@ def test_current_risk_provider_falls_back_only_on_connection_failure(
     )
     assert calls == {"em": 1, "sina": 1}
     assert {state.source for state in states} == {"akshare:stock_zh_a_spot"}
+
+
+def test_financial_and_industry_timeouts_are_connection_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_timeout(**kwargs: object) -> pd.DataFrame:
+        raise requests.Timeout("synthetic")
+
+    monkeypatch.setattr(
+        provider_module.ak, "stock_financial_analysis_indicator_em", raise_timeout
+    )
+    with pytest.raises(ProviderConnectionError, match="financial request failed"):
+        AKShareProvider().get_financial_records(
+            FinancialRecordsRequest(symbols=("600519.SH",))
+        )
+
+    monkeypatch.setattr(
+        provider_module.ak, "stock_industry_change_cninfo", raise_timeout
+    )
+    with pytest.raises(ProviderConnectionError, match="industry request failed"):
+        AKShareProvider().get_industry_records(
+            IndustryRecordsRequest(symbols=("600519.SH",), as_of=date(2026, 9, 2))
+        )
 
 
 def test_current_risk_provider_rejects_historical_request_before_network(

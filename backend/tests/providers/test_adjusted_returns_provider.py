@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
+import requests
 
 from stock_selector.models import AdjustmentType
 from stock_selector.providers import (
@@ -33,7 +34,7 @@ def test_adjusted_returns_use_eastmoney_once_without_sina(monkeypatch: pytest.Mo
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", lambda **kwargs: (calls.append(kwargs), _em_frame())[1])
     monkeypatch.setattr(provider_module.ak, "stock_zh_a_daily", lambda **kwargs: (_ for _ in ()).throw(AssertionError("no fallback")))
     records = AKShareProvider().get_adjusted_daily_returns(_request())
-    assert calls == [{"symbol": "600519", "period": "daily", "start_date": "20260901", "end_date": "20260903", "adjust": "hfq"}]
+    assert calls == [{"symbol": "600519", "period": "daily", "start_date": "20260901", "end_date": "20260903", "adjust": "hfq", "timeout": 15.0}]
     assert len({item.observed_at for item in records}) == 1
     assert all(item.adjustment is AdjustmentType.HFQ for item in records)
 
@@ -42,7 +43,7 @@ def test_adjusted_returns_fallback_is_transport_only(monkeypatch: pytest.MonkeyP
     calls = {"em": 0, "sina": 0}
     def fail_em(**kwargs):  # type: ignore[no-untyped-def]
         calls["em"] += 1
-        raise RuntimeError("transport")
+        raise requests.Timeout("synthetic")
     def sina(**kwargs):  # type: ignore[no-untyped-def]
         calls["sina"] += 1
         return _sina_frame()
@@ -61,9 +62,9 @@ def test_adjusted_returns_bad_schema_does_not_fallback(monkeypatch: pytest.Monke
 
 
 def test_adjusted_returns_both_transport_boundaries_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("em")))
-    monkeypatch.setattr(provider_module.ak, "stock_zh_a_daily", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("sina")))
-    with pytest.raises(ProviderConnectionError):
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_hist", lambda **kwargs: (_ for _ in ()).throw(requests.Timeout("em")))
+    monkeypatch.setattr(provider_module.ak, "stock_zh_a_daily", lambda **kwargs: (_ for _ in ()).throw(requests.Timeout("sina")))
+    with pytest.raises(ProviderConnectionError, match="primary and fallback unavailable"):
         AKShareProvider().get_adjusted_daily_returns(_request())
 
 

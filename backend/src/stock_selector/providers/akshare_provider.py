@@ -54,6 +54,10 @@ from stock_selector.providers.errors import (
     ProviderDataError,
     ProviderNotSupportedError,
 )
+from stock_selector.providers.request_timeout import (
+    DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS,
+    provider_request_timeout,
+)
 from stock_selector.providers.requests import (
     AdjustedDailyReturnsRequest,
     CurrentRiskStatesRequest,
@@ -150,6 +154,7 @@ class AKShareProvider(
                     start_date=request.start_date.strftime("%Y%m%d"),
                     end_date=request.end_date.strftime("%Y%m%d"),
                     adjust="",
+                    timeout=DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS,
                 ),
             )
         except Exception as exc:
@@ -160,15 +165,16 @@ class AKShareProvider(
     def _fetch_daily_sina(self, request: DailyBarsRequest, symbol: str) -> pd.DataFrame:
         """Call the Sina RAW daily endpoint only after primary connection failure."""
         try:
-            return cast(
-                pd.DataFrame,
-                ak.stock_zh_a_daily(
-                    symbol=symbol,
-                    start_date=request.start_date.strftime("%Y%m%d"),
-                    end_date=request.end_date.strftime("%Y%m%d"),
-                    adjust="",
-                ),
-            )
+            with provider_request_timeout():
+                return cast(
+                    pd.DataFrame,
+                    ak.stock_zh_a_daily(
+                        symbol=symbol,
+                        start_date=request.start_date.strftime("%Y%m%d"),
+                        end_date=request.end_date.strftime("%Y%m%d"),
+                        adjust="",
+                    ),
+                )
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_zh_a_daily", "Sina daily history request failed"
@@ -215,6 +221,7 @@ class AKShareProvider(
                     start_date=request.start_date.strftime("%Y%m%d"),
                     end_date=request.end_date.strftime("%Y%m%d"),
                     adjust="hfq",
+                    timeout=DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS,
                 ),
             )
         except Exception as exc:
@@ -227,15 +234,16 @@ class AKShareProvider(
     ) -> pd.DataFrame:
         """Call Sina exactly once only after the Eastmoney connection boundary fails."""
         try:
-            return cast(
-                pd.DataFrame,
-                ak.stock_zh_a_daily(
-                    symbol=symbol,
-                    start_date=request.start_date.strftime("%Y%m%d"),
-                    end_date=request.end_date.strftime("%Y%m%d"),
-                    adjust="hfq",
-                ),
-            )
+            with provider_request_timeout():
+                return cast(
+                    pd.DataFrame,
+                    ak.stock_zh_a_daily(
+                        symbol=symbol,
+                        start_date=request.start_date.strftime("%Y%m%d"),
+                        end_date=request.end_date.strftime("%Y%m%d"),
+                        adjust="hfq",
+                    ),
+                )
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_zh_a_daily", "HFQ daily history request failed"
@@ -315,7 +323,8 @@ class AKShareProvider(
     def _fetch_realtime_em(self) -> pd.DataFrame:
         """Call the primary Eastmoney realtime endpoint at the provider boundary."""
         try:
-            return cast(pd.DataFrame, ak.stock_zh_a_spot_em())
+            with provider_request_timeout():
+                return cast(pd.DataFrame, ak.stock_zh_a_spot_em())
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_zh_a_spot_em", "realtime snapshot request failed"
@@ -324,7 +333,8 @@ class AKShareProvider(
     def _fetch_realtime_sina(self) -> pd.DataFrame:
         """Call the Sina realtime endpoint only after primary connectivity failure."""
         try:
-            return cast(pd.DataFrame, ak.stock_zh_a_spot())
+            with provider_request_timeout():
+                return cast(pd.DataFrame, ak.stock_zh_a_spot())
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_zh_a_spot", "Sina realtime snapshot request failed"
@@ -333,7 +343,8 @@ class AKShareProvider(
     def _fetch_sh_list(self, board: str) -> pd.DataFrame:
         """Call one concrete Shanghai listing endpoint at the third-party boundary."""
         try:
-            return cast(pd.DataFrame, ak.stock_info_sh_name_code(symbol=board))
+            with provider_request_timeout():
+                return cast(pd.DataFrame, ak.stock_info_sh_name_code(symbol=board))
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_info_sh_name_code", "Shanghai listing request failed"
@@ -342,7 +353,8 @@ class AKShareProvider(
     def _fetch_sz_list(self) -> pd.DataFrame:
         """Call the concrete Shenzhen listing endpoint at the third-party boundary."""
         try:
-            return cast(pd.DataFrame, ak.stock_info_sz_name_code(symbol="A股列表"))
+            with provider_request_timeout():
+                return cast(pd.DataFrame, ak.stock_info_sz_name_code(symbol="A股列表"))
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_info_sz_name_code", "Shenzhen listing request failed"
@@ -351,7 +363,8 @@ class AKShareProvider(
     def _fetch_bj_list(self) -> pd.DataFrame:
         """Call the concrete Beijing listing endpoint at the third-party boundary."""
         try:
-            return cast(pd.DataFrame, ak.stock_info_bj_name_code())
+            with provider_request_timeout():
+                return cast(pd.DataFrame, ak.stock_info_bj_name_code())
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare", "stock_info_bj_name_code", "Beijing listing request failed"
@@ -364,12 +377,13 @@ class AKShareProvider(
         records: list[FinancialRecord] = []
         for symbol in request.symbols:
             try:
-                frame = cast(
-                    pd.DataFrame,
-                    ak.stock_financial_analysis_indicator_em(
-                        symbol=symbol, indicator="按报告期"
-                    ),
-                )
+                with provider_request_timeout():
+                    frame = cast(
+                        pd.DataFrame,
+                        ak.stock_financial_analysis_indicator_em(
+                            symbol=symbol, indicator="按报告期"
+                        ),
+                    )
             except Exception as exc:
                 raise ProviderConnectionError(
                     "akshare", "stock_financial_analysis_indicator_em", "financial request failed"
@@ -405,12 +419,13 @@ class AKShareProvider(
     ) -> pd.DataFrame:
         """Fetch one required valuation indicator with one bounded immediate retry."""
         try:
-            return cast(
-                pd.DataFrame,
-                ak.stock_zh_valuation_baidu(
-                    symbol=raw_symbol, indicator=indicator, period="全部"
-                ),
-            )
+            with provider_request_timeout():
+                return cast(
+                    pd.DataFrame,
+                    ak.stock_zh_valuation_baidu(
+                        symbol=raw_symbol, indicator=indicator, period="全部"
+                    ),
+                )
         except Exception as exc:  # noqa: BLE001 - third-party request boundary
             _LOGGER.warning(
                 "valuation indicator request failed; retrying once; symbol=%s indicator=%s error=%s",
@@ -419,12 +434,13 @@ class AKShareProvider(
                 type(exc).__name__,
             )
         try:
-            return cast(
-                pd.DataFrame,
-                ak.stock_zh_valuation_baidu(
-                    symbol=raw_symbol, indicator=indicator, period="全部"
-                ),
-            )
+            with provider_request_timeout():
+                return cast(
+                    pd.DataFrame,
+                    ak.stock_zh_valuation_baidu(
+                        symbol=raw_symbol, indicator=indicator, period="全部"
+                    ),
+                )
         except Exception as exc:
             raise ProviderConnectionError(
                 "akshare",
@@ -440,14 +456,15 @@ class AKShareProvider(
         end_date = request.as_of.strftime("%Y%m%d") if request.as_of is not None else datetime.now(_SHANGHAI).strftime("%Y%m%d")
         for symbol in request.symbols:
             try:
-                frame = cast(
-                    pd.DataFrame,
-                    ak.stock_industry_change_cninfo(
-                        symbol=symbol.split(".", maxsplit=1)[0],
-                        start_date="19900101",
-                        end_date=end_date,
-                    ),
-                )
+                with provider_request_timeout():
+                    frame = cast(
+                        pd.DataFrame,
+                        ak.stock_industry_change_cninfo(
+                            symbol=symbol.split(".", maxsplit=1)[0],
+                            start_date="19900101",
+                            end_date=end_date,
+                        ),
+                    )
             except Exception as exc:
                 raise ProviderConnectionError(
                     "akshare", "stock_industry_change_cninfo", "industry request failed"

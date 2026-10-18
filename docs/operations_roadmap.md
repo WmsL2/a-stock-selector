@@ -9,7 +9,7 @@ for the A-share research application.
 | Item | Scope | Status |
 | --- | --- | --- |
 | OPS01 — Decouple selection readiness from optional adjusted-return backfill | Refresh required risk, financial, industry, and valuation inputs without synchronous HFQ collection. | Completed |
-| OPS02 — Provider timeout and fallback hardening | Bound provider waits and review fallback behavior. | Planned |
+| OPS02 — Provider timeout and fallback hardening | Bound provider waits and review fallback behavior. | Completed |
 | OPS03 — Observable bounded progress and resumable operator batches | Make bounded batch progress and continuation observable. | Planned |
 | OPS04 — First-time data initialization workflow | Define an explicit local initialization sequence. | Planned |
 | OPS05 — Daily operator workflow and preflight | Define daily local operation and input preflight. | Planned |
@@ -49,4 +49,32 @@ request or fallback evidence and explicitly reported that adjusted-return
 refresh was skipped as optional. Generic all-slow-input and explicit
 adjusted-return workflows remain supported.
 
-OPS02–OPS06 remain Planned.
+## OPS02 contract
+
+Application-owned Requests network attempts use a 15-second connect/read timeout
+while preserving third-party explicit timeouts and existing fallback/retry rules.
+This timeout is per network attempt; it is not a total operation wall-clock
+deadline across pagination, retries, backoff, streaming, DNS, or system behavior.
+
+## OPS02 verification and external-provider gate exception
+
+Focused timeout-adapter validation passed 44 tests, and provider regressions
+passed 141 tests. Canonical validation passed with 1,091 backend tests in both
+normal and coverage runs at 91% coverage. Ruff, mypy across 124 source files,
+frontend type-check and lint, Vitest, and the production build passed.
+
+The bounded HFQ failure-path live smoke exited 1 in approximately 3.3 seconds
+after its permitted fallback and reported a finite application-level
+`ProviderConnectionError`. The bounded current-risk live smoke exited 1 in
+8.194 seconds after Eastmoney fell back to Sina and reported a finite
+application-level `ProviderConnectionError`. Neither transcript exposed a raw
+Requests/urllib3 traceback, `KeyboardInterrupt`, or sensitive URL.
+
+OPS02 is completed under an explicit external-provider availability gate
+exception: the current-risk smoke passes transport-failure handling only; it is
+not a successful readiness collection. Successful live readiness under OPS02
+remains unverified, and exact-date risk coverage remains blocked until an
+external current-risk provider is available. No additional provider requests
+are required to obtain a green exit code.
+
+OPS03–OPS06 remain Planned.
