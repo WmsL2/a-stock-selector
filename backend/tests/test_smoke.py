@@ -521,7 +521,10 @@ def test_structural_slow_input_sweep_cli_parser_allows_only_cursor_and_limit() -
     arguments = build_parser().parse_args(
         ["refresh", "structural-slow-inputs-sweep", "--limit", "100", "--start-after", "000002.SZ"]
     )
-    assert (arguments.limit, arguments.start_after) == (100, "000002.SZ")
+    assert (arguments.limit, arguments.start_after, arguments.progress) == (100, "000002.SZ", False)
+    assert build_parser().parse_args(
+        ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--progress"]
+    ).progress
     with pytest.raises(SystemExit):
         build_parser().parse_args(
             ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--symbols", "000001.SZ"]
@@ -548,7 +551,10 @@ def test_structural_missing_slow_inputs_parser_is_bounded() -> None:
     arguments = build_parser().parse_args(
         ["refresh", "structural-missing-slow-inputs", "--limit", "100", "--start-after", "000002.SZ"]
     )
-    assert (arguments.limit, arguments.start_after) == (100, "000002.SZ")
+    assert (arguments.limit, arguments.start_after, arguments.progress) == (100, "000002.SZ", False)
+    assert build_parser().parse_args(
+        ["refresh", "structural-missing-slow-inputs", "--limit", "1", "--progress"]
+    ).progress
     for argument in ("--symbols", "--as-of", "--date", "--start", "--end"):
         with pytest.raises(SystemExit):
             build_parser().parse_args(
@@ -879,6 +885,7 @@ def test_selection_coverage_status_parser_has_no_operational_arguments() -> None
 
 def test_selection_refresh_current_parser_has_no_operational_arguments() -> None:
     assert build_parser().parse_args(["selection", "refresh-current"]).selection_command == "refresh-current"
+    assert build_parser().parse_args(["selection", "refresh-current", "--progress"]).progress
     for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--top-n", "--refresh", "--persist", "--prepare", "--max-runs", "--retry"):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "refresh-current", argument, "x"])
@@ -886,6 +893,7 @@ def test_selection_refresh_current_parser_has_no_operational_arguments() -> None
 
 def test_selection_daily_parser_has_no_operational_arguments() -> None:
     assert build_parser().parse_args(["selection", "daily"]).selection_command == "daily"
+    assert build_parser().parse_args(["selection", "daily", "--progress"]).progress
     for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--top-n", "--refresh", "--persist", "--prepare", "--retry", "--max-runs", "--all-market"):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "daily", argument, "x"])
@@ -895,7 +903,10 @@ def test_selection_prepare_inputs_parser_is_tightly_bounded() -> None:
     arguments = build_parser().parse_args(
         ["selection", "prepare-inputs", "--limit", "100", "--start-after", "000002.SZ"]
     )
-    assert (arguments.limit, arguments.start_after) == (100, "000002.SZ")
+    assert (arguments.limit, arguments.start_after, arguments.progress) == (100, "000002.SZ", False)
+    assert build_parser().parse_args(
+        ["selection", "prepare-inputs", "--limit", "1", "--progress"]
+    ).progress
     for argument in ("--as-of", "--date", "--symbols", "--start", "--end", "--persist", "--all-market", "--top-n"):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "prepare-inputs", "--limit", "1", argument, "x"])

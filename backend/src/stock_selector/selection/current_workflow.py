@@ -1,6 +1,8 @@
 """Pure composition of current input refresh and official daily selection."""
 
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from pydantic import field_validator, model_validator
 
@@ -65,9 +67,19 @@ class CurrentDailySelectionWorkflowService:
         self._refresh_service = refresh_service
         self._selection_service = selection_service
 
-    def run(self, current_at: datetime, structural: UniverseSnapshot) -> CurrentDailySelectionWorkflowReport:
+    def run(
+        self,
+        current_at: datetime,
+        structural: UniverseSnapshot,
+        *,
+        progress_callback: Callable[[Any, int, int], None] | None = None,
+    ) -> CurrentDailySelectionWorkflowReport:
         current_at = ensure_aware_datetime(current_at, "current_at")
-        refresh = self._refresh_service.refresh(current_at, structural)
+        refresh = (
+            self._refresh_service.refresh(current_at, structural, progress_callback=progress_callback)
+            if progress_callback is not None
+            else self._refresh_service.refresh(current_at, structural)
+        )
         selection = self._selection_service.build(current_at)
         return CurrentDailySelectionWorkflowReport(
             as_of=current_at, refresh_report=refresh, selection_result=selection

@@ -10,7 +10,7 @@ for the A-share research application.
 | --- | --- | --- |
 | OPS01 — Decouple selection readiness from optional adjusted-return backfill | Refresh required risk, financial, industry, and valuation inputs without synchronous HFQ collection. | Completed |
 | OPS02 — Provider timeout and fallback hardening | Bound provider waits and review fallback behavior. | Completed |
-| OPS03 — Observable bounded progress and resumable operator batches | Make bounded batch progress and continuation observable. | Planned |
+| OPS03 — Observable bounded progress and resumable operator batches | Make bounded batch progress and continuation observable. | Completed |
 | OPS04 — First-time data initialization workflow | Define an explicit local initialization sequence. | Planned |
 | OPS05 — Daily operator workflow and preflight | Define daily local operation and input preflight. | Planned |
 | OPS06 — Production/data-operations acceptance | Validate the completed local operations workflow against agreed evidence. | Planned |
@@ -77,4 +77,36 @@ remains unverified, and exact-date risk coverage remains blocked until an
 external current-risk provider is available. No additional provider requests
 are required to obtain a green exit code.
 
-OPS03–OPS06 remain Planned.
+## OPS03 contract and verification
+
+`--progress` is opt-in for `selection prepare-inputs`, `selection
+refresh-current`, `selection daily`, `refresh structural-missing-slow-inputs`,
+and `refresh structural-slow-inputs-sweep`. It emits flushed `RUN_STARTED`,
+post-persistence `BATCH_COMPLETED`, and `RUN_FINISHED` events; `RUN_BLOCKED` or
+`RUN_FAILED` identifies a non-successful terminal path without exposing a
+provider exception. A handled per-symbol provider failure remains part of the
+existing collection/report continuation semantics, whereas a fatal batch emits
+no misleading completion event for that batch. `EMPTY` and `FAILED` remain
+distinct and neither is persisted evidence.
+
+The existing 20-symbol inner batches and 100-symbol outer batches remain in
+place, along with each command's existing limit boundary. `selection
+refresh-current` and `selection daily` may still process the complete missing
+set in one invocation. A forward scan cursor is ordering only, not a durable
+completion checkpoint: after failure, interruption, or an uncertain final write,
+operators recompute missing work from authoritative repository evidence without
+reusing the old cursor. Recovery can replay provider work at least once; OPS03
+does not provide exactly-once execution, a durable manifest, or a database
+schema. It adds no concurrency, provider retry, timeout, ranking, factor,
+scoring, or selection-result behavior. Adjusted returns remain optional for
+official readiness under OPS01; generic and explicit HFQ collection behavior and
+exact-date risk-readiness requirements are unchanged.
+
+Focused validation passed 208 tests and the collection/selection regression
+passed 405 tests. Canonical validation passed with 1,093 tests in both pytest
+runs and 91% coverage; Ruff passed, mypy passed across 124 source files,
+frontend type-check and lint passed, Vitest passed 99 tests, and the production
+build passed. No live OPS03 provider-success smoke was performed: completion is
+based on deterministic offline tests and full canonical validation.
+
+OPS04–OPS06 remain Planned.

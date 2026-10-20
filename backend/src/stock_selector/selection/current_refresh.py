@@ -1,5 +1,6 @@
 """Finite refresh of the current official selection's upstream inputs only."""
 
+from collections.abc import Callable
 from datetime import datetime
 
 from pydantic import field_validator, model_validator
@@ -14,6 +15,9 @@ from stock_selector.collection import (
     StructuralSlowInputSweepCollector,
     StructuralSlowInputSweepReport,
     StructuralSlowInputSweepRequest,
+)
+from stock_selector.collection.structural_slow_inputs import (
+    StructuralSlowInputCollectionReport,
 )
 from stock_selector.config import Settings
 from stock_selector.models.common import DomainModel, ensure_aware_datetime
@@ -119,7 +123,13 @@ class CurrentSelectionRefreshService:
         self._risk_collector = risk_collector
         self._slow_input_sweep_collector = slow_input_sweep_collector
 
-    def refresh(self, current_at: datetime, structural: UniverseSnapshot) -> CurrentSelectionRefreshReport:
+    def refresh(
+        self,
+        current_at: datetime,
+        structural: UniverseSnapshot,
+        *,
+        progress_callback: Callable[[StructuralSlowInputCollectionReport, int, int], None] | None = None,
+    ) -> CurrentSelectionRefreshReport:
         current_at = ensure_aware_datetime(current_at, "current_at")
         if structural.as_of != current_at.date():
             raise ValueError("structural snapshot must match current_at date")
@@ -144,9 +154,16 @@ class CurrentSelectionRefreshService:
                 limit=100, start_after=cursor))
             if not plan.selected_symbols:
                 break
-            sweep = self._slow_input_sweep_collector.collect(StructuralSlowInputSweepRequest(
+            sweep_request = StructuralSlowInputSweepRequest(
                 symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False,
-                include_adjusted_returns=False))
+                include_adjusted_returns=False)
+            sweep = (
+                self._slow_input_sweep_collector.collect(
+                    sweep_request, progress_callback=progress_callback
+                )
+                if progress_callback is not None
+                else self._slow_input_sweep_collector.collect(sweep_request)
+            )
             coverage_after = self._audit(current_at, structural.members, risk_records, complete, risk.eligible_members)
             steps.append(CurrentSelectionRefreshStep(plan=plan, sweep_report=sweep, coverage_after=coverage_after))
             coverage = coverage_after

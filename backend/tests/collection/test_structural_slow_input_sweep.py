@@ -160,6 +160,43 @@ def test_per_symbol_failure_continues_and_batch_exception_aborts() -> None:
     assert len(aborted_calls) == 2
 
 
+def test_progress_callback_follows_each_completed_inner_batch() -> None:
+    calls: list[object] = []
+    events: list[tuple[int, int, tuple[str, ...]]] = []
+
+    StructuralSlowInputSweepCollector(_Task35(calls)).collect(
+        StructuralSlowInputSweepRequest(
+            symbols=_symbols(100), as_of=_AS_OF, has_more_structural_members=False
+        ),
+        progress_callback=lambda report, index, total: events.append(
+            (index, total, report.requested_symbols)
+        ),
+    )
+
+    assert events == [
+        (1, 5, _symbols(20)),
+        (2, 5, _symbols(100)[20:40]),
+        (3, 5, _symbols(100)[40:60]),
+        (4, 5, _symbols(100)[60:80]),
+        (5, 5, _symbols(100)[80:]),
+    ]
+
+
+def test_progress_callback_omits_fatally_interrupted_batch() -> None:
+    calls: list[object] = []
+    completed: list[int] = []
+
+    with pytest.raises(RuntimeError, match="stop"):
+        StructuralSlowInputSweepCollector(_Task35(calls, fail_at=3)).collect(
+            StructuralSlowInputSweepRequest(
+                symbols=_symbols(61), as_of=_AS_OF, has_more_structural_members=False
+            ),
+            progress_callback=lambda _report, index, _total: completed.append(index),
+        )
+
+    assert completed == [1, 2]
+
+
 @pytest.mark.parametrize(
     "update",
     (

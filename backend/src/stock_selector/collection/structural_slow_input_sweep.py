@@ -1,5 +1,6 @@
 """Bounded sequential multi-batch orchestration over Task35 slow-input refreshes."""
 
+from collections.abc import Callable
 from datetime import datetime
 
 from pydantic import Field, field_validator, model_validator
@@ -15,6 +16,10 @@ from .structural_slow_inputs import (
     StructuralSlowInputCollectionRequest,
     StructuralSlowInputCollector,
 )
+
+StructuralSlowInputProgressCallback = Callable[
+    [StructuralSlowInputCollectionReport, int, int], None
+]
 
 
 class StructuralSlowInputSweepRequest(DomainModel):
@@ -95,13 +100,19 @@ class StructuralSlowInputSweepCollector:
     def __init__(self, collector: StructuralSlowInputCollector) -> None:
         self._collector = collector
 
-    def collect(self, request: StructuralSlowInputSweepRequest) -> StructuralSlowInputSweepReport:
+    def collect(
+        self,
+        request: StructuralSlowInputSweepRequest,
+        *,
+        progress_callback: StructuralSlowInputProgressCallback | None = None,
+    ) -> StructuralSlowInputSweepReport:
         chunks = tuple(
             request.symbols[index : index + 20]
             for index in range(0, len(request.symbols), 20)
         )
-        reports = tuple(
-            self._collector.collect(
+        reports: list[StructuralSlowInputCollectionReport] = []
+        for index, chunk in enumerate(chunks):
+            report = self._collector.collect(
                 StructuralSlowInputCollectionRequest(
                     symbols=chunk,
                     as_of=request.as_of,
@@ -111,10 +122,11 @@ class StructuralSlowInputSweepCollector:
                     ),
                 )
             )
-            for index, chunk in enumerate(chunks)
-        )
+            reports.append(report)
+            if progress_callback is not None:
+                progress_callback(report, index + 1, len(chunks))
         return StructuralSlowInputSweepReport(
-            as_of=request.as_of, requested_symbols=request.symbols, batch_reports=reports,
+            as_of=request.as_of, requested_symbols=request.symbols, batch_reports=tuple(reports),
             adjusted_returns_requested=request.include_adjusted_returns,
             factor_input_covered_after_run=sum(report.factor_input_covered_after_run for report in reports),
             batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1],

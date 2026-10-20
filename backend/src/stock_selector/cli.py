@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
         StructuralCoreCollectionReport,
         StructuralValuationCollectionReport,
     )
+    from stock_selector.collection.structural_slow_inputs import (
+        StructuralSlowInputCollectionReport,
+    )
     from stock_selector.providers.akshare_provider import AKShareProvider
     from stock_selector.providers.requests import (
         DailyBarsRequest,
@@ -33,6 +37,67 @@ if TYPE_CHECKING:
     )
 
 
+class _OperatorProgress:
+    """Emit concise, post-persistence operator progress to stdout."""
+
+    def __init__(
+        self,
+        operation: str,
+        as_of: datetime,
+        start_after: str | None,
+        scope: str,
+        adjusted_returns_requested: bool,
+    ) -> None:
+        self._operation = operation
+        self._started = time.monotonic()
+        self._last_completed_batch: str | None = None
+        print(
+            "PROGRESS RUN_STARTED "
+            f"operation={operation} as_of={as_of.isoformat()} "
+            f"start_after={start_after or 'none'} scope={scope} "
+            f"adjusted_returns={'requested' if adjusted_returns_requested else 'skipped'}",
+            flush=True,
+        )
+
+    def batch_completed(
+        self, report: StructuralSlowInputCollectionReport, index: int, total: int
+    ) -> None:
+        core = report.core_report
+        valuation = report.valuation_report
+        self._last_completed_batch = report.batch_last_symbol
+        print(
+            "PROGRESS BATCH_COMPLETED "
+            f"operation={self._operation} batch={index}/{total} "
+            f"first={report.batch_first_symbol} last={report.batch_last_symbol} "
+            f"requested={len(report.requested_symbols)} "
+            f"financial={core.financial_success}/{core.financial_empty}/{core.financial_failed} "
+            f"industry={core.industry_success}/{core.industry_empty}/{core.industry_failed} "
+            f"valuation={valuation.success_symbols}/{valuation.empty_symbols}/{valuation.failed_symbols} "
+            f"adjusted_returns={'requested' if report.adjusted_returns_requested else 'skipped'} "
+            f"factor_input_covered={report.factor_input_covered_after_run} "
+            f"scan_cursor={report.next_start_after or 'complete'} "
+            f"elapsed_seconds={time.monotonic() - self._started:.3f}",
+            flush=True,
+        )
+
+    def finished(self, *, remaining_work: str, readiness: str) -> None:
+        print(
+            "PROGRESS RUN_FINISHED "
+            f"operation={self._operation} remaining_work={remaining_work} "
+            f"official_readiness={readiness} "
+            f"elapsed_seconds={time.monotonic() - self._started:.3f}",
+            flush=True,
+        )
+
+    def failed(self, stage: str, *, blocked: bool = False) -> None:
+        event = "RUN_BLOCKED" if blocked else "RUN_FAILED"
+        print(
+            f"PROGRESS {event} operation={self._operation} stage={stage} "
+            f"last_completed_batch={self._last_completed_batch or 'none'} "
+            "recovery=recompute_missing_evidence_without_old_cursor "
+            f"elapsed_seconds={time.monotonic() - self._started:.3f}",
+            flush=True,
+        )
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
     parser = argparse.ArgumentParser(description="A Stock Selector")
@@ -174,15 +239,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_inputs.add_argument("--limit", type=int, required=True)
     prepare_inputs.add_argument("--start-after")
-    selection_subparsers.add_parser(
+    prepare_inputs.add_argument("--progress", action="store_true")
+    refresh_current = selection_subparsers.add_parser(
         "refresh-current",
         allow_abbrev=False,
         help="Refresh all current eligible missing upstream inputs once.",
     )
-    selection_subparsers.add_parser(
+    refresh_current.add_argument("--progress", action="store_true")
+    selection_daily = selection_subparsers.add_parser(
         "daily", allow_abbrev=False,
         help="Refresh current inputs and run the official daily selection.",
     )
+    selection_daily.add_argument("--progress", action="store_true")
     selection_subparsers.add_parser(
         "run-current",
         allow_abbrev=False,
@@ -245,6 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
     slow_inputs_sweep = refresh_subparsers.add_parser("structural-slow-inputs-sweep")
     slow_inputs_sweep.add_argument("--limit", type=int, required=True)
     slow_inputs_sweep.add_argument("--start-after")
+    slow_inputs_sweep.add_argument("--progress", action="store_true")
     refresh_subparsers.add_parser(
         "structural-factor-input-status",
         help="Audit current structural factor-input membership coverage.",
@@ -254,6 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     missing_refresh.add_argument("--limit", type=int, required=True)
     missing_refresh.add_argument("--start-after")
+    missing_refresh.add_argument("--progress", action="store_true")
     return parser
 
 
@@ -281,11 +351,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.selection_command == "coverage-status":
             return _run_selection_coverage_status_command()
         if arguments.selection_command == "prepare-inputs":
-            return _run_selection_prepare_inputs_command(arguments.limit, arguments.start_after)
+            return _run_selection_prepare_inputs_command(
+                arguments.limit, arguments.start_after, arguments.progress
+            )
         if arguments.selection_command == "refresh-current":
-            return _run_selection_refresh_current_command()
+            return _run_selection_refresh_current_command(arguments.progress)
         if arguments.selection_command == "daily":
-            return _run_selection_daily_workflow_command()
+            return _run_selection_daily_workflow_command(arguments.progress)
         if arguments.selection_command == "run-current":
             return _run_selection_run_current_command()
         return _run_selection_command(arguments.selection_command)
@@ -297,12 +369,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.refresh_command == "structural-slow-inputs":
             return _run_structural_slow_inputs_command(arguments.limit, arguments.start_after)
         if arguments.refresh_command == "structural-slow-inputs-sweep":
-            return _run_structural_slow_inputs_sweep_command(arguments.limit, arguments.start_after)
+            return _run_structural_slow_inputs_sweep_command(
+                arguments.limit, arguments.start_after, arguments.progress
+            )
         if arguments.refresh_command == "structural-factor-input-status":
             return _run_structural_factor_input_status_command()
         if arguments.refresh_command == "structural-missing-slow-inputs":
             return _run_structural_missing_slow_inputs_command(
-                arguments.limit, arguments.start_after
+                arguments.limit, arguments.start_after, arguments.progress
             )
         parser.print_help()
         return 2
@@ -940,7 +1014,7 @@ def _format_optional_score(value: float | None) -> str:
     return "unavailable" if value is None else f"{value:.4f}"
 
 
-def _run_selection_daily_workflow_command() -> int:
+def _run_selection_daily_workflow_command(progress: bool = False) -> int:
     """Run current refresh followed by the official local daily selection."""
     from stock_selector.collection import (
         CollectionDataError,
@@ -967,6 +1041,7 @@ def _run_selection_daily_workflow_command() -> int:
     )
     from stock_selector.storage import LocalMarketRepository, StorageError
     from stock_selector.universe import CurrentUniverseService, UniverseError
+    reporter: _OperatorProgress | None = None
     try:
         paths = AppPaths.from_project_root()
         settings = load_settings(paths.config_dir)
@@ -974,6 +1049,11 @@ def _run_selection_daily_workflow_command() -> int:
         repository.initialize()
         current_at = datetime.now(ZoneInfo(settings.app.timezone))
         structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        reporter = (
+            _OperatorProgress("selection.daily", current_at, None, "current_refresh", False)
+            if progress
+            else None
+        )
         provider = AKShareProvider()
         risk_collector = CurrentRiskStateCollector(provider, repository)
         task35 = StructuralSlowInputCollector(
@@ -988,12 +1068,18 @@ def _run_selection_daily_workflow_command() -> int:
         workflow = CurrentDailySelectionWorkflowService(
             refresh, DailySelectionService(repository, settings)
         )
-        report = workflow.run(current_at, structural)
+        report = (
+            workflow.run(current_at, structural, progress_callback=reporter.batch_completed)
+            if reporter is not None
+            else workflow.run(current_at, structural)
+        )
     except (
         CollectionDataError, CollectionError, ConfigurationError, ProviderError,
         RiskError, SelectionError, StorageError, UniverseError, ValidationError,
         ValueError,
     ) as exc:
+        if reporter is not None:
+            reporter.failed("current_refresh", blocked=True)
         print(f"Daily selection workflow error: {exc}", file=sys.stderr)
         return 1
     print("=== Current input refresh ===")
@@ -1012,10 +1098,16 @@ def _run_selection_daily_workflow_command() -> int:
     print("=== Selection research export ===")
     print(f"JSON: {export.json_path}")
     print(f"CSV: {export.csv_path}")
+    if reporter is not None:
+        readiness = report.refresh_report.final_coverage.input_readiness
+        reporter.finished(
+            remaining_work=str(readiness.eligible_factor_input_missing),
+            readiness="YES" if readiness.upstream_inputs_ready else "NO",
+        )
     return 1 if report.had_collection_failures else 0
 
 
-def _run_selection_refresh_current_command() -> int:
+def _run_selection_refresh_current_command(progress: bool = False) -> int:
     """Refresh current upstream inputs without running official selection."""
     from stock_selector.collection import (
         CollectionDataError,
@@ -1035,6 +1127,7 @@ def _run_selection_refresh_current_command() -> int:
     from stock_selector.storage import LocalMarketRepository, StorageError
     from stock_selector.universe import CurrentUniverseService, UniverseError
 
+    reporter: _OperatorProgress | None = None
     try:
         paths = AppPaths.from_project_root()
         settings = load_settings(paths.config_dir)
@@ -1042,6 +1135,11 @@ def _run_selection_refresh_current_command() -> int:
         repository.initialize()
         current_at = datetime.now(ZoneInfo(settings.app.timezone))
         structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        reporter = (
+            _OperatorProgress("selection.refresh-current", current_at, None, "all_eligible_missing", False)
+            if progress
+            else None
+        )
         provider = AKShareProvider()
         risk_collector = CurrentRiskStateCollector(provider, repository)
         task35 = StructuralSlowInputCollector(
@@ -1057,7 +1155,11 @@ def _run_selection_refresh_current_command() -> int:
         service = CurrentSelectionRefreshService(
             repository, settings, risk_collector, StructuralSlowInputSweepCollector(task35)
         )
-        report = service.refresh(current_at, structural)
+        report = (
+            service.refresh(current_at, structural, progress_callback=reporter.batch_completed)
+            if reporter is not None
+            else service.refresh(current_at, structural)
+        )
     except (
         CollectionDataError,
         CollectionError,
@@ -1069,9 +1171,17 @@ def _run_selection_refresh_current_command() -> int:
         ValidationError,
         ValueError,
     ) as exc:
+        if reporter is not None:
+            reporter.failed("current_risk", blocked=True)
         print(f"Current selection refresh error: {exc}", file=sys.stderr)
         return 1
     _print_selection_refresh_current_report(report)
+    if reporter is not None:
+        readiness = report.final_coverage.input_readiness
+        reporter.finished(
+            remaining_work=str(readiness.eligible_factor_input_missing),
+            readiness="YES" if readiness.upstream_inputs_ready else "NO",
+        )
     return 1 if report.had_collection_failures else 0
 
 
@@ -1116,7 +1226,9 @@ def _print_selection_refresh_current_report(
     print("Current selection refresh does not run DailySelectionService, factors, BaseScore, Explanation, or return selection items.")
 
 
-def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -> int:
+def _run_selection_prepare_inputs_command(
+    limit: int, start_after: str | None, progress: bool = False
+) -> int:
     """Refresh current risk then one bounded eligible missing slow-input slice."""
     from stock_selector.collection import (
         CollectionDataError,
@@ -1145,6 +1257,7 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
     )
     from stock_selector.storage import LocalMarketRepository, StorageError
     from stock_selector.universe import CurrentUniverseService, UniverseError
+    reporter: _OperatorProgress | None = None
     try:
         if not 1 <= limit <= 100:
             raise ValueError("--limit must be between 1 and 100")
@@ -1154,6 +1267,11 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
         repository.initialize()
         current_at = datetime.now(ZoneInfo(settings.app.timezone))
         structural = CurrentUniverseService(repository, settings).build_current(current_at.date())
+        reporter = (
+            _OperatorProgress("selection.prepare-inputs", current_at, start_after, "eligible_missing_slice", False)
+            if progress
+            else None
+        )
         if start_after is not None:
             from stock_selector.models.common import validate_symbol
             validate_symbol(start_after)
@@ -1185,6 +1303,8 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
             limit=limit, start_after=start_after,
         ))
     except (CollectionDataError, CollectionError, ConfigurationError, ProviderError, RiskError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        if reporter is not None:
+            reporter.failed("current_risk", blocked=True)
         print(f"Daily-selection input preparation error: {exc}", file=sys.stderr)
         return 1
     _print_selection_prepare_pre(risk_report, pre_coverage, pre, plan)
@@ -1197,6 +1317,11 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
         else:
             print("No eligible factor-input-missing members after start-after.")
         print("Preparation does not run DailySelectionService, factors, BaseScore, or return selection items.")
+        if reporter is not None:
+            reporter.finished(
+                remaining_work=str(pre.eligible_factor_input_missing),
+                readiness="YES" if pre.upstream_inputs_ready else "NO",
+            )
         return 0
     try:
         task35 = StructuralSlowInputCollector(
@@ -1211,18 +1336,31 @@ def _run_selection_prepare_inputs_command(limit: int, start_after: str | None) -
             None,
             repository,
         )
-        slow = StructuralSlowInputSweepCollector(task35).collect(StructuralSlowInputSweepRequest(
+        sweep_request = StructuralSlowInputSweepRequest(
             symbols=plan.selected_symbols, as_of=current_at, has_more_structural_members=False,
             include_adjusted_returns=False,
-        ))
+        )
+        sweep_collector = StructuralSlowInputSweepCollector(task35)
+        slow = (
+            sweep_collector.collect(sweep_request, progress_callback=reporter.batch_completed)
+            if reporter is not None
+            else sweep_collector.collect(sweep_request)
+        )
         factor_after = repository.load_factor_input_symbols()
         post_coverage = StructuralFactorInputCoverageAuditor().audit(StructuralFactorInputCoverageRequest(as_of=current_at, structural_symbols=structural.members, factor_input_symbols=factor_after))
         post = DailySelectionInputReadinessAuditor().audit(readiness_request.model_copy(update={"factor_input_symbols": factor_after}))
     except (CollectionDataError, CollectionError, ConfigurationError, ProviderError, RiskError, StorageError, UniverseError, ValidationError, ValueError) as exc:
+        if reporter is not None:
+            reporter.failed("slow_input_sweep")
         print(f"Daily-selection input preparation error: {exc}", file=sys.stderr)
         return 1
     _print_selection_prepare_post(slow, post_coverage, post)
     print("Preparation does not run DailySelectionService, factors, BaseScore, or return selection items.")
+    if reporter is not None:
+        reporter.finished(
+            remaining_work=str(post.eligible_factor_input_missing),
+            readiness="YES" if post.upstream_inputs_ready else "NO",
+        )
     return 1 if any(
         batch.core_report.financial_failed
         or batch.core_report.industry_failed
@@ -1276,7 +1414,7 @@ def _run_structural_factor_input_status_command() -> int:
 
 
 def _run_structural_missing_slow_inputs_command(
-    limit: int, start_after: str | None
+    limit: int, start_after: str | None, progress: bool = False
 ) -> int:
     """Refresh one bounded missing-membership slice through the Task36 sweep."""
     from stock_selector.collection import (
@@ -1301,6 +1439,7 @@ def _run_structural_missing_slow_inputs_command(
     from stock_selector.storage import LocalMarketRepository, StorageError
     from stock_selector.universe import CurrentUniverseService, UniverseError
 
+    reporter: _OperatorProgress | None = None
     try:
         if not 1 <= limit <= 100:
             raise ValueError("--limit must be between 1 and 100")
@@ -1311,6 +1450,11 @@ def _run_structural_missing_slow_inputs_command(
         current_at = datetime.now(ZoneInfo(settings.app.timezone))
         structural = CurrentUniverseService(repository, settings).build_current(
             current_at.date()
+        )
+        reporter = (
+            _OperatorProgress("refresh.structural-missing-slow-inputs", current_at, start_after, "structural_missing", True)
+            if progress
+            else None
         )
         coverage = StructuralFactorInputCoverageAuditor().audit(
             StructuralFactorInputCoverageRequest(
@@ -1337,6 +1481,8 @@ def _run_structural_missing_slow_inputs_command(
         ValidationError,
         ValueError,
     ) as exc:
+        if reporter is not None:
+            reporter.failed("planning")
         print(f"Structural missing slow-input refresh error: {exc}", file=sys.stderr)
         return 1
 
@@ -1346,6 +1492,10 @@ def _run_structural_missing_slow_inputs_command(
             print("Structural factor-input coverage already complete.")
         else:
             print("No missing structural factor-input members after start-after.")
+        if reporter is not None:
+            reporter.finished(
+                remaining_work=str(plan.missing_after_cursor), readiness="unavailable"
+            )
         return 0
 
     try:
@@ -1362,12 +1512,16 @@ def _run_structural_missing_slow_inputs_command(
             ),
             repository,
         )
-        report = StructuralSlowInputSweepCollector(task35).collect(
-            StructuralSlowInputSweepRequest(
+        sweep_request = StructuralSlowInputSweepRequest(
                 symbols=plan.selected_symbols,
                 as_of=current_at,
                 has_more_structural_members=False,
             )
+        sweep_collector = StructuralSlowInputSweepCollector(task35)
+        report = (
+            sweep_collector.collect(sweep_request, progress_callback=reporter.batch_completed)
+            if reporter is not None
+            else sweep_collector.collect(sweep_request)
         )
     except (
         CollectionDataError,
@@ -1376,10 +1530,17 @@ def _run_structural_missing_slow_inputs_command(
         ValidationError,
         ValueError,
     ) as exc:
+        if reporter is not None:
+            reporter.failed("slow_input_sweep")
         print(f"Structural missing slow-input refresh error: {exc}", file=sys.stderr)
         return 1
 
     _print_structural_missing_refresh_report(report, plan)
+    if reporter is not None:
+        reporter.finished(
+            remaining_work=str(plan.missing_after_cursor - plan.selected_count),
+            readiness="unavailable",
+        )
     return 1 if any(
         batch.core_report.financial_failed
         or batch.core_report.industry_failed
@@ -1445,7 +1606,9 @@ def _run_structural_valuation_command(limit: int, start_after: str | None) -> in
     return 1 if report.failed_symbols else 0
 
 
-def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | None) -> int:
+def _run_structural_slow_inputs_sweep_command(
+    limit: int, start_after: str | None, progress: bool = False
+) -> int:
     """Run a bounded multi-batch Task35 sweep with one shared collector graph."""
     from stock_selector.collection import (
         AdjustedDailyReturnCollector,
@@ -1465,6 +1628,7 @@ def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | Non
     from stock_selector.storage import LocalMarketRepository, StorageError
     from stock_selector.universe import CurrentUniverseService, UniverseError
 
+    reporter: _OperatorProgress | None = None
     try:
         if not 1 <= limit <= 100:
             raise ValueError("--limit must be between 1 and 100")
@@ -1476,12 +1640,19 @@ def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | Non
         structural = CurrentUniverseService(repository, settings).build_current(
             current_at.date()
         )
+        reporter = (
+            _OperatorProgress("refresh.structural-slow-inputs-sweep", current_at, start_after, "structural_slice", True)
+            if progress
+            else None
+        )
         symbols, has_more = _select_structural_batch(
             structural.members, limit, start_after, maximum_limit=100
         )
         if not symbols:
             print("No remaining structural members.")
             print("Next start-after: complete")
+            if reporter is not None:
+                reporter.finished(remaining_work="0", readiness="unavailable")
             return 0
 
         provider = AKShareProvider()
@@ -1497,12 +1668,16 @@ def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | Non
             ),
             repository,
         )
-        report = StructuralSlowInputSweepCollector(task35).collect(
-            StructuralSlowInputSweepRequest(
+        sweep_request = StructuralSlowInputSweepRequest(
                 symbols=symbols,
                 as_of=current_at,
                 has_more_structural_members=has_more,
             )
+        sweep_collector = StructuralSlowInputSweepCollector(task35)
+        report = (
+            sweep_collector.collect(sweep_request, progress_callback=reporter.batch_completed)
+            if reporter is not None
+            else sweep_collector.collect(sweep_request)
         )
     except (
         CollectionDataError,
@@ -1513,10 +1688,17 @@ def _run_structural_slow_inputs_sweep_command(limit: int, start_after: str | Non
         ValidationError,
         ValueError,
     ) as exc:
+        if reporter is not None:
+            reporter.failed("slow_input_sweep")
         print(f"Structural slow-input sweep error: {exc}", file=sys.stderr)
         return 1
 
     _print_structural_slow_input_sweep_report(report, len(structural.members))
+    if reporter is not None:
+        reporter.finished(
+            remaining_work="unknown" if report.has_more_structural_members else "0",
+            readiness="unavailable",
+        )
     return 1 if any(
         batch.core_report.financial_failed
         or batch.core_report.industry_failed
