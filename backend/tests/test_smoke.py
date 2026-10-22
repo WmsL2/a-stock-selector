@@ -27,7 +27,9 @@ from stock_selector.universe import UniverseError
 
 
 def _patch_adjusted_cli(
-    monkeypatch: pytest.MonkeyPatch, *, results: tuple[tuple[str, int, str | None], ...] = ()
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    results: tuple[tuple[str, int, str | None], ...] = (),
 ) -> dict[str, object]:
     """Replace all CLI dependencies with offline recording fakes."""
     import stock_selector.collection as collection_module
@@ -44,7 +46,13 @@ def _patch_adjusted_cli(
             captured["initialized"] = True
 
         def get_adjusted_return_stats(self) -> SimpleNamespace:
-            return SimpleNamespace(symbols=0, rows=0, earliest_trade_date=None, latest_trade_date=None, latest_observed_at=None)
+            return SimpleNamespace(
+                symbols=0,
+                rows=0,
+                earliest_trade_date=None,
+                latest_trade_date=None,
+                latest_observed_at=None,
+            )
 
     class FakeProvider:
         def __init__(self) -> None:
@@ -54,15 +62,19 @@ def _patch_adjusted_cli(
         def __init__(self, provider: object, repository: object) -> None:
             captured["collector"] = int(captured["collector"]) + 1
 
-        def collect(self, request: AdjustedReturnCollectionRequest) -> AdjustedReturnCollectionReport:
+        def collect(
+            self, request: AdjustedReturnCollectionRequest
+        ) -> AdjustedReturnCollectionReport:
             captured["requests"].append(request)  # type: ignore[union-attr]
             items = tuple(
                 AdjustedReturnSymbolResult(
                     symbol=symbol,
                     status=(
-                        AdjustedReturnCollectionStatus.FAILED if error else
-                        AdjustedReturnCollectionStatus.SUCCESS if rows else
-                        AdjustedReturnCollectionStatus.EMPTY
+                        AdjustedReturnCollectionStatus.FAILED
+                        if error
+                        else AdjustedReturnCollectionStatus.SUCCESS
+                        if rows
+                        else AdjustedReturnCollectionStatus.EMPTY
                     ),
                     rows_received=rows,
                     rows_persisted=rows,
@@ -72,17 +84,31 @@ def _patch_adjusted_cli(
                 for symbol, rows, error in results
             )
             return AdjustedReturnCollectionReport(
-                requested_symbols=request.symbols, start_date=request.start_date, end_date=request.end_date,
-                success_symbols=sum(item.status is AdjustedReturnCollectionStatus.SUCCESS for item in items),
-                empty_symbols=sum(item.status is AdjustedReturnCollectionStatus.EMPTY for item in items),
-                failed_symbols=sum(item.status is AdjustedReturnCollectionStatus.FAILED for item in items),
+                requested_symbols=request.symbols,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                success_symbols=sum(
+                    item.status is AdjustedReturnCollectionStatus.SUCCESS
+                    for item in items
+                ),
+                empty_symbols=sum(
+                    item.status is AdjustedReturnCollectionStatus.EMPTY
+                    for item in items
+                ),
+                failed_symbols=sum(
+                    item.status is AdjustedReturnCollectionStatus.FAILED
+                    for item in items
+                ),
                 rows_received=sum(item.rows_received for item in items),
-                rows_persisted=sum(item.rows_persisted for item in items), results=items,
+                rows_persisted=sum(item.rows_persisted for item in items),
+                results=items,
             )
 
     monkeypatch.setattr(storage_module, "LocalMarketRepository", FakeRepository)
     monkeypatch.setattr(providers_module, "AKShareProvider", FakeProvider)
-    monkeypatch.setattr(collection_module, "AdjustedDailyReturnCollector", FakeCollector)
+    monkeypatch.setattr(
+        collection_module, "AdjustedDailyReturnCollector", FakeCollector
+    )
     return captured
 
 
@@ -94,6 +120,135 @@ def run_module(*arguments: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def test_instrument_sync_parser_and_invalid_apply_exit_before_provider(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Keep guarded-sync CLI usage validation offline and before provider creation."""
+    parsed = build_parser().parse_args(
+        ["data", "instruments-sync", "--expected-min-board", "sh_main=1"]
+    )
+    assert parsed.data_command == "instruments-sync"
+    assert parsed.apply is False
+
+    import stock_selector.providers as providers_module
+
+    monkeypatch.setattr(
+        providers_module,
+        "AKShareProvider",
+        lambda: pytest.fail("provider must not be constructed for invalid apply usage"),
+    )
+    assert main(["data", "instruments-sync", "--apply"]) == 1
+    assert "requires a positive --expected-min-total" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    (
+        (
+            [
+                "data",
+                "instruments-sync",
+                "--apply",
+                "--expected-min-total",
+                "5",
+                "--expected-min-board",
+                "sh_main=1",
+                "--expected-min-board",
+                "sz_main=1",
+                "--expected-min-board",
+                "chinext=1",
+                "--expected-min-board",
+                "star=1",
+                "--expected-min-board",
+                "bse=0",
+            ],
+            "values must be positive",
+        ),
+        (
+            [
+                "data",
+                "instruments-sync",
+                "--apply",
+                "--expected-min-total",
+                "5",
+                "--expected-min-board",
+                "sh_main",
+            ],
+            "must use BOARD=COUNT",
+        ),
+        (
+            [
+                "data",
+                "instruments-sync",
+                "--apply",
+                "--expected-min-total",
+                "5",
+                "--expected-min-board",
+                "unknown=1",
+            ],
+            "unknown board or invalid count",
+        ),
+        (
+            [
+                "data",
+                "instruments-sync",
+                "--apply",
+                "--expected-min-total",
+                "5",
+                "--expected-min-board",
+                "sh_main=1",
+                "--expected-min-board",
+                "sh_main=1",
+            ],
+            "cannot repeat a board",
+        ),
+    ),
+)
+def test_instrument_sync_invalid_floor_arguments_never_construct_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    arguments: list[str],
+    expected: str,
+) -> None:
+    """All deterministic malformed APPLY floor forms stop before provider work."""
+    import stock_selector.providers as providers_module
+
+    monkeypatch.setattr(
+        providers_module,
+        "AKShareProvider",
+        lambda: pytest.fail("invalid floor arguments must not construct a provider"),
+    )
+    assert main(arguments) == 1
+    assert expected in capsys.readouterr().err
+
+
+def test_instrument_sync_provider_error_is_finite_and_safe(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Provider-boundary failures remain typed CLI failures without traceback output."""
+    import stock_selector.providers as providers_module
+    import stock_selector.storage as storage_module
+    from stock_selector.providers.errors import ProviderConnectionError
+
+    class FakeRepository:
+        def __init__(self, _: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+    class FailingProvider:
+        def get_instruments(self) -> tuple[Instrument, ...]:
+            raise ProviderConnectionError("fake", "get_instruments", "offline")
+
+    monkeypatch.setattr(storage_module, "LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr(providers_module, "AKShareProvider", FailingProvider)
+    assert main(["data", "instruments-sync"]) == 1
+    output = capsys.readouterr().err
+    assert "fake.get_instruments: offline" in output
+    assert "Traceback" not in output
 
 
 def test_package_can_be_imported() -> None:
@@ -175,15 +330,49 @@ def test_daily_cli_parser_requires_explicit_symbols_and_range() -> None:
     assert arguments.symbols == ["600519.SH"]
 
 
-def test_adjusted_daily_parser_and_valid_collection_are_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
-    parsed = build_parser().parse_args(["daily", "collect-adjusted-returns", "--symbols", "600519.SH", "000001.SZ", "--start", "2026-05-01", "--end", "2026-09-03"])
+def test_adjusted_daily_parser_and_valid_collection_are_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parsed = build_parser().parse_args(
+        [
+            "daily",
+            "collect-adjusted-returns",
+            "--symbols",
+            "600519.SH",
+            "000001.SZ",
+            "--start",
+            "2026-05-01",
+            "--end",
+            "2026-09-03",
+        ]
+    )
     assert parsed.daily_command == "collect-adjusted-returns"
-    captured = _patch_adjusted_cli(monkeypatch, results=(("000001.SZ", 1, None), ("600519.SH", 0, None)))
-    assert main(["daily", "collect-adjusted-returns", "--symbols", "600519.SH", "000001.SZ", "--start", "2026-05-01", "--end", "2026-09-03"]) == 0
+    captured = _patch_adjusted_cli(
+        monkeypatch, results=(("000001.SZ", 1, None), ("600519.SH", 0, None))
+    )
+    assert (
+        main(
+            [
+                "daily",
+                "collect-adjusted-returns",
+                "--symbols",
+                "600519.SH",
+                "000001.SZ",
+                "--start",
+                "2026-05-01",
+                "--end",
+                "2026-09-03",
+            ]
+        )
+        == 0
+    )
     assert captured["provider"] == 1 and captured["collector"] == 1
     request = captured["requests"][0]  # type: ignore[index]
     assert request.symbols == ("000001.SZ", "600519.SH")
-    assert (request.start_date, request.end_date) == (date(2026, 5, 1), date(2026, 9, 3))
+    assert (request.start_date, request.end_date) == (
+        date(2026, 5, 1),
+        date(2026, 9, 3),
+    )
 
 
 @pytest.mark.parametrize(
@@ -196,28 +385,87 @@ def test_adjusted_daily_parser_and_valid_collection_are_explicit(monkeypatch: py
         (["600519.SH"], "2026-03-07", "2026-09-03"),
     ],
 )
-def test_adjusted_daily_invalid_requests_fail_before_provider(monkeypatch: pytest.MonkeyPatch, symbols, start: str, end: str) -> None:  # type: ignore[no-untyped-def]
+def test_adjusted_daily_invalid_requests_fail_before_provider(
+    monkeypatch: pytest.MonkeyPatch, symbols, start: str, end: str
+) -> None:  # type: ignore[no-untyped-def]
     captured = _patch_adjusted_cli(monkeypatch)
-    assert main(["daily", "collect-adjusted-returns", "--symbols", *symbols, "--start", start, "--end", end]) == 1
+    assert (
+        main(
+            [
+                "daily",
+                "collect-adjusted-returns",
+                "--symbols",
+                *symbols,
+                "--start",
+                start,
+                "--end",
+                end,
+            ]
+        )
+        == 1
+    )
     assert captured["provider"] == 0
 
 
-def test_adjusted_daily_20_symbols_and_180_inclusive_days_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adjusted_daily_20_symbols_and_180_inclusive_days_are_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     symbols = [f"{index:06d}.SZ" for index in range(20)]
-    captured = _patch_adjusted_cli(monkeypatch, results=tuple((symbol, 0, None) for symbol in symbols))
-    assert main(["daily", "collect-adjusted-returns", "--symbols", *symbols, "--start", "2026-03-08", "--end", "2026-09-03"]) == 0
+    captured = _patch_adjusted_cli(
+        monkeypatch, results=tuple((symbol, 0, None) for symbol in symbols)
+    )
+    assert (
+        main(
+            [
+                "daily",
+                "collect-adjusted-returns",
+                "--symbols",
+                *symbols,
+                "--start",
+                "2026-03-08",
+                "--end",
+                "2026-09-03",
+            ]
+        )
+        == 0
+    )
     assert captured["provider"] == 1
 
 
-def test_adjusted_daily_failed_report_returns_one(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    _patch_adjusted_cli(monkeypatch, results=(("000001.SZ", 1, None), ("600519.SH", 0, "ProviderDataError")))
-    assert main(["daily", "collect-adjusted-returns", "--symbols", "000001.SZ", "600519.SH", "--start", "2026-05-01", "--end", "2026-09-03"]) == 1
+def test_adjusted_daily_failed_report_returns_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _patch_adjusted_cli(
+        monkeypatch,
+        results=(("000001.SZ", 1, None), ("600519.SH", 0, "ProviderDataError")),
+    )
+    assert (
+        main(
+            [
+                "daily",
+                "collect-adjusted-returns",
+                "--symbols",
+                "000001.SZ",
+                "600519.SH",
+                "--start",
+                "2026-05-01",
+                "--end",
+                "2026-09-03",
+            ]
+        )
+        == 1
+    )
     assert "600519.SH failed ProviderDataError" in capsys.readouterr().out
 
 
-def test_adjusted_status_is_offline_and_formats_empty_and_nonempty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_adjusted_status_is_offline_and_formats_empty_and_nonempty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     captured = _patch_adjusted_cli(monkeypatch)
-    assert build_parser().parse_args(["daily", "adjusted-status"]).daily_command == "adjusted-status"
+    assert (
+        build_parser().parse_args(["daily", "adjusted-status"]).daily_command
+        == "adjusted-status"
+    )
     assert main(["daily", "adjusted-status"]) == 0
     output = capsys.readouterr().out
     assert "Stored symbols: 0" in output and "Latest observed at: unavailable" in output
@@ -300,11 +548,17 @@ def test_risk_cli_composes_structural_scope_and_collects_once(
         "from_project_root",
         lambda: original_from_project_root(tmp_path),
     )
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
-    monkeypatch.setattr("stock_selector.collection.CurrentRiskStateCollector", FakeCollector)
+    monkeypatch.setattr(
+        "stock_selector.collection.CurrentRiskStateCollector", FakeCollector
+    )
 
     assert main(["risk", "collect-current"]) == 0
     assert captured["initialized"] is True
@@ -375,7 +629,9 @@ def test_risk_cli_uses_cdr_filtered_members_from_real_structural_universe(
         "stock_selector.storage.LocalMarketRepository", SeededRepository
     )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
-    monkeypatch.setattr("stock_selector.collection.CurrentRiskStateCollector", FakeCollector)
+    monkeypatch.setattr(
+        "stock_selector.collection.CurrentRiskStateCollector", FakeCollector
+    )
 
     assert main(["risk", "collect-current"]) == 0
     assert captured["request"].symbols == ("688001.SH",)
@@ -409,7 +665,9 @@ def test_risk_cli_expected_failure_and_missing_subcommand(
         lambda: original_from_project_root(tmp_path),
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FailingUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FailingUniverseService
+    )
 
     assert main(["risk", "collect-current"]) == 1
     assert "Risk collection error: expected offline failure" in capsys.readouterr().err
@@ -417,7 +675,9 @@ def test_risk_cli_expected_failure_and_missing_subcommand(
     assert "risk subcommand is required" in capsys.readouterr().err
 
 
-def test_structural_batch_selection_reuses_exact_cursor_with_distinct_task_limits() -> None:
+def test_structural_batch_selection_reuses_exact_cursor_with_distinct_task_limits() -> (
+    None
+):
     members = ("000001.SZ", "000002.SZ", "000004.SZ", "600000.SH")
     assert cli_module._select_structural_batch(members, 1, None, maximum_limit=500) == (
         ("000001.SZ",),
@@ -464,7 +724,14 @@ def test_structural_core_cli_parser_is_bounded_and_current_only() -> None:
     assert arguments.start_after == "000002.SZ"
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["fundamentals", "collect-structural-core", "--limit", "1", "--as-of", "2026-09-02"]
+            [
+                "fundamentals",
+                "collect-structural-core",
+                "--limit",
+                "1",
+                "--as-of",
+                "2026-09-02",
+            ]
         )
 
 
@@ -494,40 +761,92 @@ def test_structural_valuation_cli_parser_is_tightly_bounded_and_current_only() -
         )
 
 
-def test_structural_adjusted_return_cli_parser_is_tightly_bounded_and_current_only() -> None:
+def test_structural_adjusted_return_cli_parser_is_tightly_bounded_and_current_only() -> (
+    None
+):
     arguments = build_parser().parse_args(
-        ["daily", "collect-structural-adjusted-returns", "--limit", "20", "--start-after", "000002.SZ"]
+        [
+            "daily",
+            "collect-structural-adjusted-returns",
+            "--limit",
+            "20",
+            "--start-after",
+            "000002.SZ",
+        ]
     )
     assert arguments.limit == 20
     assert arguments.start_after == "000002.SZ"
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["daily", "collect-structural-adjusted-returns", "--limit", "1", "--symbols", "000001.SZ"]
+            [
+                "daily",
+                "collect-structural-adjusted-returns",
+                "--limit",
+                "1",
+                "--symbols",
+                "000001.SZ",
+            ]
         )
 
 
 def test_structural_slow_inputs_cli_parser_is_tightly_bounded() -> None:
     arguments = build_parser().parse_args(
-        ["refresh", "structural-slow-inputs", "--limit", "20", "--start-after", "000002.SZ"]
+        [
+            "refresh",
+            "structural-slow-inputs",
+            "--limit",
+            "20",
+            "--start-after",
+            "000002.SZ",
+        ]
     )
     assert (arguments.limit, arguments.start_after) == (20, "000002.SZ")
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["refresh", "structural-slow-inputs", "--limit", "1", "--symbols", "000001.SZ"]
+            [
+                "refresh",
+                "structural-slow-inputs",
+                "--limit",
+                "1",
+                "--symbols",
+                "000001.SZ",
+            ]
         )
 
 
 def test_structural_slow_input_sweep_cli_parser_allows_only_cursor_and_limit() -> None:
     arguments = build_parser().parse_args(
-        ["refresh", "structural-slow-inputs-sweep", "--limit", "100", "--start-after", "000002.SZ"]
+        [
+            "refresh",
+            "structural-slow-inputs-sweep",
+            "--limit",
+            "100",
+            "--start-after",
+            "000002.SZ",
+        ]
     )
-    assert (arguments.limit, arguments.start_after, arguments.progress) == (100, "000002.SZ", False)
-    assert build_parser().parse_args(
-        ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--progress"]
-    ).progress
+    assert (arguments.limit, arguments.start_after, arguments.progress) == (
+        100,
+        "000002.SZ",
+        False,
+    )
+    assert (
+        build_parser()
+        .parse_args(
+            ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--progress"]
+        )
+        .progress
+    )
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--symbols", "000001.SZ"]
+            [
+                "refresh",
+                "structural-slow-inputs-sweep",
+                "--limit",
+                "1",
+                "--symbols",
+                "000001.SZ",
+            ]
         )
 
 
@@ -539,26 +858,54 @@ def test_structural_factor_input_status_parser_has_no_operational_arguments() ->
             build_parser().parse_args(
                 ["refresh", "structural-factor-input-status", argument, "000001.SZ"]
             )
-    assert build_parser().parse_args(
-        ["refresh", "structural-slow-inputs", "--limit", "1"]
-    ).refresh_command == "structural-slow-inputs"
-    assert build_parser().parse_args(
-        ["refresh", "structural-slow-inputs-sweep", "--limit", "1"]
-    ).refresh_command == "structural-slow-inputs-sweep"
+    assert (
+        build_parser()
+        .parse_args(["refresh", "structural-slow-inputs", "--limit", "1"])
+        .refresh_command
+        == "structural-slow-inputs"
+    )
+    assert (
+        build_parser()
+        .parse_args(["refresh", "structural-slow-inputs-sweep", "--limit", "1"])
+        .refresh_command
+        == "structural-slow-inputs-sweep"
+    )
 
 
 def test_structural_missing_slow_inputs_parser_is_bounded() -> None:
     arguments = build_parser().parse_args(
-        ["refresh", "structural-missing-slow-inputs", "--limit", "100", "--start-after", "000002.SZ"]
+        [
+            "refresh",
+            "structural-missing-slow-inputs",
+            "--limit",
+            "100",
+            "--start-after",
+            "000002.SZ",
+        ]
     )
-    assert (arguments.limit, arguments.start_after, arguments.progress) == (100, "000002.SZ", False)
-    assert build_parser().parse_args(
-        ["refresh", "structural-missing-slow-inputs", "--limit", "1", "--progress"]
-    ).progress
+    assert (arguments.limit, arguments.start_after, arguments.progress) == (
+        100,
+        "000002.SZ",
+        False,
+    )
+    assert (
+        build_parser()
+        .parse_args(
+            ["refresh", "structural-missing-slow-inputs", "--limit", "1", "--progress"]
+        )
+        .progress
+    )
     for argument in ("--symbols", "--as-of", "--date", "--start", "--end"):
         with pytest.raises(SystemExit):
             build_parser().parse_args(
-                ["refresh", "structural-missing-slow-inputs", "--limit", "1", argument, "x"]
+                [
+                    "refresh",
+                    "structural-missing-slow-inputs",
+                    "--limit",
+                    "1",
+                    argument,
+                    "x",
+                ]
             )
 
 
@@ -638,7 +985,9 @@ def _patch_missing_refresh_dependencies(
                 selected_first_symbol=selected_symbols[0] if selected_symbols else None,
                 selected_last_symbol=selected_symbols[-1] if selected_symbols else None,
                 has_more_missing_after_selection=has_more,
-                next_start_after=selected_symbols[-1] if has_more and selected_symbols else None,
+                next_start_after=selected_symbols[-1]
+                if has_more and selected_symbols
+                else None,
             )
 
     def base(name: str):
@@ -651,7 +1000,9 @@ def _patch_missing_refresh_dependencies(
         return Base
 
     class Core:
-        def __init__(self, financial: object, industry: object, _repository: object) -> None:
+        def __init__(
+            self, financial: object, industry: object, _repository: object
+        ) -> None:
             cast = captured["wrappers"]
             assert isinstance(cast, list)
             cast.append(("core", financial, industry))
@@ -669,7 +1020,9 @@ def _patch_missing_refresh_dependencies(
             cast.append(("adjusted", collector))
 
     class Task35:
-        def __init__(self, core: object, valuation: object, adjusted: object, _repository: object) -> None:
+        def __init__(
+            self, core: object, valuation: object, adjusted: object, _repository: object
+        ) -> None:
             captured["task35"] = int(captured["task35"]) + 1
             captured["task35_args"] = (core, valuation, adjusted)
 
@@ -712,31 +1065,56 @@ def _patch_missing_refresh_dependencies(
                 factor_input_covered_after_run=len(selected_symbols),
             )
             return SimpleNamespace(
-                batch_reports=(batch,), factor_input_covered_after_run=len(selected_symbols)
+                batch_reports=(batch,),
+                factor_input_covered_after_run=len(selected_symbols),
             )
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
     monkeypatch.setattr(
-        cli_module, "datetime", SimpleNamespace(now=lambda _timezone: _record_now(captured, current_at))
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "datetime",
+        SimpleNamespace(now=lambda _timezone: _record_now(captured, current_at)),
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
-    monkeypatch.setattr("stock_selector.collection.StructuralFactorInputCoverageAuditor", Auditor)
-    monkeypatch.setattr("stock_selector.collection.StructuralMissingRefreshPlanner", Planner)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralFactorInputCoverageAuditor", Auditor
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralMissingRefreshPlanner", Planner
+    )
     monkeypatch.setattr(
         "stock_selector.providers.AKShareProvider",
         lambda: _record_provider(captured, provider),
     )
-    monkeypatch.setattr("stock_selector.collection.FinancialCollector", base("financial"))
+    monkeypatch.setattr(
+        "stock_selector.collection.FinancialCollector", base("financial")
+    )
     monkeypatch.setattr("stock_selector.collection.IndustryCollector", base("industry"))
-    monkeypatch.setattr("stock_selector.collection.ValuationCollector", base("valuation"))
-    monkeypatch.setattr("stock_selector.collection.AdjustedDailyReturnCollector", base("adjusted"))
-    monkeypatch.setattr("stock_selector.collection.StructuralCoreFundamentalsCollector", Core)
-    monkeypatch.setattr("stock_selector.collection.StructuralValuationCollector", Valuation)
-    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", Adjusted)
-    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputCollector", Task35)
-    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputSweepCollector", Sweep)
+    monkeypatch.setattr(
+        "stock_selector.collection.ValuationCollector", base("valuation")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.AdjustedDailyReturnCollector", base("adjusted")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralCoreFundamentalsCollector", Core
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralValuationCollector", Valuation
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector", Adjusted
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputCollector", Task35
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputSweepCollector", Sweep
+    )
     captured["current_at"] = current_at
     return captured
 
@@ -769,7 +1147,11 @@ def test_structural_missing_slow_inputs_rejects_invalid_limits_before_work(
     ("missing_symbols", "start_after", "expected_message"),
     (
         ((), None, "Structural factor-input coverage already complete."),
-        (("000001.SZ",), "600519.SH", "No missing structural factor-input members after start-after."),
+        (
+            ("000001.SZ",),
+            "600519.SH",
+            "No missing structural factor-input members after start-after.",
+        ),
     ),
 )
 def test_structural_missing_slow_inputs_stops_without_graph_when_no_target(
@@ -787,7 +1169,14 @@ def test_structural_missing_slow_inputs_stops_without_graph_when_no_target(
     if start_after:
         arguments.extend(("--start-after", start_after))
     assert main(arguments) == 0
-    assert captured["now"] == captured["universe"] == captured["factor_read"] == captured["audit"] == captured["plan"] == 1
+    assert (
+        captured["now"]
+        == captured["universe"]
+        == captured["factor_read"]
+        == captured["audit"]
+        == captured["plan"]
+        == 1
+    )
     assert captured["provider"] == captured["task35"] == captured["sweep"] == 0
     output = capsys.readouterr().out
     assert expected_message in output
@@ -816,14 +1205,45 @@ def test_structural_missing_slow_inputs_uses_one_preselection_and_shared_graph(
         has_more=True,
         failure=failure,
     )
-    assert main(["refresh", "structural-missing-slow-inputs", "--limit", "1", "--start-after", "000001.SZ"]) == expected
+    assert (
+        main(
+            [
+                "refresh",
+                "structural-missing-slow-inputs",
+                "--limit",
+                "1",
+                "--start-after",
+                "000001.SZ",
+            ]
+        )
+        == expected
+    )
     current_at = captured["current_at"]
     coverage_request = captured["coverage_request"]
     plan_request = captured["plan_request"]
     sweep_request = captured["sweep_request"]
-    assert captured["now"] == captured["universe"] == captured["factor_read"] == captured["audit"] == captured["plan"] == captured["provider"] == captured["task35"] == captured["sweep"] == 1
-    assert coverage_request.as_of == plan_request.as_of == sweep_request.as_of == current_at
-    assert coverage_request.structural_symbols == plan_request.structural_symbols == ("000001.SZ", "000002.SZ", "600519.SH")
+    assert (
+        captured["now"]
+        == captured["universe"]
+        == captured["factor_read"]
+        == captured["audit"]
+        == captured["plan"]
+        == captured["provider"]
+        == captured["task35"]
+        == captured["sweep"]
+        == 1
+    )
+    assert (
+        coverage_request.as_of
+        == plan_request.as_of
+        == sweep_request.as_of
+        == current_at
+    )
+    assert (
+        coverage_request.structural_symbols
+        == plan_request.structural_symbols
+        == ("000001.SZ", "000002.SZ", "600519.SH")
+    )
     assert coverage_request.factor_input_symbols == ("000001.SZ",)
     assert plan_request.missing_structural_symbols == ("000002.SZ", "600519.SH")
     assert (plan_request.limit, plan_request.start_after) == (1, "000001.SZ")
@@ -831,7 +1251,12 @@ def test_structural_missing_slow_inputs_uses_one_preselection_and_shared_graph(
     assert sweep_request.has_more_structural_members is False
     base = captured["base"]
     assert isinstance(base, list)
-    assert [item[0] for item in base] == ["financial", "industry", "valuation", "adjusted"]
+    assert [item[0] for item in base] == [
+        "financial",
+        "industry",
+        "valuation",
+        "adjusted",
+    ]
     assert len({id(item[1]) for item in base}) == 1
     output = capsys.readouterr().out
     assert "Structural factor-input covered before refresh: 1" in output
@@ -864,37 +1289,111 @@ def test_structural_missing_slow_inputs_returns_one_for_sweep_storage_error(
 
 def test_task35_to_task37_parser_contracts_remain_unchanged() -> None:
     parser = build_parser()
-    assert parser.parse_args(["refresh", "structural-slow-inputs", "--limit", "1"]).refresh_command == "structural-slow-inputs"
-    assert parser.parse_args(["refresh", "structural-slow-inputs-sweep", "--limit", "1"]).refresh_command == "structural-slow-inputs-sweep"
-    assert parser.parse_args(["refresh", "structural-factor-input-status"]).refresh_command == "structural-factor-input-status"
+    assert (
+        parser.parse_args(
+            ["refresh", "structural-slow-inputs", "--limit", "1"]
+        ).refresh_command
+        == "structural-slow-inputs"
+    )
+    assert (
+        parser.parse_args(
+            ["refresh", "structural-slow-inputs-sweep", "--limit", "1"]
+        ).refresh_command
+        == "structural-slow-inputs-sweep"
+    )
+    assert (
+        parser.parse_args(["refresh", "structural-factor-input-status"]).refresh_command
+        == "structural-factor-input-status"
+    )
 
 
 def test_selection_input_status_parser_has_no_operational_arguments() -> None:
-    assert build_parser().parse_args(["selection", "input-status"]).selection_command == "input-status"
-    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--refresh", "--persist"):
+    assert (
+        build_parser().parse_args(["selection", "input-status"]).selection_command
+        == "input-status"
+    )
+    for argument in (
+        "--as-of",
+        "--date",
+        "--limit",
+        "--start-after",
+        "--symbols",
+        "--refresh",
+        "--persist",
+    ):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "input-status", argument, "x"])
 
 
 def test_selection_coverage_status_parser_has_no_operational_arguments() -> None:
-    assert build_parser().parse_args(["selection", "coverage-status"]).selection_command == "coverage-status"
-    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--refresh", "--persist", "--prepare", "--top-n"):
+    assert (
+        build_parser().parse_args(["selection", "coverage-status"]).selection_command
+        == "coverage-status"
+    )
+    for argument in (
+        "--as-of",
+        "--date",
+        "--limit",
+        "--start-after",
+        "--symbols",
+        "--symbol",
+        "--refresh",
+        "--persist",
+        "--prepare",
+        "--top-n",
+    ):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "coverage-status", argument, "x"])
 
 
 def test_selection_refresh_current_parser_has_no_operational_arguments() -> None:
-    assert build_parser().parse_args(["selection", "refresh-current"]).selection_command == "refresh-current"
-    assert build_parser().parse_args(["selection", "refresh-current", "--progress"]).progress
-    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--top-n", "--refresh", "--persist", "--prepare", "--max-runs", "--retry"):
+    assert (
+        build_parser().parse_args(["selection", "refresh-current"]).selection_command
+        == "refresh-current"
+    )
+    assert (
+        build_parser()
+        .parse_args(["selection", "refresh-current", "--progress"])
+        .progress
+    )
+    for argument in (
+        "--as-of",
+        "--date",
+        "--limit",
+        "--start-after",
+        "--symbols",
+        "--symbol",
+        "--top-n",
+        "--refresh",
+        "--persist",
+        "--prepare",
+        "--max-runs",
+        "--retry",
+    ):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "refresh-current", argument, "x"])
 
 
 def test_selection_daily_parser_has_no_operational_arguments() -> None:
-    assert build_parser().parse_args(["selection", "daily"]).selection_command == "daily"
+    assert (
+        build_parser().parse_args(["selection", "daily"]).selection_command == "daily"
+    )
     assert build_parser().parse_args(["selection", "daily", "--progress"]).progress
-    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--top-n", "--refresh", "--persist", "--prepare", "--retry", "--max-runs", "--all-market"):
+    for argument in (
+        "--as-of",
+        "--date",
+        "--limit",
+        "--start-after",
+        "--symbols",
+        "--symbol",
+        "--top-n",
+        "--refresh",
+        "--persist",
+        "--prepare",
+        "--retry",
+        "--max-runs",
+        "--all-market",
+    ):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "daily", argument, "x"])
 
@@ -903,35 +1402,93 @@ def test_selection_prepare_inputs_parser_is_tightly_bounded() -> None:
     arguments = build_parser().parse_args(
         ["selection", "prepare-inputs", "--limit", "100", "--start-after", "000002.SZ"]
     )
-    assert (arguments.limit, arguments.start_after, arguments.progress) == (100, "000002.SZ", False)
-    assert build_parser().parse_args(
-        ["selection", "prepare-inputs", "--limit", "1", "--progress"]
-    ).progress
-    for argument in ("--as-of", "--date", "--symbols", "--start", "--end", "--persist", "--all-market", "--top-n"):
+    assert (arguments.limit, arguments.start_after, arguments.progress) == (
+        100,
+        "000002.SZ",
+        False,
+    )
+    assert (
+        build_parser()
+        .parse_args(["selection", "prepare-inputs", "--limit", "1", "--progress"])
+        .progress
+    )
+    for argument in (
+        "--as-of",
+        "--date",
+        "--symbols",
+        "--start",
+        "--end",
+        "--persist",
+        "--all-market",
+        "--top-n",
+    ):
         with pytest.raises(SystemExit):
-            build_parser().parse_args(["selection", "prepare-inputs", "--limit", "1", argument, "x"])
+            build_parser().parse_args(
+                ["selection", "prepare-inputs", "--limit", "1", argument, "x"]
+            )
 
 
 def test_selection_run_current_parser_has_no_operational_arguments() -> None:
-    assert build_parser().parse_args(["selection", "run-current"]).selection_command == "run-current"
-    for argument in ("--as-of", "--date", "--limit", "--start-after", "--symbols", "--symbol", "--top-n", "--persist", "--refresh", "--prepare", "--all-market"):
+    assert (
+        build_parser().parse_args(["selection", "run-current"]).selection_command
+        == "run-current"
+    )
+    for argument in (
+        "--as-of",
+        "--date",
+        "--limit",
+        "--start-after",
+        "--symbols",
+        "--symbol",
+        "--top-n",
+        "--persist",
+        "--refresh",
+        "--prepare",
+        "--all-market",
+    ):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["selection", "run-current", argument, "x"])
 
 
-def test_selection_without_subcommand_reports_all_available_commands(capsys: pytest.CaptureFixture[str]) -> None:
+def test_selection_without_subcommand_reports_all_available_commands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     assert main(["selection"]) == 2
-    assert "input-status, coverage-status, prepare-inputs, refresh-current, daily, or run-current" in capsys.readouterr().err
+    assert (
+        "input-status, coverage-status, prepare-inputs, refresh-current, daily, or run-current"
+        in capsys.readouterr().err
+    )
 
 
 @pytest.mark.parametrize(
-    ("complete", "eligible", "factor_symbols", "expected_ready", "expected_blocker", "structural_missing"),
+    (
+        "complete",
+        "eligible",
+        "factor_symbols",
+        "expected_ready",
+        "expected_blocker",
+        "structural_missing",
+    ),
     (
         (("000001.SZ",), (), ("000001.SZ",), "NO", "risk_state_coverage_incomplete", 1),
         (("000001.SZ", "000002.SZ"), (), (), "NO", "no_risk_eligible_members", 2),
-        (("000001.SZ", "000002.SZ"), ("000001.SZ",), (), "NO", "eligible_factor_input_coverage_incomplete", 2),
+        (
+            ("000001.SZ", "000002.SZ"),
+            ("000001.SZ",),
+            (),
+            "NO",
+            "eligible_factor_input_coverage_incomplete",
+            2,
+        ),
         (("000001.SZ", "000002.SZ"), ("000001.SZ",), ("000001.SZ",), "YES", "none", 1),
-        (("000001.SZ", "000002.SZ"), ("000001.SZ", "000002.SZ"), ("000001.SZ", "000002.SZ"), "YES", "none", 0),
+        (
+            ("000001.SZ", "000002.SZ"),
+            ("000001.SZ", "000002.SZ"),
+            ("000001.SZ", "000002.SZ"),
+            "YES",
+            "none",
+            0,
+        ),
     ),
 )
 def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
@@ -947,7 +1504,15 @@ def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
 ) -> None:
     current_at = datetime(2026, 9, 8, 9, tzinfo=ZoneInfo("Asia/Shanghai"))
     original_paths = AppPaths.from_project_root
-    calls: dict[str, object] = {"now": 0, "build": 0, "risk_read": 0, "evaluate": 0, "factor_read": 0, "coverage": 0, "readiness": 0}
+    calls: dict[str, object] = {
+        "now": 0,
+        "build": 0,
+        "risk_read": 0,
+        "evaluate": 0,
+        "factor_read": 0,
+        "coverage": 0,
+        "readiness": 0,
+    }
 
     class Repository:
         def __init__(self, _paths: object) -> None:
@@ -956,7 +1521,9 @@ def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
         def initialize(self) -> None:
             pass
 
-        def load_risk_states(self, as_of: date, symbols: tuple[str, ...]) -> tuple[SimpleNamespace, ...]:
+        def load_risk_states(
+            self, as_of: date, symbols: tuple[str, ...]
+        ) -> tuple[SimpleNamespace, ...]:
             calls["risk_read"] = int(calls["risk_read"]) + 1
             calls["risk_request"] = (as_of, symbols)
             return tuple(SimpleNamespace(symbol=symbol) for symbol in symbols)
@@ -975,11 +1542,19 @@ def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
             return SimpleNamespace(members=("000001.SZ", "000002.SZ"))
 
     class Evaluator:
-        def evaluate(self, structural: object, states: tuple[SimpleNamespace, ...], _config: object) -> SimpleNamespace:
+        def evaluate(
+            self,
+            structural: object,
+            states: tuple[SimpleNamespace, ...],
+            _config: object,
+        ) -> SimpleNamespace:
             calls["evaluate"] = int(calls["evaluate"]) + 1
             return SimpleNamespace(
                 eligible_members=eligible,
-                decisions=tuple(SimpleNamespace(symbol=symbol, risk_complete=symbol in complete) for symbol in structural.members),
+                decisions=tuple(
+                    SimpleNamespace(symbol=symbol, risk_complete=symbol in complete)
+                    for symbol in structural.members
+                ),
             )
 
     from stock_selector.collection import (
@@ -1002,13 +1577,25 @@ def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
             return super().audit(request)
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _timezone: _record_now(calls, current_at)))
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "datetime",
+        SimpleNamespace(now=lambda _timezone: _record_now(calls, current_at)),
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
-    monkeypatch.setattr("stock_selector.risk.evaluator.RiskEligibilityEvaluator", Evaluator)
-    monkeypatch.setattr("stock_selector.collection.StructuralFactorInputCoverageAuditor", Coverage)
-    monkeypatch.setattr("stock_selector.selection.DailySelectionInputReadinessAuditor", Readiness)
+    monkeypatch.setattr(
+        "stock_selector.risk.evaluator.RiskEligibilityEvaluator", Evaluator
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralFactorInputCoverageAuditor", Coverage
+    )
+    monkeypatch.setattr(
+        "stock_selector.selection.DailySelectionInputReadinessAuditor", Readiness
+    )
     for target in (
         "stock_selector.providers.AKShareProvider",
         "stock_selector.collection.CurrentRiskStateCollector",
@@ -1025,7 +1612,16 @@ def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
             lambda target=target: (_ for _ in ()).throw(AssertionError(target)),
         )
     assert main(["selection", "input-status"]) == 0
-    assert calls["now"] == calls["build"] == calls["risk_read"] == calls["evaluate"] == calls["factor_read"] == calls["coverage"] == calls["readiness"] == 1
+    assert (
+        calls["now"]
+        == calls["build"]
+        == calls["risk_read"]
+        == calls["evaluate"]
+        == calls["factor_read"]
+        == calls["coverage"]
+        == calls["readiness"]
+        == 1
+    )
     assert calls["build_as_of"] == current_at.date()
     assert calls["risk_request"] == (current_at.date(), ("000001.SZ", "000002.SZ"))
     request = calls["readiness_request"]
@@ -1047,7 +1643,10 @@ def test_selection_input_status_uses_one_local_snapshot_and_reports_readiness(
         assert "Structural factor-input covered: 1" in output
         assert "Eligible factor-input covered: 1" in output
         assert "Eligible factor-input missing: 0" in output
-    assert "does not run factors/BaseScore and does not guarantee returned selection items" in output
+    assert (
+        "does not run factors/BaseScore and does not guarantee returned selection items"
+        in output
+    )
 
 
 def test_selection_input_status_returns_one_for_storage_error(
@@ -1062,7 +1661,9 @@ def test_selection_input_status_returns_one_for_storage_error(
         def initialize(self) -> None:
             pass
 
-        def load_risk_states(self, _as_of: date, _symbols: tuple[str, ...]) -> tuple[object, ...]:
+        def load_risk_states(
+            self, _as_of: date, _symbols: tuple[str, ...]
+        ) -> tuple[object, ...]:
             raise StorageError("risk read")
 
     class Universe:
@@ -1073,13 +1674,23 @@ def test_selection_input_status_returns_one_for_storage_error(
             return SimpleNamespace(members=("000001.SZ",))
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _timezone: datetime(2026, 9, 8, tzinfo=ZoneInfo("Asia/Shanghai"))))
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "datetime",
+        SimpleNamespace(
+            now=lambda _timezone: datetime(2026, 9, 8, tzinfo=ZoneInfo("Asia/Shanghai"))
+        ),
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr(
         "stock_selector.providers.AKShareProvider",
-        lambda: (_ for _ in ()).throw(AssertionError("provider must not be constructed")),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("provider must not be constructed")
+        ),
     )
     assert main(["selection", "input-status"]) == 1
 
@@ -1104,7 +1715,12 @@ def test_structural_factor_input_status_uses_one_snapshot_read_and_audit(
 ) -> None:
     current_at = datetime(2026, 9, 7, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
     original_paths = AppPaths.from_project_root
-    captured: dict[str, object] = {"now": 0, "universe": 0, "factor_read": 0, "audit": 0}
+    captured: dict[str, object] = {
+        "now": 0,
+        "universe": 0,
+        "factor_read": 0,
+        "audit": 0,
+    }
 
     class Repository:
         def __init__(self, _paths: object) -> None:
@@ -1131,10 +1747,14 @@ def test_structural_factor_input_status_uses_one_snapshot_read_and_audit(
             captured["audit"] += 1
             captured["request"] = request
             covered_symbols = tuple(
-                symbol for symbol in request.structural_symbols if symbol in factor_symbols
+                symbol
+                for symbol in request.structural_symbols
+                if symbol in factor_symbols
             )
             missing_symbols = tuple(
-                symbol for symbol in request.structural_symbols if symbol not in factor_symbols
+                symbol
+                for symbol in request.structural_symbols
+                if symbol not in factor_symbols
             )
             assert len(covered_symbols) == covered
             assert len(missing_symbols) == missing
@@ -1162,14 +1782,22 @@ def test_structural_factor_input_status_uses_one_snapshot_read_and_audit(
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr(
         "stock_selector.providers.AKShareProvider",
-        lambda: (_ for _ in ()).throw(AssertionError("provider must not be constructed")),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("provider must not be constructed")
+        ),
     )
     monkeypatch.setattr(
         "stock_selector.collection.StructuralFactorInputCoverageAuditor", Auditor
     )
 
     assert main(["refresh", "structural-factor-input-status"]) == 0
-    assert captured["now"] == captured["universe"] == captured["factor_read"] == captured["audit"] == 1
+    assert (
+        captured["now"]
+        == captured["universe"]
+        == captured["factor_read"]
+        == captured["audit"]
+        == 1
+    )
     assert captured["universe_as_of"] == current_at.date()
     assert captured["request"].structural_symbols == ("000001.SZ", "000002.SZ")
     assert captured["request"].factor_input_symbols == factor_symbols
@@ -1185,7 +1813,10 @@ def test_structural_factor_input_status_uses_one_snapshot_read_and_audit(
     )
     expected_marker = "complete" if not missing else missing_symbols[0]
     assert f"First missing symbol: {expected_marker}" in output
-    assert f"Last missing symbol: {expected_marker if missing == 1 else (missing_symbols[-1] if missing else 'complete')}" in output
+    assert (
+        f"Last missing symbol: {expected_marker if missing == 1 else (missing_symbols[-1] if missing else 'complete')}"
+        in output
+    )
 
 
 @pytest.mark.parametrize("failure", ("config", "storage", "universe", "contract"))
@@ -1222,7 +1853,8 @@ def test_structural_factor_input_status_returns_one_for_operational_errors(
         cli_module,
         "load_settings",
         (lambda _path: (_ for _ in ()).throw(ConfigurationError("config")))
-        if failure == "config" else lambda _path: Settings(),
+        if failure == "config"
+        else lambda _path: Settings(),
     )
     monkeypatch.setattr(
         cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
@@ -1230,7 +1862,9 @@ def test_structural_factor_input_status_returns_one_for_operational_errors(
     monkeypatch.setattr(
         cli_module,
         "datetime",
-        SimpleNamespace(now=lambda _tz: datetime(2026, 9, 7, tzinfo=ZoneInfo("Asia/Shanghai"))),
+        SimpleNamespace(
+            now=lambda _tz: datetime(2026, 9, 7, tzinfo=ZoneInfo("Asia/Shanghai"))
+        ),
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
@@ -1281,7 +1915,9 @@ def test_structural_slow_input_sweep_stops_before_provider_for_invalid_or_empty_
     monkeypatch.setattr(
         cli_module,
         "datetime",
-        SimpleNamespace(now=lambda _tz: datetime(2026, 9, 7, tzinfo=ZoneInfo("Asia/Shanghai"))),
+        SimpleNamespace(
+            now=lambda _tz: datetime(2026, 9, 7, tzinfo=ZoneInfo("Asia/Shanghai"))
+        ),
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
@@ -1292,13 +1928,33 @@ def test_structural_slow_input_sweep_stops_before_provider_for_invalid_or_empty_
 
     assert main(["refresh", "structural-slow-inputs-sweep", "--limit", "0"]) == 1
     assert main(["refresh", "structural-slow-inputs-sweep", "--limit", "101"]) == 1
-    assert main(
-        ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--start-after", "600519.SH"]
-    ) == 1
+    assert (
+        main(
+            [
+                "refresh",
+                "structural-slow-inputs-sweep",
+                "--limit",
+                "1",
+                "--start-after",
+                "600519.SH",
+            ]
+        )
+        == 1
+    )
     assert provider_calls == sweep_calls == 0
-    assert main(
-        ["refresh", "structural-slow-inputs-sweep", "--limit", "1", "--start-after", "000003.SZ"]
-    ) == 0
+    assert (
+        main(
+            [
+                "refresh",
+                "structural-slow-inputs-sweep",
+                "--limit",
+                "1",
+                "--start-after",
+                "000003.SZ",
+            ]
+        )
+        == 0
+    )
     assert provider_calls == sweep_calls == 0
     assert "No remaining structural members." in capsys.readouterr().out
 
@@ -1408,11 +2064,18 @@ def test_structural_slow_input_sweep_cli_composes_one_shared_graph_and_reports_f
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: sentinel)
-    monkeypatch.setattr("stock_selector.collection.FinancialCollector", base_factory("financial"))
-    monkeypatch.setattr("stock_selector.collection.IndustryCollector", base_factory("industry"))
-    monkeypatch.setattr("stock_selector.collection.ValuationCollector", base_factory("valuation"))
     monkeypatch.setattr(
-        "stock_selector.collection.AdjustedDailyReturnCollector", base_factory("adjusted")
+        "stock_selector.collection.FinancialCollector", base_factory("financial")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.IndustryCollector", base_factory("industry")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.ValuationCollector", base_factory("valuation")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.AdjustedDailyReturnCollector",
+        base_factory("adjusted"),
     )
     monkeypatch.setattr(
         "stock_selector.collection.StructuralCoreFundamentalsCollector",
@@ -1468,11 +2131,16 @@ def test_structural_slow_inputs_cli_composes_one_shared_provider_and_partial_cur
     sentinel = object()
 
     class Repository:
-        def __init__(self, _paths: object) -> None: pass
-        def initialize(self) -> None: pass
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
 
     class Universe:
-        def __init__(self, *_: object) -> None: pass
+        def __init__(self, *_: object) -> None:
+            pass
+
         def build_current(self, as_of: date) -> SimpleNamespace:
             captured["universe_as_of"] = as_of
             return SimpleNamespace(members=("000001.SZ", "000002.SZ", "000003.SZ"))
@@ -1481,49 +2149,128 @@ def test_structural_slow_inputs_cli_composes_one_shared_provider_and_partial_cur
         def factory(provider: object, _repository: object) -> SimpleNamespace:
             captured["base"].append((name, provider))
             return SimpleNamespace(name=name)
+
         return factory
 
     class SlowCollector:
-        def __init__(self, *_dependencies: object) -> None: pass
+        def __init__(self, *_dependencies: object) -> None:
+            pass
+
         def collect(self, request: object) -> SimpleNamespace:
             captured["request"] = request
             statuses = SimpleNamespace(value="success")
-            core_items = tuple(SimpleNamespace(symbol=s, financial_status=statuses, industry_status=statuses) for s in request.symbols)
-            valuation_items = tuple(SimpleNamespace(status=statuses) for _ in request.symbols)
-            adjusted_items = tuple(SimpleNamespace(status=statuses) for _ in request.symbols)
-            core = SimpleNamespace(financial_success=2, financial_empty=0, financial_failed=0, financial_rows_persisted=2, industry_success=2, industry_empty=0, industry_failed=0, industry_rows_persisted=2, results=core_items)
-            valuation = SimpleNamespace(success_symbols=2, empty_symbols=0, failed_symbols=0, rows_persisted=2, valuation_available_after_run=2, results=valuation_items)
-            adjusted = SimpleNamespace(success_symbols=2, empty_symbols=0, failed_symbols=0, rows_received=2, rows_persisted=2, availability_as_of=current_at, adjusted_return_available_after_run=2, results=adjusted_items)
-            return SimpleNamespace(as_of=current_at, requested_symbols=request.symbols, core_report=core, valuation_report=valuation, adjusted_return_report=adjusted, factor_input_covered_after_run=2, batch_first_symbol=request.symbols[0], batch_last_symbol=request.symbols[-1], has_more_structural_members=request.has_more_structural_members, next_start_after=request.symbols[-1])
+            core_items = tuple(
+                SimpleNamespace(
+                    symbol=s, financial_status=statuses, industry_status=statuses
+                )
+                for s in request.symbols
+            )
+            valuation_items = tuple(
+                SimpleNamespace(status=statuses) for _ in request.symbols
+            )
+            adjusted_items = tuple(
+                SimpleNamespace(status=statuses) for _ in request.symbols
+            )
+            core = SimpleNamespace(
+                financial_success=2,
+                financial_empty=0,
+                financial_failed=0,
+                financial_rows_persisted=2,
+                industry_success=2,
+                industry_empty=0,
+                industry_failed=0,
+                industry_rows_persisted=2,
+                results=core_items,
+            )
+            valuation = SimpleNamespace(
+                success_symbols=2,
+                empty_symbols=0,
+                failed_symbols=0,
+                rows_persisted=2,
+                valuation_available_after_run=2,
+                results=valuation_items,
+            )
+            adjusted = SimpleNamespace(
+                success_symbols=2,
+                empty_symbols=0,
+                failed_symbols=0,
+                rows_received=2,
+                rows_persisted=2,
+                availability_as_of=current_at,
+                adjusted_return_available_after_run=2,
+                results=adjusted_items,
+            )
+            return SimpleNamespace(
+                as_of=current_at,
+                requested_symbols=request.symbols,
+                core_report=core,
+                valuation_report=valuation,
+                adjusted_return_report=adjusted,
+                factor_input_covered_after_run=2,
+                batch_first_symbol=request.symbols[0],
+                batch_last_symbol=request.symbols[-1],
+                has_more_structural_members=request.has_more_structural_members,
+                next_start_after=request.symbols[-1],
+            )
 
     def fake_now(_tz: object) -> datetime:
         captured["now"] += 1
         return current_at
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
     monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=fake_now))
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: sentinel)
-    monkeypatch.setattr("stock_selector.collection.FinancialCollector", base_factory("financial"))
-    monkeypatch.setattr("stock_selector.collection.IndustryCollector", base_factory("industry"))
-    monkeypatch.setattr("stock_selector.collection.ValuationCollector", base_factory("valuation"))
-    monkeypatch.setattr("stock_selector.collection.AdjustedDailyReturnCollector", base_factory("adjusted"))
-    monkeypatch.setattr("stock_selector.collection.StructuralCoreFundamentalsCollector", lambda *_: SimpleNamespace())
-    monkeypatch.setattr("stock_selector.collection.StructuralValuationCollector", lambda *_: SimpleNamespace())
-    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", lambda *_: SimpleNamespace())
-    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputCollector", SlowCollector)
+    monkeypatch.setattr(
+        "stock_selector.collection.FinancialCollector", base_factory("financial")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.IndustryCollector", base_factory("industry")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.ValuationCollector", base_factory("valuation")
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.AdjustedDailyReturnCollector",
+        base_factory("adjusted"),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralCoreFundamentalsCollector",
+        lambda *_: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralValuationCollector",
+        lambda *_: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector",
+        lambda *_: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputCollector", SlowCollector
+    )
 
     assert main(["refresh", "structural-slow-inputs", "--limit", "2"]) == 0
     assert captured["now"] == 1 and captured["universe_as_of"] == current_at.date()
     assert captured["request"].symbols == ("000001.SZ", "000002.SZ")
     assert captured["request"].has_more_structural_members is True
-    assert [name for name, _ in captured["base"]] == ["financial", "industry", "valuation", "adjusted"]
+    assert [name for name, _ in captured["base"]] == [
+        "financial",
+        "industry",
+        "valuation",
+        "adjusted",
+    ]
     assert all(provider is sentinel for _, provider in captured["base"])
     output = capsys.readouterr().out
     assert "Has more: YES" in output and "Next start-after: 000002.SZ" in output
-    assert "financial=success industry=success valuation=success adjusted=success" in output
+    assert (
+        "financial=success industry=success valuation=success adjusted=success"
+        in output
+    )
 
 
 def test_structural_slow_inputs_cli_stops_before_provider_for_invalid_or_empty_batches(
@@ -1532,77 +2279,216 @@ def test_structural_slow_inputs_cli_stops_before_provider_for_invalid_or_empty_b
     original_paths = AppPaths.from_project_root
     constructions = 0
     collector_calls = 0
+
     class Repository:
-        def __init__(self, _paths: object) -> None: pass
-        def initialize(self) -> None: pass
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
     class Universe:
-        def __init__(self, *_: object) -> None: pass
+        def __init__(self, *_: object) -> None:
+            pass
+
         def build_current(self, _as_of: date) -> SimpleNamespace:
             return SimpleNamespace(members=("000001.SZ", "000002.SZ", "000003.SZ"))
+
     def provider() -> object:
         nonlocal constructions
         constructions += 1
         return object()
+
     class Collector:
-        def __init__(self, *_: object) -> None: pass
+        def __init__(self, *_: object) -> None:
+            pass
+
         def collect(self, _request: object) -> None:
             nonlocal collector_calls
             collector_calls += 1
+
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: datetime(2026, 9, 6, tzinfo=ZoneInfo("Asia/Shanghai"))))
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "datetime",
+        SimpleNamespace(
+            now=lambda _tz: datetime(2026, 9, 6, tzinfo=ZoneInfo("Asia/Shanghai"))
+        ),
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider)
-    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputCollector", Collector)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputCollector", Collector
+    )
     assert main(["refresh", "structural-slow-inputs", "--limit", "0"]) == 1
     assert main(["refresh", "structural-slow-inputs", "--limit", "21"]) == 1
-    assert main(["refresh", "structural-slow-inputs", "--limit", "2", "--start-after", "600519.SH"]) == 1
+    assert (
+        main(
+            [
+                "refresh",
+                "structural-slow-inputs",
+                "--limit",
+                "2",
+                "--start-after",
+                "600519.SH",
+            ]
+        )
+        == 1
+    )
     assert constructions == collector_calls == 0
-    assert main(["refresh", "structural-slow-inputs", "--limit", "2", "--start-after", "000003.SZ"]) == 0
+    assert (
+        main(
+            [
+                "refresh",
+                "structural-slow-inputs",
+                "--limit",
+                "2",
+                "--start-after",
+                "000003.SZ",
+            ]
+        )
+        == 0
+    )
     assert constructions == collector_calls == 0
     assert "No remaining structural members." in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
-    ("financial_failed", "industry_failed", "valuation_failed", "adjusted_failed", "expected"),
-    ((1, 0, 0, 0, 1), (0, 1, 0, 0, 1), (0, 0, 1, 0, 1), (0, 0, 0, 1, 1), (0, 0, 0, 0, 0)),
+    (
+        "financial_failed",
+        "industry_failed",
+        "valuation_failed",
+        "adjusted_failed",
+        "expected",
+    ),
+    (
+        (1, 0, 0, 0, 1),
+        (0, 1, 0, 0, 1),
+        (0, 0, 1, 0, 1),
+        (0, 0, 0, 1, 1),
+        (0, 0, 0, 0, 0),
+    ),
 )
 def test_structural_slow_inputs_cli_exit_reflects_each_nested_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, financial_failed: int, industry_failed: int,
-    valuation_failed: int, adjusted_failed: int, expected: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    financial_failed: int,
+    industry_failed: int,
+    valuation_failed: int,
+    adjusted_failed: int,
+    expected: int,
 ) -> None:
     current_at = datetime(2026, 9, 6, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
     original_paths = AppPaths.from_project_root
+
     class Repository:
-        def __init__(self, _paths: object) -> None: pass
-        def initialize(self) -> None: pass
+        def __init__(self, _paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
     class Universe:
-        def __init__(self, *_: object) -> None: pass
+        def __init__(self, *_: object) -> None:
+            pass
+
         def build_current(self, _as_of: date) -> SimpleNamespace:
             return SimpleNamespace(members=("000001.SZ",))
+
     class Collector:
-        def __init__(self, *_: object) -> None: pass
+        def __init__(self, *_: object) -> None:
+            pass
+
         def collect(self, request: object) -> SimpleNamespace:
             status = SimpleNamespace(value="empty")
-            core = SimpleNamespace(financial_success=0, financial_empty=1-financial_failed, financial_failed=financial_failed, financial_rows_persisted=0, industry_success=0, industry_empty=1-industry_failed, industry_failed=industry_failed, industry_rows_persisted=0, results=(SimpleNamespace(symbol="000001.SZ", financial_status=status, industry_status=status),))
-            valuation = SimpleNamespace(success_symbols=0, empty_symbols=1-valuation_failed, failed_symbols=valuation_failed, rows_persisted=0, valuation_available_after_run=0, results=(SimpleNamespace(status=status),))
-            adjusted = SimpleNamespace(success_symbols=0, empty_symbols=1-adjusted_failed, failed_symbols=adjusted_failed, rows_received=0, rows_persisted=0, availability_as_of=current_at, adjusted_return_available_after_run=0, results=(SimpleNamespace(status=status),))
-            return SimpleNamespace(as_of=current_at, requested_symbols=request.symbols, core_report=core, valuation_report=valuation, adjusted_return_report=adjusted, factor_input_covered_after_run=0, batch_first_symbol="000001.SZ", batch_last_symbol="000001.SZ", has_more_structural_members=False, next_start_after=None)
+            core = SimpleNamespace(
+                financial_success=0,
+                financial_empty=1 - financial_failed,
+                financial_failed=financial_failed,
+                financial_rows_persisted=0,
+                industry_success=0,
+                industry_empty=1 - industry_failed,
+                industry_failed=industry_failed,
+                industry_rows_persisted=0,
+                results=(
+                    SimpleNamespace(
+                        symbol="000001.SZ",
+                        financial_status=status,
+                        industry_status=status,
+                    ),
+                ),
+            )
+            valuation = SimpleNamespace(
+                success_symbols=0,
+                empty_symbols=1 - valuation_failed,
+                failed_symbols=valuation_failed,
+                rows_persisted=0,
+                valuation_available_after_run=0,
+                results=(SimpleNamespace(status=status),),
+            )
+            adjusted = SimpleNamespace(
+                success_symbols=0,
+                empty_symbols=1 - adjusted_failed,
+                failed_symbols=adjusted_failed,
+                rows_received=0,
+                rows_persisted=0,
+                availability_as_of=current_at,
+                adjusted_return_available_after_run=0,
+                results=(SimpleNamespace(status=status),),
+            )
+            return SimpleNamespace(
+                as_of=current_at,
+                requested_symbols=request.symbols,
+                core_report=core,
+                valuation_report=valuation,
+                adjusted_return_report=adjusted,
+                factor_input_covered_after_run=0,
+                batch_first_symbol="000001.SZ",
+                batch_last_symbol="000001.SZ",
+                has_more_structural_members=False,
+                next_start_after=None,
+            )
+
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr(
+        cli_module.AppPaths, "from_project_root", lambda: original_paths(tmp_path)
+    )
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", Repository)
     monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", Universe)
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: object())
-    monkeypatch.setattr("stock_selector.collection.FinancialCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.IndustryCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.ValuationCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.AdjustedDailyReturnCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.StructuralCoreFundamentalsCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.StructuralValuationCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", lambda *_: object())
-    monkeypatch.setattr("stock_selector.collection.StructuralSlowInputCollector", Collector)
+    monkeypatch.setattr(
+        "stock_selector.collection.FinancialCollector", lambda *_: object()
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.IndustryCollector", lambda *_: object()
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.ValuationCollector", lambda *_: object()
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.AdjustedDailyReturnCollector", lambda *_: object()
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralCoreFundamentalsCollector",
+        lambda *_: object(),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralValuationCollector", lambda *_: object()
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector",
+        lambda *_: object(),
+    )
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralSlowInputCollector", Collector
+    )
     assert main(["refresh", "structural-slow-inputs", "--limit", "1"]) == expected
 
 
@@ -1636,16 +2522,31 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
         def collect(self, request: object) -> SimpleNamespace:
             captured["request"] = request
             return SimpleNamespace(
-                as_of=current_at, start_date=current_at.date() - timedelta(days=179), end_date=current_at.date(),
+                as_of=current_at,
+                start_date=current_at.date() - timedelta(days=179),
+                end_date=current_at.date(),
                 availability_as_of=current_at,
-                requested_symbols=("000002.SZ", "600519.SH"), success_symbols=1, empty_symbols=1,
-                failed_symbols=0, rows_received=1, rows_persisted=1, adjusted_return_available_after_run=1,
-                results=(), batch_first_symbol="000002.SZ", batch_last_symbol="600519.SH",
-                has_more_structural_members=False, next_start_after=None,
+                requested_symbols=("000002.SZ", "600519.SH"),
+                success_symbols=1,
+                empty_symbols=1,
+                failed_symbols=0,
+                rows_received=1,
+                rows_persisted=1,
+                adjusted_return_available_after_run=1,
+                results=(),
+                batch_first_symbol="000002.SZ",
+                batch_last_symbol="600519.SH",
+                has_more_structural_members=False,
+                next_start_after=None,
             )
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+
     def fake_now(_tz: object) -> datetime:
         nonlocal now_calls
         now_calls += 1
@@ -1653,11 +2554,28 @@ def test_structural_adjusted_return_cli_uses_one_current_timestamp_and_current_w
 
     monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=fake_now))
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
-    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", FakeStructuralCollector)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector",
+        FakeStructuralCollector,
+    )
 
-    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2", "--start-after", "000001.SZ"]) == 0
+    assert (
+        main(
+            [
+                "daily",
+                "collect-structural-adjusted-returns",
+                "--limit",
+                "2",
+                "--start-after",
+                "000001.SZ",
+            ]
+        )
+        == 0
+    )
     request = captured["request"]
     assert captured["as_of"] == current_at.date()
     assert request.symbols == ("000002.SZ", "600519.SH")
@@ -1711,23 +2629,56 @@ def test_structural_adjusted_return_cli_validates_before_provider_and_exit_statu
             nonlocal collector_calls
             collector_calls += 1
             return SimpleNamespace(
-                as_of=current_at, start_date=current_at.date() - timedelta(days=179), end_date=current_at.date(),
+                as_of=current_at,
+                start_date=current_at.date() - timedelta(days=179),
+                end_date=current_at.date(),
                 availability_as_of=current_at,
-                requested_symbols=request.symbols, success_symbols=1, empty_symbols=1 - failed_symbols,
-                failed_symbols=failed_symbols, rows_received=1, rows_persisted=1,
-                adjusted_return_available_after_run=1, results=(), batch_first_symbol=request.symbols[0],
-                batch_last_symbol=request.symbols[-1], has_more_structural_members=False, next_start_after=None,
+                requested_symbols=request.symbols,
+                success_symbols=1,
+                empty_symbols=1 - failed_symbols,
+                failed_symbols=failed_symbols,
+                rows_received=1,
+                rows_persisted=1,
+                adjusted_return_available_after_run=1,
+                results=(),
+                batch_first_symbol=request.symbols[0],
+                batch_last_symbol=request.symbols[-1],
+                has_more_structural_members=False,
+                next_start_after=None,
             )
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
-    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", FakeStructuralCollector)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector",
+        FakeStructuralCollector,
+    )
 
-    assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2", "--start-after", "000003.SZ"]) == 1
+    assert (
+        main(
+            [
+                "daily",
+                "collect-structural-adjusted-returns",
+                "--limit",
+                "2",
+                "--start-after",
+                "000003.SZ",
+            ]
+        )
+        == 1
+    )
     assert provider_constructions == 0
     assert collector_calls == 0
 
@@ -1768,21 +2719,42 @@ def test_structural_adjusted_return_cli_reports_next_cursor_for_partial_batch(
         def collect(self, request: object) -> SimpleNamespace:
             captured["request"] = request
             return SimpleNamespace(
-                as_of=current_at, start_date=request.start_date, end_date=request.end_date,
+                as_of=current_at,
+                start_date=request.start_date,
+                end_date=request.end_date,
                 availability_as_of=current_at,
-                requested_symbols=request.symbols, success_symbols=2, empty_symbols=0, failed_symbols=0,
-                rows_received=2, rows_persisted=2, adjusted_return_available_after_run=2, results=(),
-                batch_first_symbol="000001.SZ", batch_last_symbol="000002.SZ",
-                has_more_structural_members=True, next_start_after="000002.SZ",
+                requested_symbols=request.symbols,
+                success_symbols=2,
+                empty_symbols=0,
+                failed_symbols=0,
+                rows_received=2,
+                rows_persisted=2,
+                adjusted_return_available_after_run=2,
+                results=(),
+                batch_first_symbol="000001.SZ",
+                batch_last_symbol="000002.SZ",
+                has_more_structural_members=True,
+                next_start_after="000002.SZ",
             )
 
     monkeypatch.setattr(cli_module, "load_settings", lambda _path: Settings())
-    monkeypatch.setattr(cli_module.AppPaths, "from_project_root", lambda: original_from_project_root(tmp_path))
-    monkeypatch.setattr(cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at))
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        lambda: original_from_project_root(tmp_path),
+    )
+    monkeypatch.setattr(
+        cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
+    )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", lambda: "provider")
-    monkeypatch.setattr("stock_selector.collection.StructuralAdjustedReturnCollector", FakeStructuralCollector)
+    monkeypatch.setattr(
+        "stock_selector.collection.StructuralAdjustedReturnCollector",
+        FakeStructuralCollector,
+    )
 
     assert main(["daily", "collect-structural-adjusted-returns", "--limit", "2"]) == 0
     assert captured["request"].symbols == ("000001.SZ", "000002.SZ")
@@ -1863,22 +2835,28 @@ def test_structural_core_cli_uses_bounded_structural_scope_once(
         cli_module, "datetime", SimpleNamespace(now=lambda _tz: current_at)
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
     monkeypatch.setattr(
-        "stock_selector.collection.StructuralCoreFundamentalsCollector", FakeCoreCollector
+        "stock_selector.collection.StructuralCoreFundamentalsCollector",
+        FakeCoreCollector,
     )
 
-    assert main(
-        [
-            "fundamentals",
-            "collect-structural-core",
-            "--limit",
-            "2",
-            "--start-after",
-            "000001.SZ",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "fundamentals",
+                "collect-structural-core",
+                "--limit",
+                "2",
+                "--start-after",
+                "000001.SZ",
+            ]
+        )
+        == 0
+    )
     assert provider_calls == 1
     assert captured["as_of"] == current_at.date()
     assert captured["request"].symbols == ("000002.SZ", "600000.SH")
@@ -1956,37 +2934,46 @@ def test_structural_core_cli_reports_domain_failure_and_skips_end_or_bad_cursor_
         lambda: original_from_project_root(tmp_path),
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
     monkeypatch.setattr(
-        "stock_selector.collection.StructuralCoreFundamentalsCollector", FailingCoreCollector
+        "stock_selector.collection.StructuralCoreFundamentalsCollector",
+        FailingCoreCollector,
     )
 
     assert main(["fundamentals", "collect-structural-core", "--limit", "1"]) == 1
     assert provider_calls == 1
     assert "Financial failed: 688001.SH" in capsys.readouterr().out
-    assert main(
-        [
-            "fundamentals",
-            "collect-structural-core",
-            "--limit",
-            "1",
-            "--start-after",
-            "688001.SH",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "fundamentals",
+                "collect-structural-core",
+                "--limit",
+                "1",
+                "--start-after",
+                "688001.SH",
+            ]
+        )
+        == 0
+    )
     assert "No remaining structural members." in capsys.readouterr().out
     assert provider_calls == 1
-    assert main(
-        [
-            "fundamentals",
-            "collect-structural-core",
-            "--limit",
-            "1",
-            "--start-after",
-            "600000.SH",
-        ]
-    ) == 1
+    assert (
+        main(
+            [
+                "fundamentals",
+                "collect-structural-core",
+                "--limit",
+                "1",
+                "--start-after",
+                "600000.SH",
+            ]
+        )
+        == 1
+    )
     assert "current structural member" in capsys.readouterr().err
     assert provider_calls == 1
 
@@ -2055,22 +3042,27 @@ def test_structural_valuation_cli_uses_one_current_timestamp_and_one_provider(
         cli_module, "datetime", SimpleNamespace(now=lambda _timezone: current_at)
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
     monkeypatch.setattr(
         "stock_selector.collection.StructuralValuationCollector", FakeValuationCollector
     )
 
-    assert main(
-        [
-            "fundamentals",
-            "collect-structural-valuation",
-            "--limit",
-            "2",
-            "--start-after",
-            "000001.SZ",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "fundamentals",
+                "collect-structural-valuation",
+                "--limit",
+                "2",
+                "--start-after",
+                "000001.SZ",
+            ]
+        )
+        == 0
+    )
     assert provider_calls == 1
     assert captured["structural_as_of"] == current_at.date()
     assert captured["request"].symbols == ("000002.SZ", "600000.SH")
@@ -2141,7 +3133,9 @@ def test_structural_valuation_cli_exit_and_no_provider_boundaries(
         lambda: original_from_project_root(tmp_path),
     )
     monkeypatch.setattr("stock_selector.storage.LocalMarketRepository", FakeRepository)
-    monkeypatch.setattr("stock_selector.universe.CurrentUniverseService", FakeUniverseService)
+    monkeypatch.setattr(
+        "stock_selector.universe.CurrentUniverseService", FakeUniverseService
+    )
     monkeypatch.setattr("stock_selector.providers.AKShareProvider", provider_factory)
     monkeypatch.setattr(
         "stock_selector.collection.StructuralValuationCollector", FakeValuationCollector
@@ -2153,32 +3147,41 @@ def test_structural_valuation_cli_exit_and_no_provider_boundaries(
     outcome = "empty"
     assert main(["fundamentals", "collect-structural-valuation", "--limit", "1"]) == 0
     assert provider_calls == 2
-    assert main(
-        [
-            "fundamentals",
-            "collect-structural-valuation",
-            "--limit",
-            "1",
-            "--start-after",
-            "688001.SH",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "fundamentals",
+                "collect-structural-valuation",
+                "--limit",
+                "1",
+                "--start-after",
+                "688001.SH",
+            ]
+        )
+        == 0
+    )
     assert "No remaining structural members." in capsys.readouterr().out
     assert provider_calls == 2
     for limit in (0, -1, 21):
-        assert main(
-            ["fundamentals", "collect-structural-valuation", "--limit", str(limit)]
-        ) == 1
-    assert main(
-        [
-            "fundamentals",
-            "collect-structural-valuation",
-            "--limit",
-            "1",
-            "--start-after",
-            "600000.SH",
-        ]
-    ) == 1
+        assert (
+            main(
+                ["fundamentals", "collect-structural-valuation", "--limit", str(limit)]
+            )
+            == 1
+        )
+    assert (
+        main(
+            [
+                "fundamentals",
+                "collect-structural-valuation",
+                "--limit",
+                "1",
+                "--start-after",
+                "600000.SH",
+            ]
+        )
+        == 1
+    )
     assert provider_calls == 2
 
 

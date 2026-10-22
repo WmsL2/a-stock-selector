@@ -114,6 +114,15 @@ def build_parser() -> argparse.ArgumentParser:
     data_subparsers.add_parser(
         "instruments-once", help="Fetch and summarize one instrument snapshot."
     )
+    instrument_sync = data_subparsers.add_parser(
+        "instruments-sync",
+        help="Preview or explicitly apply one guarded instrument-master snapshot.",
+    )
+    instrument_sync.add_argument("--apply", action="store_true")
+    instrument_sync.add_argument("--expected-min-total", type=int)
+    instrument_sync.add_argument(
+        "--expected-min-board", action="append", default=[], metavar="BOARD=COUNT"
+    )
     data_subparsers.add_parser(
         "realtime-once", help="Fetch and summarize one real-time snapshot."
     )
@@ -435,6 +444,9 @@ def _run_data_command(arguments: argparse.Namespace) -> int:
         RealtimeQuotesRequest,
     )
 
+    if arguments.data_command == "instruments-sync":
+        return _run_instrument_sync_command(arguments)
+
     try:
         provider = AKShareProvider()
         if arguments.data_command == "instruments-once":
@@ -454,6 +466,47 @@ def _run_data_command(arguments: argparse.Namespace) -> int:
     except (ProviderError, ValidationError, ValueError) as exc:
         print(f"Data provider error: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _run_instrument_sync_command(arguments: argparse.Namespace) -> int:
+    """Synchronize the master only after explicit operator safeguards pass."""
+    from stock_selector.instrument_sync import (
+        InstrumentMasterSyncService,
+        InstrumentSyncError,
+        InstrumentSyncRequest,
+    )
+    from stock_selector.models import Board
+    from stock_selector.providers import AKShareProvider, ProviderError
+    from stock_selector.storage import LocalMarketRepository, StorageError
+
+    try:
+        floors: dict[Board, int] = {}
+        for raw_floor in arguments.expected_min_board:
+            board_text, separator, count_text = raw_floor.partition("=")
+            if not separator:
+                raise InstrumentSyncError("--expected-min-board must use BOARD=COUNT")
+            try:
+                board = Board(board_text)
+                count = int(count_text)
+            except ValueError as exc:
+                raise InstrumentSyncError("--expected-min-board has an unknown board or invalid count") from exc
+            if board in floors:
+                raise InstrumentSyncError("--expected-min-board cannot repeat a board")
+            floors[board] = count
+        request = InstrumentSyncRequest(
+            apply=arguments.apply,
+            expected_min_total=arguments.expected_min_total,
+            expected_min_boards=floors,
+        )
+        request.validate_usage()
+        repository = LocalMarketRepository(AppPaths.from_project_root())
+        repository.initialize()
+        report = InstrumentMasterSyncService(AKShareProvider(), repository).sync(request)
+    except (InstrumentSyncError, ProviderError, StorageError, ValidationError, ValueError) as exc:
+        print(f"Instrument sync error: {exc}", file=sys.stderr)
+        return 1
+    _print_instrument_sync_report(report)
     return 0
 
 
@@ -2156,6 +2209,30 @@ def _print_instrument_summary(provider: AKShareProvider) -> None:
     ):
         print(f"{label}: {board_counts[board]}")
     print("Validation: PASS")
+
+
+def _print_instrument_sync_report(report) -> None:  # type: ignore[no-untyped-def]
+    """Print a safe, finite instrument-sync result without exposing listings."""
+    print(f"Mode: {report.mode}")
+    print(f"Provider: {report.provider}")
+    print(f"Candidate total: {report.candidate_total}")
+    print(f"Existing total: {report.existing_total}")
+    for board in ("sh_main", "sz_main", "chinext", "star", "bse"):
+        from stock_selector.models import Board
+
+        value = Board(board)
+        print(
+            f"{board}: candidate={report.candidate_board_counts[value]} "
+            f"existing={report.existing_board_counts[value]}"
+        )
+    print(f"Added: {report.added_count}")
+    print(f"Removed: {report.removed_count}")
+    print(f"Changed metadata: {report.changed_metadata_count}")
+    print("Snapshot validated: YES")
+    print(f"Master persisted: {'YES' if report.persistence_performed else 'NO'}")
+    print(f"Readback verified: {'YES' if report.readback_verified else 'NO'}")
+    print("Universe ready: NOT VERIFIED")
+    print("Official readiness ready: NOT VERIFIED")
 
 
 def _print_realtime_summary(

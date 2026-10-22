@@ -11,7 +11,7 @@ for the A-share research application.
 | OPS01 — Decouple selection readiness from optional adjusted-return backfill | Refresh required risk, financial, industry, and valuation inputs without synchronous HFQ collection. | Completed |
 | OPS02 — Provider timeout and fallback hardening | Bound provider waits and review fallback behavior. | Completed |
 | OPS03 — Observable bounded progress and resumable operator batches | Make bounded batch progress and continuation observable. | Completed |
-| OPS04 — First-time data initialization workflow | Define an explicit local initialization sequence. | Planned |
+| OPS04 — First-time data initialization workflow | Guarded instrument-master sync and bounded local initialization runbook. | Completed |
 | OPS05 — Daily operator workflow and preflight | Define daily local operation and input preflight. | Planned |
 | OPS06 — Production/data-operations acceptance | Validate the completed local operations workflow against agreed evidence. | Planned |
 
@@ -109,4 +109,53 @@ frontend type-check and lint passed, Vitest passed 99 tests, and the production
 build passed. No live OPS03 provider-success smoke was performed: completion is
 based on deterministic offline tests and full canonical validation.
 
-OPS04–OPS06 remain Planned.
+## OPS04 contract and verification
+
+OPS04 adds the dedicated `data instruments-sync` command. It is preview-only by
+default; replacement requires explicit `--apply`, an operator-supplied minimum
+total count, and positive operator-supplied floors for all five supported
+boards. Each candidate is validated before master replacement. Existing symbols
+cannot silently disappear, board coverage cannot shrink, and existing exchange,
+board, and listing-date identities are protected. Safe new listings and
+permitted metadata updates remain supported. Each invocation performs one
+provider fetch and no unrelated-domain collection. A successful apply performs
+a full persisted-tuple readback verification. A pre-write failure preserves the
+existing master. Parquet replacement and DuckDB catalog refresh are not one
+atomic transaction, so a later catalog failure may leave persistence state
+uncertain; the command does not promise rollback.
+
+The service is located at
+`backend/src/stock_selector/instrument_sync.py`, outside the collection layer,
+so its repository orchestration preserves the collection-layer architecture.
+The first-time initialization runbook is
+`docs/first_time_data_initialization.md`. It defines cold, warm,
+provider-blocked, and interrupted initialization/recovery procedures without an
+implicit automatic full-market historical backfill. RAW collection and optional
+HFQ collection remain separate. Exact-date current-risk requirements and
+factor-input membership semantics remain unchanged, and optional HFQ remains
+nonblocking for official selection readiness. OPS04 adds no scheduler, trading,
+or background collection and makes no historical survivorship-safety claim.
+
+OPS04 implementation baseline: `b9566aa1d032a4404ecc90f62bf6441e128b5cba`.
+The roadmap baseline at the top of this document remains the historical
+operations-roadmap baseline, `04ff8235ed3e55fc115a442396e84ade67c8fdcb`.
+
+Canonical validation passed: backend pytest passed 1,118 tests with 12
+warnings; backend coverage pytest passed 1,118 tests with 12 warnings and 91%
+total backend coverage, including 97% coverage for `instrument_sync.py`. Ruff
+passed. Mypy passed across 125 source files. Frontend type-check and lint
+passed; Vitest passed 16 files / 99 tests; the frontend production build passed
+with its existing chunk-size warning. The first canonical run exposed an
+architecture-boundary violation, subsequently fixed by moving the service out
+of `collection/`. The second run exposed a Windows pytest temporary-path
+configuration problem. The final canonical run passed completely with an
+isolated short relative `basetemp` path. No live OPS04 provider-success smoke
+was performed; offline validation is not successful live data initialization.
+
+OPS04 completion does not recover live current-risk provider availability. The
+OPS02 external-provider limitation remains: no successful live provider
+initialization is claimed, and exact-date risk coverage remains blocked until
+an external current-risk provider is available.
+
+OPS01–OPS04 are Completed. OPS05–OPS06 remain Planned. Task00–60 remains
+frozen.
