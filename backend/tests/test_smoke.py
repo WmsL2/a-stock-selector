@@ -1455,7 +1455,7 @@ def test_selection_without_subcommand_reports_all_available_commands(
 ) -> None:
     assert main(["selection"]) == 2
     assert (
-        "input-status, coverage-status, prepare-inputs, refresh-current, daily, or run-current"
+        "input-status, coverage-status, daily-preflight, prepare-inputs, refresh-current, daily, or run-current"
         in capsys.readouterr().err
     )
 

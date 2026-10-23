@@ -4,6 +4,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import duckdb
+import pytest
 
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import (
@@ -14,7 +15,7 @@ from stock_selector.models import (
     Instrument,
     RealtimeQuote,
 )
-from stock_selector.storage import LocalMarketRepository
+from stock_selector.storage import LocalMarketRepository, StorageIOError
 
 
 def _repository(tmp_path) -> LocalMarketRepository:  # type: ignore[no-untyped-def]
@@ -95,3 +96,28 @@ def test_catalog_views_query_selective_parquet_and_stats(tmp_path) -> None:  # t
     assert stats.realtime_snapshots == 1
     assert stats.latest_realtime_at == _quote().ingested_at
     assert stats.disk_usage_bytes > 0
+
+
+def test_read_only_catalog_validates_without_creating_or_refreshing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    read_only = LocalMarketRepository.open_read_only(repository.paths)
+    catalog_bytes = repository.catalog_path.read_bytes()
+
+    with pytest.raises(StorageIOError, match="read-only"):
+        read_only._catalog.refresh_views()  # type: ignore[attr-defined]
+
+    assert repository.catalog_path.read_bytes() == catalog_bytes
+
+
+
+def test_read_only_catalog_rejects_initialize_before_directory_creation(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    read_only = LocalMarketRepository.open_read_only(repository.paths)
+    before = repository.catalog_path.read_bytes()
+
+    with pytest.raises(StorageIOError, match='read-only'):
+        read_only._catalog.initialize()  # type: ignore[attr-defined]
+    with pytest.raises(StorageIOError, match='read-only'):
+        read_only._catalog.refresh_views()  # type: ignore[attr-defined]
+
+    assert repository.catalog_path.read_bytes() == before

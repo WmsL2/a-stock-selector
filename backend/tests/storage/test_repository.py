@@ -9,7 +9,11 @@ import pytest
 
 from stock_selector.config.paths import AppPaths
 from stock_selector.models import AdjustedDailyReturn, AdjustmentType, RealtimeQuote
-from stock_selector.storage import LocalMarketRepository, StorageDataError
+from stock_selector.storage import (
+    LocalMarketRepository,
+    StorageDataError,
+    StorageIOError,
+)
 
 
 def _repository(tmp_path) -> LocalMarketRepository:  # type: ignore[no-untyped-def]
@@ -99,3 +103,64 @@ def test_adjusted_return_pit_blocks_future_backfill_and_is_idempotent(tmp_path) 
     repository.upsert_adjusted_daily_returns((historical,))
     assert repository.load_latest_adjusted_daily_returns_as_of("600519.SH", datetime(2025, 1, 3, 16, tzinfo=ZoneInfo("Asia/Shanghai"))) == ()
     assert len(repository.load_adjusted_daily_returns("600519.SH")) == 1
+
+
+def test_read_only_open_rejects_initialize_and_mutations(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    read_only = LocalMarketRepository.open_read_only(repository.paths)
+    catalog_bytes = repository.catalog_path.read_bytes()
+
+    with pytest.raises(StorageIOError, match="read-only"):
+        read_only.initialize()
+    with pytest.raises(StorageIOError, match="read-only"):
+        read_only.save_realtime_snapshot((_quote(),))
+
+    assert repository.catalog_path.read_bytes() == catalog_bytes
+
+
+
+def _readonly_mutations():  # type: ignore[no-untyped-def]
+    from stock_selector.models import (
+        Board,
+        DailyBar,
+        Exchange,
+        FinancialRecord,
+        IndustryRecord,
+        Instrument,
+        ValuationRecord,
+    )
+    from stock_selector.risk import DatedRiskState
+
+    at = datetime(2026, 10, 23, 9, tzinfo=ZoneInfo('Asia/Shanghai'))
+    instrument = Instrument(symbol='600519.SH', name='test', exchange=Exchange.SSE, board=Board.SH_MAIN, listing_date=date(2001, 8, 27))
+    bar = DailyBar(symbol='600519.SH', trade_date=date(2026, 10, 23), adjustment=AdjustmentType.RAW,
+                   open=10, high=11, low=9, close=10, volume=1, amount=10, source='test')
+    adjusted = AdjustedDailyReturn(symbol='600519.SH', trade_date=date(2026, 10, 23), previous_trade_date=date(2026, 10, 22),
+                                   return_fraction=0.01, adjustment=AdjustmentType.HFQ, observed_at=at, source='test')
+    risk = DatedRiskState(symbol='600519.SH', as_of=date(2026, 10, 23), is_st=False, is_suspended=False, is_delisting_period=False, observed_at=at, source='test')
+    financial = FinancialRecord(symbol='600519.SH', report_period=date(2025, 12, 31), announcement_date=date(2026, 3, 1), available_at=at, roe=1, source='test')
+    valuation = ValuationRecord(symbol='600519.SH', as_of=at, pe=1, source='test')
+    industry = IndustryRecord(symbol='600519.SH', industry_code='C15', industry_name='test', classification='test', effective_from=date(2020, 1, 1), source='test')
+    return (
+        ('save_instruments', lambda value: value.save_instruments((instrument,))),
+        ('upsert_daily_bars', lambda value: value.upsert_daily_bars((bar,))),
+        ('upsert_adjusted_daily_returns', lambda value: value.upsert_adjusted_daily_returns((adjusted,))),
+        ('save_realtime_snapshot', lambda value: value.save_realtime_snapshot((_quote(at=at),))),
+        ('upsert_risk_states', lambda value: value.upsert_risk_states((risk,))),
+        ('upsert_financial_records', lambda value: value.upsert_financial_records((financial,))),
+        ('upsert_valuation_records', lambda value: value.upsert_valuation_records((valuation,))),
+        ('upsert_industry_records', lambda value: value.upsert_industry_records((industry,))),
+    )
+
+
+@pytest.mark.parametrize(('name', 'mutation'), _readonly_mutations())
+def test_every_public_repository_mutator_rejects_read_only_before_writing(tmp_path, name, mutation) -> None:  # type: ignore[no-untyped-def]
+    repository = _repository(tmp_path)
+    read_only = LocalMarketRepository.open_read_only(repository.paths)
+    before = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+
+    with pytest.raises(StorageIOError, match='read-only'):
+        mutation(read_only)
+
+    after = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    assert after == before, name

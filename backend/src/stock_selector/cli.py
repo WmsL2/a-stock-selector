@@ -241,6 +241,10 @@ def build_parser() -> argparse.ArgumentParser:
         "coverage-status", allow_abbrev=False,
         help="Read-only current official selection data-coverage audit.",
     )
+    selection_subparsers.add_parser(
+        "daily-preflight", allow_abbrev=False,
+        help="Strictly read-only daily upstream-input readiness preflight.",
+    )
     prepare_inputs = selection_subparsers.add_parser(
         "prepare-inputs",
         allow_abbrev=False,
@@ -357,6 +361,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.command == "risk":
         return _run_risk_command(arguments.risk_command)
     elif arguments.command == "selection":
+        if arguments.selection_command == "daily-preflight":
+            return _run_selection_daily_preflight_command()
         if arguments.selection_command == "coverage-status":
             return _run_selection_coverage_status_command()
         if arguments.selection_command == "prepare-inputs":
@@ -877,7 +883,7 @@ def _run_selection_command(command: str | None) -> int:
     """Audit local current upstream inputs without running daily selection."""
     if command != "input-status":
         print(
-            "A selection subcommand is required: input-status, coverage-status, prepare-inputs, refresh-current, daily, or run-current.",
+            "A selection subcommand is required: input-status, coverage-status, daily-preflight, prepare-inputs, refresh-current, daily, or run-current.",
             file=sys.stderr,
         )
         return 2
@@ -928,6 +934,52 @@ def _run_selection_command(command: str | None) -> int:
         return 1
     _print_daily_selection_input_readiness_report(coverage, report)
     return 0
+
+
+def _run_selection_daily_preflight_command() -> int:
+    """Run one strictly read-only current upstream-input preflight."""
+    from stock_selector.daily_preflight import (
+        DailyPreflightOutcome,
+        DailyPreflightService,
+    )
+
+    try:
+        paths = AppPaths.from_project_root()
+        settings = load_settings(paths.config_dir)
+        current_at = datetime.now(ZoneInfo(settings.app.timezone))
+        report = DailyPreflightService(paths, settings).run(current_at)
+    except (ConfigurationError, ValidationError, ValueError) as exc:
+        print(f"Daily preflight error: {exc}", file=sys.stderr)
+        return 1
+    _print_daily_preflight_report(report)
+    if report.outcome is DailyPreflightOutcome.READY:
+        return 0
+    if report.outcome is DailyPreflightOutcome.BLOCKED:
+        return 3
+    return 1
+
+
+def _print_daily_preflight_report(report) -> None:  # type: ignore[no-untyped-def]
+    """Print a compact deterministic report without executing any workflow."""
+    print(f"As of: {report.as_of.isoformat()}")
+    print(f"Configured timezone: {report.configured_timezone}")
+    print(f"Outcome: {report.outcome.value}")
+    print(f"Local storage: {report.local_storage_state.value}")
+    print(f"Structural members: {report.structural_members if report.structural_members is not None else 'unavailable'}")
+    print(f"Risk-complete members: {report.risk_complete_members if report.risk_complete_members is not None else 'unavailable'}")
+    print(f"Risk-eligible members: {report.risk_eligible_members if report.risk_eligible_members is not None else 'unavailable'}")
+    print(f"Eligible factor-input covered: {report.eligible_factor_input_covered if report.eligible_factor_input_covered is not None else 'unavailable'}")
+    print(f"Eligible factor-input missing: {report.eligible_factor_input_missing if report.eligible_factor_input_missing is not None else 'unavailable'}")
+    ready = "unavailable" if report.upstream_inputs_ready is None else ("YES" if report.upstream_inputs_ready else "NO")
+    print(f"Upstream inputs ready: {ready}")
+    print("Readiness blockers: " + (", ".join(report.readiness_blockers) or "none"))
+    print(f"Provider checked: {'NO' if report.provider_unchecked else 'YES'}")
+    if report.current_risk_timezone_note:
+        print(f"Timezone note: {report.current_risk_timezone_note}")
+    if report.error:
+        print(f"Error: {report.error}")
+    print(f"Recommended next operator action: {report.recommended_next_operator_action}")
+    print("Preflight does not collect, refresh, score, rank, export, or run official selection.")
 
 
 def _run_selection_coverage_status_command() -> int:

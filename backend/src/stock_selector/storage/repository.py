@@ -64,20 +64,42 @@ class AdjustedReturnStorageStats:
 class LocalMarketRepository:
     """Persist only explicit domain batches; never fetches or selects market data."""
 
-    def __init__(self, paths: AppPaths) -> None:
+    def __init__(self, paths: AppPaths, *, read_only: bool = False) -> None:
         """Store collaborators without creating directories, files, or databases."""
         self.paths = paths
         self._parquet = ParquetStore(paths)
-        self._catalog = DuckDBCatalog(paths)
+        self._catalog = DuckDBCatalog(paths, read_only=read_only)
         self._initialized = False
+        self._read_only = read_only
+        self._read_only_storage_state = "available"
+
+    @classmethod
+    def open_read_only(cls, paths: AppPaths) -> "LocalMarketRepository":
+        """Open existing local evidence without creating, repairing, or refreshing it."""
+        repository = cls(paths, read_only=True)
+        if not repository.catalog_path.exists():
+            if repository._has_persisted_market_evidence():
+                raise StorageIOError("catalog is missing while persisted market evidence exists")
+            repository._initialized = True
+            repository._read_only_storage_state = "cold"
+            return repository
+        repository._catalog.validate_read_only()
+        repository._initialized = True
+        return repository
 
     @property
     def catalog_path(self) -> Path:
         """Expose the local catalog file path for offline status reporting."""
         return self._catalog.database_path
 
+    @property
+    def read_only_storage_state(self) -> str:
+        """Return whether read-only opening found a cold or available repository."""
+        return self._read_only_storage_state
+
     def initialize(self) -> None:
         """Explicitly create storage directories and the DuckDB catalog."""
+        self._require_writable()
         try:
             for directory in (
                 self._parquet.instruments_dir,
@@ -98,6 +120,7 @@ class LocalMarketRepository:
 
     def save_instruments(self, instruments: tuple[Instrument, ...]) -> None:
         """Replace the complete lightweight instrument master with sorted data."""
+        self._require_writable()
         self._require_initialized()
         if not instruments:
             raise StorageDataError("instrument master must not be empty")
@@ -114,6 +137,7 @@ class LocalMarketRepository:
 
     def upsert_daily_bars(self, bars: tuple[DailyBar, ...]) -> None:
         """Merge one explicit symbol's finite daily window, with incoming dates winning."""
+        self._require_writable()
         self._require_initialized()
         if not bars:
             return
@@ -162,6 +186,7 @@ class LocalMarketRepository:
 
     def upsert_adjusted_daily_returns(self, records: tuple[AdjustedDailyReturn, ...]) -> None:
         """Merge HFQ return revisions by (trade_date, observed_at), never into RAW bars."""
+        self._require_writable()
         self._require_initialized()
         if not records:
             return
@@ -235,6 +260,7 @@ class LocalMarketRepository:
 
     def save_realtime_snapshot(self, quotes: tuple[RealtimeQuote, ...]) -> Path:
         """Save one caller-selected, internally consistent realtime snapshot."""
+        self._require_writable()
         self._require_initialized()
         if not quotes:
             raise StorageDataError("realtime snapshot must not be empty")
@@ -272,6 +298,7 @@ class LocalMarketRepository:
 
     def upsert_risk_states(self, states: tuple[DatedRiskState, ...]) -> None:
         """Merge one exact-date risk batch, with incoming records explicitly winning."""
+        self._require_writable()
         self._require_initialized()
         if not states:
             return
@@ -309,6 +336,7 @@ class LocalMarketRepository:
 
     def upsert_financial_records(self, records: tuple[FinancialRecord, ...]) -> None:
         """Merge one symbol's revision-safe financial records by full PIT key."""
+        self._require_writable()
         self._require_initialized()
         if not records:
             return
@@ -360,6 +388,7 @@ class LocalMarketRepository:
 
     def upsert_valuation_records(self, records: tuple[ValuationRecord, ...]) -> None:
         """Merge one symbol's dated valuation observations; incoming exact instants win."""
+        self._require_writable()
         self._require_initialized()
         if not records:
             return
@@ -420,6 +449,7 @@ class LocalMarketRepository:
 
     def upsert_industry_records(self, records: tuple[IndustryRecord, ...]) -> None:
         """Merge one symbol's reliable industry intervals without overlap ambiguity."""
+        self._require_writable()
         self._require_initialized()
         if not records:
             return
@@ -526,6 +556,30 @@ class LocalMarketRepository:
         """Make local filesystem creation an explicit caller action."""
         if not self._initialized:
             raise StorageIOError("repository.initialize() must be called before storage access")
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise StorageIOError("repository is opened read-only")
+
+    def _has_persisted_market_evidence(self) -> bool:
+        """Detect actual known data files without treating empty directories as evidence."""
+        paths = (
+            self._parquet.instruments_path,
+            self._parquet.daily_bars_dir,
+            self._parquet.adjusted_returns_dir,
+            self._parquet.realtime_quotes_dir,
+            self._parquet.risk_states_dir,
+            self._parquet.financials_dir,
+            self._parquet.valuations_dir,
+            self._parquet.industries_dir,
+        )
+        try:
+            return any(
+                path.is_file() or (path.is_dir() and any(path.rglob("*.parquet")))
+                for path in paths
+            )
+        except OSError as exc:
+            raise StorageIOError("failed to inspect local market evidence") from exc
 
 
 def _validate_storage_symbol(symbol: str) -> None:

@@ -12,7 +12,7 @@ for the A-share research application.
 | OPS02 — Provider timeout and fallback hardening | Bound provider waits and review fallback behavior. | Completed |
 | OPS03 — Observable bounded progress and resumable operator batches | Make bounded batch progress and continuation observable. | Completed |
 | OPS04 — First-time data initialization workflow | Guarded instrument-master sync and bounded local initialization runbook. | Completed |
-| OPS05 — Daily operator workflow and preflight | Define daily local operation and input preflight. | Planned |
+| OPS05 — Daily operator workflow and preflight | Define daily local operation and input preflight. | Completed |
 | OPS06 — Production/data-operations acceptance | Validate the completed local operations workflow against agreed evidence. | Planned |
 
 ## OPS01 contract and source gate
@@ -157,5 +157,57 @@ OPS02 external-provider limitation remains: no successful live provider
 initialization is claimed, and exact-date risk coverage remains blocked until
 an external current-risk provider is available.
 
-OPS01–OPS04 are Completed. OPS05–OPS06 remain Planned. Task00–60 remains
-frozen.
+## OPS05 contract and verification
+
+OPS05 adds the `selection daily-preflight` command as a strictly read-only local
+preflight. It opens the repository explicitly in read-only mode and connects to
+the existing DuckDB catalog with `read_only=True`. It does not implicitly call
+`initialize()`, repair a catalog, or refresh views. Repository and catalog
+mutation guards reject write operations in read-only mode. A repository with no
+catalog and no persisted market evidence is classified as cold and blocked;
+missing, corrupt, unsupported, or internally inconsistent persisted catalog
+state is classified as an error rather than repaired or treated as empty.
+
+Each invocation acquires one `as_of` in the configured timezone. It evaluates
+risk evidence for that exact configured-timezone date, retains the existing
+`industry AND (financial OR valuation)` factor-input membership rule, and
+reuses the authoritative selection-readiness auditors. The report provides
+deterministic blockers, metrics, and operator guidance. It explicitly reports
+that the provider was not checked. The preflight makes no live provider
+request, performs no automatic refresh or collection, runs no factor, scoring,
+or ranking engine, exports no research artifact, and does not implicitly run
+official selection.
+
+The CLI outcomes are `READY = 0`, `ERROR = 1`, `USAGE = 2`, and `BLOCKED = 3`.
+`READY` establishes upstream membership and exact-date risk readiness
+only. It does not establish point-in-time scoreability, a nonempty official
+ranking, provider availability, market-open status, trading-calendar validity,
+or atomic snapshot consistency under concurrent writers. The separate daily
+runbook is `docs/daily_operator_workflow.md`; an operator must explicitly
+authorize any subsequent official selection.
+
+Canonical Retry 02 passed. Backend pytest passed 1,151 tests with 12 warnings,
+and backend coverage pytest passed 1,151 tests with 12 warnings at 91% total
+coverage. Coverage was 100% for `daily_preflight.py`, 97% for
+`storage/duckdb_catalog.py`, and 93% for `storage/repository.py`. Ruff passed.
+Mypy passed across 126 source files. Frontend type-check and ESLint passed;
+Vitest passed 16 files / 99 tests; and the frontend production build passed
+with its existing chunk-size warning.
+
+The first canonical attempt exposed one stale CLI command-list expectation in
+the smoke tests. The expectation was updated to include `daily-preflight`
+without changing production CLI behavior, and the corrected second canonical
+run passed.
+
+OPS05 completion preserves the OPS02 external-provider exception. Current-risk
+provider recovery is not proven, and no successful live full-market
+current-risk refresh or daily selection is claimed. OPS05 validation consists
+of deterministic offline testing and canonical regression. Actual
+cross-process DuckDB locking and concurrent-writer snapshot consistency were
+not exhaustively tested, and preflight cannot replace the official
+`DailySelectionService` result. Existing operator-controlled bounded collection
+and manual approval remain necessary. OPS05 adds no scheduler, background
+agent, brokerage integration, or automated trading.
+
+OPS01–OPS05 are Completed. OPS06 remains Planned as the final data-operations
+acceptance task. Task00–60 remains frozen.

@@ -14,10 +14,23 @@ from stock_selector.storage.errors import StorageIOError
 class DuckDBCatalog:
     """Maintain metadata and read-only Parquet views with short-lived connections."""
 
-    def __init__(self, paths: AppPaths) -> None:
+    _SCHEMA_VERSION = 1
+    _REQUIRED_VIEWS = (
+        "instruments",
+        "daily_bars",
+        "adjusted_daily_returns",
+        "realtime_quotes",
+        "risk_states",
+        "financial_records",
+        "valuation_records",
+        "industry_records",
+    )
+
+    def __init__(self, paths: AppPaths, *, read_only: bool = False) -> None:
         """Keep catalog path only; no database is created until initialize()."""
         self._database_path = paths.metadata_dir / "stock_selector.duckdb"
         self._processed_data_dir = paths.processed_data_dir
+        self._read_only = read_only
 
     @property
     def database_path(self) -> Path:
@@ -26,12 +39,22 @@ class DuckDBCatalog:
 
     def initialize(self) -> None:
         """Create schema-version metadata and empty-or-external data views."""
+        self._require_writable()
         self._database_path.parent.mkdir(parents=True, exist_ok=True)
         self._run(self._initialize_connection)
 
     def refresh_views(self) -> None:
         """Point views at current Parquet files only after successful writes."""
+        self._require_writable()
         self._run(self._refresh_connection)
+
+    def validate_read_only(self) -> None:
+        """Validate an existing catalog without creating or changing anything."""
+        if not self._read_only:
+            raise StorageIOError("read-only catalog validation requires read-only mode")
+        if not self._database_path.is_file():
+            raise StorageIOError(f"DuckDB catalog is missing: {self._database_path}")
+        self._run(self._validate_connection)
 
     def counts(
         self,
@@ -69,7 +92,7 @@ class DuckDBCatalog:
         """Execute one operation with a connection that is always closed."""
         connection = None
         try:
-            connection = duckdb.connect(str(self._database_path))
+            connection = duckdb.connect(str(self._database_path), read_only=self._read_only)
             return operation(connection)
         except duckdb.Error as exc:
             raise StorageIOError(f"DuckDB catalog operation failed: {self._database_path}") from exc
@@ -83,7 +106,7 @@ class DuckDBCatalog:
             "CREATE TABLE IF NOT EXISTS storage_metadata "
             "(schema_version INTEGER PRIMARY KEY)"
         )
-        connection.execute("INSERT OR REPLACE INTO storage_metadata VALUES (1)")
+        connection.execute(f"INSERT OR REPLACE INTO storage_metadata VALUES ({self._SCHEMA_VERSION})")
         self._refresh_connection(connection)
 
     def _refresh_connection(self, connection: Any) -> None:
@@ -228,6 +251,18 @@ class DuckDBCatalog:
         """Fetch the one supported catalog version."""
         result = connection.execute("SELECT schema_version FROM storage_metadata").fetchone()
         return int(result[0])
+
+    def _validate_connection(self, connection: Any) -> None:
+        """Confirm the supported metadata and all expected views are queryable."""
+        version = self._schema_version_connection(connection)
+        if version != self._SCHEMA_VERSION:
+            raise StorageIOError(f"unsupported DuckDB catalog schema version: {version}")
+        for view in self._REQUIRED_VIEWS:
+            connection.execute(f"SELECT 1 FROM {view} LIMIT 1").fetchone()
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise StorageIOError("catalog is opened read-only")
 
     @staticmethod
     def _fundamental_count_connection(
