@@ -4,7 +4,7 @@ Run the preflight with the existing project virtual environment. `-B` avoids
 writing Python bytecode as part of normal operator use.
 
 ```powershell
-.\venv\Scripts\python.exe -B -m stock_selector selection daily-preflight
+.\.venv\Scripts\python.exe -B -m stock_selector selection daily-preflight
 ```
 
 The command is strictly read-only for application-managed runtime data. It does
