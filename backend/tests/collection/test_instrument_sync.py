@@ -1,5 +1,6 @@
 """Offline regressions for guarded instrument-master synchronization."""
 
+from contextlib import contextmanager
 from datetime import date
 from typing import Any, cast
 
@@ -8,6 +9,7 @@ import pytest
 from stock_selector.config import AppPaths
 from stock_selector.instrument_sync import (
     InstrumentMasterSyncService,
+    InstrumentSyncBusyError,
     InstrumentSyncComparisonError,
     InstrumentSyncPersistenceError,
     InstrumentSyncRequest,
@@ -16,6 +18,9 @@ from stock_selector.instrument_sync import (
 from stock_selector.models import Board, Exchange, Instrument, SecurityStatus
 from stock_selector.providers.errors import ProviderConnectionError, ProviderDataError
 from stock_selector.storage import LocalMarketRepository, StorageError
+from stock_selector.storage.instrument_master_lock import (
+    InstrumentMasterLockBusyError,
+)
 
 
 def _instrument(board: Board, code: str, **changes: Any) -> Instrument:
@@ -123,6 +128,21 @@ def test_preview_fetches_once_and_never_replaces_existing_master(tmp_path: Any) 
     assert repository.load_instruments() == old
     assert report.mode == "preview"
     assert not report.persistence_performed and not report.readback_verified
+
+
+def test_preview_on_empty_master_creates_no_writer_lock(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    assert not repository.instrument_master_lock_path.exists()
+
+    report = InstrumentMasterSyncService(
+        FakeProvider(_five_board_candidate()), repository
+    ).sync(InstrumentSyncRequest())
+
+    assert repository.load_instruments() == ()
+    assert not repository.instrument_master_lock_path.exists()
+    assert not report.persistence_performed
+    assert not report.parquet_readback_verified
+    assert not report.catalog_readback_verified
 
 
 @pytest.mark.parametrize(
@@ -319,6 +339,229 @@ def test_safe_metadata_updates_and_new_listings_are_allowed_and_repeatable(
         second.removed_count,
         second.changed_metadata_count,
     ) == (0, 0, 0)
+
+
+def test_shared_lifecycle_date_survives_safe_metadata_sync(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    existing = list(_five_board_candidate())
+    index = next(
+        index for index, item in enumerate(existing) if item.symbol == "600001.SH"
+    )
+    lifecycle_date = date(2026, 10, 18)
+    existing[index] = existing[index].model_copy(
+        update={"delisting_date": lifecycle_date}
+    )
+    repository.save_instruments(tuple(existing))
+    provider_candidate = tuple(
+        item.model_copy(update={"name": "renamed", "status": SecurityStatus.ST})
+        if item.symbol == "600001.SH"
+        else item
+        for item in _five_board_candidate()
+    )
+
+    report = InstrumentMasterSyncService(
+        FakeProvider(provider_candidate), repository
+    ).sync(_apply_request())
+
+    stored = {item.symbol: item for item in repository.load_instruments()}
+    assert stored["600001.SH"].delisting_date == lifecycle_date
+    assert (stored["600001.SH"].name, stored["600001.SH"].status) == (
+        "renamed",
+        SecurityStatus.ST,
+    )
+    assert report.lifecycle_preserved_symbols == ("600001.SH",)
+    assert report.parquet_readback_verified and report.catalog_readback_verified
+
+
+def test_shared_matching_lifecycle_date_is_accepted(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    lifecycle_date = date(2026, 10, 18)
+    existing = tuple(
+        item.model_copy(update={"delisting_date": lifecycle_date})
+        if item.symbol == "600001.SH"
+        else item
+        for item in _five_board_candidate()
+    )
+    repository.save_instruments(existing)
+    candidate = tuple(
+        item.model_copy(
+            update={
+                "delisting_date": lifecycle_date,
+                "name": "renamed",
+                "status": SecurityStatus.DELISTED,
+            }
+        )
+        if item.symbol == "600001.SH"
+        else item
+        for item in _five_board_candidate()
+    )
+
+    report = InstrumentMasterSyncService(FakeProvider(candidate), repository).sync(
+        _apply_request()
+    )
+
+    assert repository.load_instruments() == candidate
+    assert report.lifecycle_conflict_count == 0
+    assert report.changed_metadata_count == 1
+
+
+@pytest.mark.parametrize(
+    ("existing_date", "provider_date"),
+    (
+        (date(2026, 10, 18), date(2026, 10, 19)),
+        (None, date(2026, 10, 18)),
+    ),
+)
+def test_shared_lifecycle_conflicts_reject_without_write(
+    tmp_path: Any, existing_date: date | None, provider_date: date
+) -> None:
+    repository = _repository(tmp_path)
+    existing = tuple(
+        item.model_copy(update={"delisting_date": existing_date})
+        if item.symbol == "600001.SH"
+        else item
+        for item in _five_board_candidate()
+    )
+    repository.save_instruments(existing)
+    candidate = tuple(
+        item.model_copy(update={"delisting_date": provider_date})
+        if item.symbol == "600001.SH"
+        else item
+        for item in _five_board_candidate()
+    )
+
+    with pytest.raises(InstrumentSyncComparisonError, match="lifecycle metadata"):
+        InstrumentMasterSyncService(FakeProvider(candidate), repository).sync(
+            _apply_request()
+        )
+    assert repository.load_instruments() == existing
+
+
+def test_provider_new_dated_symbol_rejects_without_write(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    existing = _five_board_candidate()
+    repository.save_instruments(existing)
+    candidate = existing + (
+        _instrument(
+            Board.SH_MAIN, "600002", delisting_date=date(2026, 10, 18)
+        ),
+    )
+
+    with pytest.raises(InstrumentSyncComparisonError, match="lifecycle metadata"):
+        InstrumentMasterSyncService(FakeProvider(candidate), repository).sync(
+            _apply_request()
+        )
+    assert repository.load_instruments() == existing
+
+
+def test_provider_absent_lifecycle_record_is_retained_exactly_and_reported(
+    tmp_path: Any,
+) -> None:
+    repository = _repository(tmp_path)
+    retained = _instrument(
+        Board.SH_MAIN,
+        "600002",
+        name="historical",
+        delisting_date=date(2026, 10, 18),
+        status=SecurityStatus.DELISTED,
+    )
+    existing = tuple(sorted((*_five_board_candidate(), retained), key=lambda item: item.symbol))
+    repository.save_instruments(existing)
+
+    report = InstrumentMasterSyncService(
+        FakeProvider(_five_board_candidate()), repository
+    ).sync(_apply_request())
+
+    assert repository.load_instruments() == existing
+    assert report.candidate_total == 5
+    assert report.provider_candidate_total == 5
+    assert report.effective_candidate_total == 6
+    assert report.provider_missing_count == 1
+    assert report.retained_historical_symbols == ("600002.SH",)
+    assert report.blocked_removal_count == report.removed_count == 0
+    assert report.candidate_board_counts[Board.SH_MAIN] == 1
+    assert report.provider_candidate_board_counts[Board.SH_MAIN] == 1
+    assert report.effective_candidate_board_counts[Board.SH_MAIN] == 2
+
+
+def test_retained_history_cannot_satisfy_raw_provider_board_floor(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    retained = _instrument(
+        Board.BSE, "430002", delisting_date=date(2026, 10, 18)
+    )
+    existing = tuple(sorted((*_five_board_candidate(), retained), key=lambda item: item.symbol))
+    repository.save_instruments(existing)
+    floors = {board: 1 for board in Board}
+    floors[Board.BSE] = 2
+
+    with pytest.raises(InstrumentSyncValidationError, match="bse count"):
+        InstrumentMasterSyncService(
+            FakeProvider(_five_board_candidate()), repository
+        ).sync(
+            InstrumentSyncRequest(
+                apply=True,
+                expected_min_total=5,
+                expected_min_boards=floors,
+            )
+        )
+    assert repository.load_instruments() == existing
+
+
+def test_mixed_retained_added_and_updated_candidate_persists_exactly(
+    tmp_path: Any,
+) -> None:
+    repository = _repository(tmp_path)
+    retained = _instrument(
+        Board.SH_MAIN,
+        "600003",
+        name="historical",
+        delisting_date=date(2026, 10, 18),
+        status=SecurityStatus.DELISTED,
+    )
+    existing = tuple(
+        sorted((*_five_board_candidate(), retained), key=lambda item: item.symbol)
+    )
+    repository.save_instruments(existing)
+    provider_candidate = tuple(
+        item.model_copy(update={"name": "renamed", "status": SecurityStatus.ST})
+        if item.symbol == "600001.SH"
+        else item
+        for item in _five_board_candidate()
+    ) + (_instrument(Board.SH_MAIN, "600002"),)
+
+    report = InstrumentMasterSyncService(
+        FakeProvider(provider_candidate), repository
+    ).sync(_apply_request())
+
+    expected = tuple(
+        sorted((*provider_candidate, retained), key=lambda item: item.symbol)
+    )
+    assert repository.load_instruments() == expected
+    assert report.retained_historical_symbols == ("600003.SH",)
+    assert (report.added_count, report.changed_metadata_count) == (1, 1)
+
+
+def test_service_busy_is_distinct_and_performs_no_master_write(tmp_path: Any) -> None:
+    repository = _repository(tmp_path)
+    existing = _five_board_candidate()
+    repository.save_instruments(existing)
+    lock_error = InstrumentMasterLockBusyError("simulated busy")
+
+    @contextmanager
+    def busy_writer(*, timeout_seconds: float = 5.0):  # type: ignore[no-untyped-def]
+        del timeout_seconds
+        raise lock_error
+        yield
+
+    repository.instrument_master_writer = busy_writer  # type: ignore[method-assign]
+
+    with pytest.raises(InstrumentSyncBusyError, match="no master write") as captured:
+        InstrumentMasterSyncService(
+            FakeProvider(_five_board_candidate()), repository
+        ).sync(_apply_request())
+
+    assert captured.value.__cause__ is lock_error
+    assert repository.load_instruments() == existing
 
 
 def test_storage_errors_are_reported_without_claiming_rollback(tmp_path: Any) -> None:

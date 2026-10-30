@@ -479,6 +479,7 @@ def _run_instrument_sync_command(arguments: argparse.Namespace) -> int:
     """Synchronize the master only after explicit operator safeguards pass."""
     from stock_selector.instrument_sync import (
         InstrumentMasterSyncService,
+        InstrumentSyncBusyError,
         InstrumentSyncError,
         InstrumentSyncRequest,
     )
@@ -509,6 +510,9 @@ def _run_instrument_sync_command(arguments: argparse.Namespace) -> int:
         repository = LocalMarketRepository(AppPaths.from_project_root())
         repository.initialize()
         report = InstrumentMasterSyncService(AKShareProvider(), repository).sync(request)
+    except InstrumentSyncBusyError as exc:
+        print(f"Instrument sync busy: {exc}", file=sys.stderr)
+        return 1
     except (InstrumentSyncError, ProviderError, StorageError, ValidationError, ValueError) as exc:
         print(f"Instrument sync error: {exc}", file=sys.stderr)
         return 1
@@ -522,11 +526,20 @@ def _run_storage_command(arguments: argparse.Namespace) -> int:
     from stock_selector.storage import LocalMarketRepository, StorageError
 
     try:
-        repository = LocalMarketRepository(AppPaths.from_project_root())
-        repository.initialize()
+        paths = AppPaths.from_project_root()
         if arguments.storage_command == "status":
+            repository = LocalMarketRepository(paths)
+            repository.initialize()
             _print_storage_status(repository)
         elif arguments.storage_command == "smoke":
+            inspection = LocalMarketRepository.open_read_only(paths)
+            if inspection.load_instruments():
+                raise ValueError(
+                    "storage smoke refuses to replace an existing nonempty instrument master; "
+                    "use data instruments-sync"
+                )
+            repository = LocalMarketRepository(paths)
+            repository.initialize()
             _run_storage_smoke(repository, arguments)
         else:
             print("A storage subcommand is required: status or smoke.", file=sys.stderr)
@@ -2267,7 +2280,8 @@ def _print_instrument_sync_report(report) -> None:  # type: ignore[no-untyped-de
     """Print a safe, finite instrument-sync result without exposing listings."""
     print(f"Mode: {report.mode}")
     print(f"Provider: {report.provider}")
-    print(f"Candidate total: {report.candidate_total}")
+    print(f"Raw provider candidate total: {report.provider_candidate_total}")
+    print(f"Effective merged master total: {report.effective_candidate_total}")
     print(f"Existing total: {report.existing_total}")
     for board in ("sh_main", "sz_main", "chinext", "star", "bse"):
         from stock_selector.models import Board
@@ -2279,10 +2293,23 @@ def _print_instrument_sync_report(report) -> None:  # type: ignore[no-untyped-de
         )
     print(f"Added: {report.added_count}")
     print(f"Removed: {report.removed_count}")
+    print(f"Provider missing: {report.provider_missing_count}")
+    print(f"Retained historical: {report.retained_historical_count}")
+    print(f"Blocked removals: {report.blocked_removal_count}")
+    print(f"Lifecycle dates preserved: {report.lifecycle_preserved_count}")
+    print(f"Lifecycle conflicts: {report.lifecycle_conflict_count}")
     print(f"Changed metadata: {report.changed_metadata_count}")
     print("Snapshot validated: YES")
     print(f"Master persisted: {'YES' if report.persistence_performed else 'NO'}")
     print(f"Readback verified: {'YES' if report.readback_verified else 'NO'}")
+    print(
+        f"Parquet readback verified: "
+        f"{'YES' if report.parquet_readback_verified else 'NO'}"
+    )
+    print(
+        f"DuckDB readback verified: "
+        f"{'YES' if report.catalog_readback_verified else 'NO'}"
+    )
     print("Universe ready: NOT VERIFIED")
     print("Official readiness ready: NOT VERIFIED")
 
@@ -2545,7 +2572,13 @@ def _run_storage_smoke(repository, arguments: argparse.Namespace) -> None:  # ty
 
     provider = AKShareProvider()
     instruments = provider.get_instruments()
-    repository.save_instruments(instruments)
+    with repository.instrument_master_writer():
+        if repository.load_instruments():
+            raise ValueError(
+                "storage smoke bootstrap was blocked because the instrument master "
+                "was populated concurrently; use data instruments-sync"
+            )
+        repository.save_instruments(instruments)
     daily_request = DailyBarsRequest(
         symbol=arguments.symbol,
         start_date=date.fromisoformat(arguments.start),

@@ -118,6 +118,54 @@ def test_read_only_open_rejects_initialize_and_mutations(tmp_path) -> None:  # t
     assert repository.catalog_path.read_bytes() == catalog_bytes
 
 
+def test_read_only_writer_guard_creates_no_lock_metadata(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    paths = AppPaths.from_project_root(tmp_path)
+    read_only = LocalMarketRepository.open_read_only(paths)
+
+    with (
+        pytest.raises(StorageIOError, match="read-only"),
+        read_only.instrument_master_writer(),
+    ):
+        pytest.fail("read-only repository acquired a writer lock")
+
+    assert not read_only.instrument_master_lock_path.exists()
+
+
+def test_instrument_catalog_readback_mismatch_is_not_reported_as_success(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    from stock_selector.models import Board, Exchange, Instrument
+
+    repository = _repository(tmp_path)
+    instrument = Instrument(
+        symbol="600519.SH",
+        name="test",
+        exchange=Exchange.SSE,
+        board=Board.SH_MAIN,
+        listing_date=date(2001, 8, 27),
+    )
+    original_readback = repository._catalog.instrument_rows
+    repository._catalog.instrument_rows = lambda: (  # type: ignore[method-assign]
+        (
+            instrument.symbol,
+            "different-name",
+            instrument.exchange.value,
+            instrument.board.value,
+            instrument.listing_date,
+            instrument.delisting_date,
+            instrument.status.value,
+        ),
+    )
+
+    try:
+        with pytest.raises(StorageIOError, match="catalog readback mismatch"):
+            repository.save_instruments((instrument,))
+    finally:
+        repository._catalog.instrument_rows = original_readback  # type: ignore[method-assign]
+
+    assert repository.load_instruments() == (instrument,)
+
+
 
 def _readonly_mutations():  # type: ignore[no-untyped-def]
     from stock_selector.models import (

@@ -1,5 +1,7 @@
 """Passive selective repository built on Parquet source files and DuckDB views."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from itertools import pairwise
@@ -20,6 +22,10 @@ from stock_selector.models.common import validate_symbol
 from stock_selector.risk.models import DatedRiskState
 from stock_selector.storage.duckdb_catalog import DuckDBCatalog
 from stock_selector.storage.errors import StorageDataError, StorageIOError
+from stock_selector.storage.instrument_master_lock import (
+    acquire_instrument_master_lock,
+    instrument_master_lock_path,
+)
 from stock_selector.storage.parquet_store import ParquetStore
 
 
@@ -93,6 +99,11 @@ class LocalMarketRepository:
         return self._catalog.database_path
 
     @property
+    def instrument_master_lock_path(self) -> Path:
+        """Return the shared writer rendezvous path without creating it."""
+        return instrument_master_lock_path(self.paths.metadata_dir)
+
+    @property
     def read_only_storage_state(self) -> str:
         """Return whether read-only opening found a cold or available repository."""
         return self._read_only_storage_state
@@ -125,8 +136,43 @@ class LocalMarketRepository:
         if not instruments:
             raise StorageDataError("instrument master must not be empty")
         _require_unique_symbols(instruments, "instrument master")
-        self._parquet.write_instruments(tuple(sorted(instruments, key=lambda item: item.symbol)))
-        self._catalog.refresh_views()
+        ordered = tuple(sorted(instruments, key=lambda item: item.symbol))
+        with self.instrument_master_writer():
+            self._parquet.write_instruments(ordered)
+            self._catalog.refresh_views()
+            if self.load_instruments() != ordered:
+                raise StorageIOError("instrument-master Parquet readback mismatch")
+            if not self.catalog_instruments_match(ordered):
+                raise StorageIOError("instrument-master catalog readback mismatch")
+
+    @contextmanager
+    def instrument_master_writer(
+        self, *, timeout_seconds: float = 5.0
+    ) -> Iterator[None]:
+        """Hold the shared reentrant writer lock for one authoritative workflow."""
+        self._require_writable()
+        self._require_initialized()
+        with acquire_instrument_master_lock(
+            self.instrument_master_lock_path, timeout_seconds=timeout_seconds
+        ):
+            yield
+
+    def catalog_instruments_match(self, instruments: tuple[Instrument, ...]) -> bool:
+        """Compare the complete DuckDB view with one canonical master tuple."""
+        self._require_initialized()
+        expected = tuple(
+            (
+                item.symbol,
+                item.name,
+                item.exchange.value,
+                item.board.value,
+                item.listing_date,
+                item.delisting_date,
+                item.status.value,
+            )
+            for item in sorted(instruments, key=lambda value: value.symbol)
+        )
+        return self._catalog.instrument_rows() == expected
 
     def load_instruments(self) -> tuple[Instrument, ...]:
         """Load the full lightweight instrument master in canonical order."""

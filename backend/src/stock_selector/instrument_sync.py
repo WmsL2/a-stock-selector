@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from stock_selector.models import Board, Instrument
 from stock_selector.providers.base import InstrumentProvider
 from stock_selector.storage import LocalMarketRepository, StorageError
+from stock_selector.storage.instrument_master_lock import (
+    InstrumentMasterLockBusyError,
+)
 
 SUPPORTED_BOARDS = (
     Board.SH_MAIN,
@@ -30,6 +33,10 @@ class InstrumentSyncComparisonError(InstrumentSyncError):
 
 class InstrumentSyncPersistenceError(InstrumentSyncError):
     """Raised when persistence or its mandatory readback cannot be confirmed."""
+
+
+class InstrumentSyncBusyError(InstrumentSyncError):
+    """Raised when another writer owns the instrument-master lock."""
 
 
 @dataclass(frozen=True)
@@ -71,14 +78,37 @@ class InstrumentSyncReport:
     mode: str
     provider: str
     candidate_total: int
+    effective_candidate_total: int
     existing_total: int
     candidate_board_counts: dict[Board, int]
+    effective_candidate_board_counts: dict[Board, int]
     existing_board_counts: dict[Board, int]
     added_count: int
     removed_count: int
+    provider_missing_count: int
+    retained_historical_count: int
+    retained_historical_symbols: tuple[str, ...]
+    blocked_removal_count: int
+    blocked_removal_symbols: tuple[str, ...]
+    lifecycle_preserved_count: int
+    lifecycle_preserved_symbols: tuple[str, ...]
+    lifecycle_conflict_count: int
+    lifecycle_conflict_symbols: tuple[str, ...]
     changed_metadata_count: int
     persistence_performed: bool
     readback_verified: bool
+    parquet_readback_verified: bool
+    catalog_readback_verified: bool
+
+    @property
+    def provider_candidate_total(self) -> int:
+        """Expose the legacy candidate total with explicit raw-provider semantics."""
+        return self.candidate_total
+
+    @property
+    def provider_candidate_board_counts(self) -> dict[Board, int]:
+        """Expose legacy candidate board counts as raw-provider coverage."""
+        return self.candidate_board_counts
 
 
 class InstrumentMasterSyncService:
@@ -92,35 +122,174 @@ class InstrumentMasterSyncService:
 
     def sync(self, request: InstrumentSyncRequest) -> InstrumentSyncReport:
         request.validate_usage()
-        candidate = _validate_candidate(self._provider.get_instruments(), request)
-        existing = self._repository.load_instruments()
-        comparison = _compare(existing, candidate)
+        provider_candidate = _validate_candidate(
+            self._provider.get_instruments(), request
+        )
         if request.apply:
-            _require_preservation(comparison)
             try:
-                self._repository.save_instruments(candidate)
-                readback = self._repository.load_instruments()
+                with self._repository.instrument_master_writer():
+                    existing = self._repository.load_instruments()
+                    merged = _merge_with_retained_history(
+                        existing, provider_candidate
+                    )
+                    comparison = _compare(existing, merged.effective_candidate)
+                    _require_preservation(comparison, merged)
+                    self._repository.save_instruments(merged.effective_candidate)
+                    parquet_verified = (
+                        self._repository.load_instruments()
+                        == merged.effective_candidate
+                    )
+                    catalog_verified = self._repository.catalog_instruments_match(
+                        merged.effective_candidate
+                    )
+            except InstrumentMasterLockBusyError as exc:
+                raise InstrumentSyncBusyError(
+                    "instrument-master writer is busy; no master write was attempted"
+                ) from exc
             except StorageError as exc:
                 raise InstrumentSyncPersistenceError(
                     "instrument-master persistence could not be confirmed; inspect local master and catalog before retrying"
                 ) from exc
-            if readback != candidate:
+            if not parquet_verified or not catalog_verified:
                 raise InstrumentSyncPersistenceError(
                     "instrument-master readback did not match the approved candidate; inspect local master and catalog"
                 )
-        return InstrumentSyncReport(
+            return _report(
+                request,
+                self._provider.info.name,
+                provider_candidate,
+                existing,
+                merged,
+                comparison,
+                parquet_verified=True,
+                catalog_verified=True,
+            )
+
+        existing = self._repository.load_instruments()
+        merged = _merge_with_retained_history(existing, provider_candidate)
+        comparison = _compare(existing, merged.effective_candidate)
+        return _report(
+            request,
+            self._provider.info.name,
+            provider_candidate,
+            existing,
+            merged,
+            comparison,
+            parquet_verified=False,
+            catalog_verified=False,
+        )
+
+
+def _report(
+    request: InstrumentSyncRequest,
+    provider: str,
+    provider_candidate: tuple[Instrument, ...],
+    existing: tuple[Instrument, ...],
+    merged: "_MergeResult",
+    comparison: "_Comparison",
+    *,
+    parquet_verified: bool,
+    catalog_verified: bool,
+) -> InstrumentSyncReport:
+    return InstrumentSyncReport(
             mode="apply" if request.apply else "preview",
-            provider=self._provider.info.name,
-            candidate_total=len(candidate),
+            provider=provider,
+            candidate_total=len(provider_candidate),
+            effective_candidate_total=len(merged.effective_candidate),
             existing_total=len(existing),
-            candidate_board_counts=_board_counts(candidate),
+            candidate_board_counts=_board_counts(provider_candidate),
+            effective_candidate_board_counts=_board_counts(
+                merged.effective_candidate
+            ),
             existing_board_counts=_board_counts(existing),
             added_count=len(comparison.added),
             removed_count=len(comparison.removed),
+            provider_missing_count=len(merged.provider_missing),
+            retained_historical_count=len(merged.retained_historical),
+            retained_historical_symbols=merged.retained_historical,
+            blocked_removal_count=len(merged.blocked_removals),
+            blocked_removal_symbols=merged.blocked_removals,
+            lifecycle_preserved_count=len(merged.lifecycle_preserved),
+            lifecycle_preserved_symbols=merged.lifecycle_preserved,
+            lifecycle_conflict_count=len(merged.lifecycle_conflicts),
+            lifecycle_conflict_symbols=merged.lifecycle_conflicts,
             changed_metadata_count=len(comparison.metadata_changed),
             persistence_performed=request.apply,
-            readback_verified=request.apply,
+            readback_verified=parquet_verified and catalog_verified,
+            parquet_readback_verified=parquet_verified,
+            catalog_readback_verified=catalog_verified,
         )
+
+
+@dataclass(frozen=True)
+class _MergeResult:
+    effective_candidate: tuple[Instrument, ...]
+    provider_missing: tuple[str, ...]
+    retained_historical: tuple[str, ...]
+    blocked_removals: tuple[str, ...]
+    lifecycle_preserved: tuple[str, ...]
+    lifecycle_conflicts: tuple[str, ...]
+
+
+def _merge_with_retained_history(
+    existing: tuple[Instrument, ...], provider_candidate: tuple[Instrument, ...]
+) -> _MergeResult:
+    old = {item.symbol: item for item in existing}
+    provider = {item.symbol: item for item in provider_candidate}
+    effective = dict(provider)
+    shared = tuple(sorted(old.keys() & provider.keys()))
+    lifecycle_preserved = tuple(
+        symbol
+        for symbol in shared
+        if old[symbol].delisting_date is not None
+        and provider[symbol].delisting_date is None
+    )
+    for symbol in lifecycle_preserved:
+        effective[symbol] = provider[symbol].model_copy(
+            update={"delisting_date": old[symbol].delisting_date}
+        )
+
+    shared_conflicts = tuple(
+        symbol
+        for symbol in shared
+        if (
+            old[symbol].delisting_date is None
+            and provider[symbol].delisting_date is not None
+        )
+        or (
+            old[symbol].delisting_date is not None
+            and provider[symbol].delisting_date is not None
+            and old[symbol].delisting_date != provider[symbol].delisting_date
+        )
+    )
+    new_dated = tuple(
+        sorted(
+            symbol
+            for symbol in provider.keys() - old.keys()
+            if provider[symbol].delisting_date is not None
+        )
+    )
+    provider_missing = tuple(sorted(old.keys() - provider.keys()))
+    retained_historical = tuple(
+        symbol
+        for symbol in provider_missing
+        if old[symbol].delisting_date is not None
+    )
+    blocked_removals = tuple(
+        symbol
+        for symbol in provider_missing
+        if old[symbol].delisting_date is None
+    )
+    for symbol in retained_historical:
+        effective[symbol] = old[symbol]
+    return _MergeResult(
+        effective_candidate=tuple(effective[symbol] for symbol in sorted(effective)),
+        provider_missing=provider_missing,
+        retained_historical=retained_historical,
+        blocked_removals=blocked_removals,
+        lifecycle_preserved=lifecycle_preserved,
+        lifecycle_conflicts=tuple(sorted((*shared_conflicts, *new_dated))),
+    )
 
 
 @dataclass(frozen=True)
@@ -204,7 +373,13 @@ def _compare(
     )
 
 
-def _require_preservation(comparison: _Comparison) -> None:
+def _require_preservation(
+    comparison: _Comparison, merged: _MergeResult
+) -> None:
+    if merged.lifecycle_conflicts:
+        raise InstrumentSyncComparisonError(
+            "ordinary sync cannot establish or change delisting lifecycle metadata"
+        )
     if comparison.removed:
         raise InstrumentSyncComparisonError(
             "candidate would remove existing instrument symbols"

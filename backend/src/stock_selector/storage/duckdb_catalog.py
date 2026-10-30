@@ -88,6 +88,12 @@ class DuckDBCatalog:
         """Return PIT return-evidence coverage from its separate view."""
         return self._run(self._adjusted_return_count_connection)
 
+    def instrument_rows(
+        self,
+    ) -> tuple[tuple[str, str, str, str, date, date | None, str], ...]:
+        """Read the complete catalog-backed instrument view in canonical order."""
+        return self._run(self._instrument_rows_connection)
+
     def _run(self, operation: Callable[[Any], "CatalogResult"]) -> "CatalogResult":
         """Execute one operation with a connection that is always closed."""
         connection = None
@@ -251,6 +257,19 @@ class DuckDBCatalog:
         """Fetch the one supported catalog version."""
         result = connection.execute("SELECT schema_version FROM storage_metadata").fetchone()
         return int(result[0])
+
+    @staticmethod
+    def _instrument_rows_connection(
+        connection: Any,
+    ) -> tuple[tuple[str, str, str, str, date, date | None, str], ...]:
+        rows = connection.execute(
+            "SELECT symbol, name, exchange, board, listing_date, delisting_date, status "
+            "FROM instruments ORDER BY symbol"
+        ).fetchall()
+        return tuple(
+            (symbol, name, exchange, board, listing_date, delisting_date, status)
+            for symbol, name, exchange, board, listing_date, delisting_date, status in rows
+        )
 
     def _validate_connection(self, connection: Any) -> None:
         """Confirm the supported metadata and all expected views are queryable."""

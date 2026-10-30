@@ -21,7 +21,15 @@ from stock_selector.collection import (
 )
 from stock_selector.config import AppPaths, Settings
 from stock_selector.config.loader import ConfigurationError
-from stock_selector.models import Board, Exchange, Instrument
+from stock_selector.models import (
+    AdjustmentType,
+    Board,
+    DailyBar,
+    Exchange,
+    Instrument,
+    RealtimeQuote,
+    SecurityStatus,
+)
 from stock_selector.storage import LocalMarketRepository, StorageError
 from stock_selector.universe import UniverseError
 
@@ -298,6 +306,248 @@ def test_storage_cli_parser_accepts_bounded_smoke_arguments() -> None:
     )
     assert arguments.storage_command == "smoke"
     assert arguments.symbol == "600519.SH"
+
+
+def _use_project_paths(
+    monkeypatch: pytest.MonkeyPatch, paths: AppPaths
+) -> None:
+    monkeypatch.setattr(
+        cli_module.AppPaths,
+        "from_project_root",
+        classmethod(lambda cls, project_root=None: paths),
+    )
+
+
+def _storage_smoke_arguments() -> list[str]:
+    return [
+        "storage",
+        "smoke",
+        "600519.SH",
+        "--start",
+        "2026-08-03",
+        "--end",
+        "2026-08-07",
+    ]
+
+
+def test_storage_smoke_rejects_existing_master_before_provider_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import stock_selector.providers as providers_module
+
+    paths = AppPaths.from_project_root(tmp_path)
+    repository = LocalMarketRepository(paths)
+    repository.initialize()
+    authoritative = Instrument(
+        symbol="600519.SH",
+        name="authoritative",
+        exchange=Exchange.SSE,
+        board=Board.SH_MAIN,
+        listing_date=date(2001, 8, 27),
+        delisting_date=date(2026, 10, 18),
+        status=SecurityStatus.DELISTED,
+    )
+    historical = Instrument(
+        symbol="600001.SH",
+        name="provider-absent historical",
+        exchange=Exchange.SSE,
+        board=Board.SH_MAIN,
+        listing_date=date(1990, 12, 19),
+        delisting_date=date(2026, 10, 17),
+        status=SecurityStatus.DELISTED,
+    )
+    original = tuple(sorted((authoritative, historical), key=lambda item: item.symbol))
+    repository.save_instruments(original)
+    _use_project_paths(monkeypatch, paths)
+    monkeypatch.setattr(
+        providers_module,
+        "AKShareProvider",
+        lambda: pytest.fail("provider must not be constructed for a populated master"),
+    )
+
+    assert main(_storage_smoke_arguments()) == 1
+
+    assert "refuses to replace an existing nonempty instrument master" in capsys.readouterr().err
+    assert repository.load_instruments() == original
+
+
+def test_storage_smoke_cold_bootstrap_remains_supported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stock_selector.providers as providers_module
+
+    paths = AppPaths.from_project_root(tmp_path)
+    _use_project_paths(monkeypatch, paths)
+    instrument = Instrument(
+        symbol="600519.SH",
+        name="bootstrap",
+        exchange=Exchange.SSE,
+        board=Board.SH_MAIN,
+        listing_date=date(2001, 8, 27),
+    )
+    observed_at = datetime(2026, 8, 7, 16, tzinfo=ZoneInfo("Asia/Shanghai"))
+    daily = DailyBar(
+        symbol=instrument.symbol,
+        trade_date=date(2026, 8, 7),
+        adjustment=AdjustmentType.RAW,
+        open=10,
+        high=11,
+        low=9,
+        close=10,
+        volume=100,
+        amount=1000,
+        source="fake",
+    )
+    quote = RealtimeQuote(
+        symbol=instrument.symbol,
+        price=10,
+        ingested_at=observed_at,
+        source="fake",
+    )
+
+    class FakeProvider:
+        def get_instruments(self) -> tuple[Instrument, ...]:
+            return (instrument,)
+
+        def get_daily_bars(self, request: object) -> tuple[DailyBar, ...]:
+            return (daily,)
+
+        def get_realtime_quotes(self, request: object) -> tuple[RealtimeQuote, ...]:
+            return (quote,)
+
+    monkeypatch.setattr(providers_module, "AKShareProvider", FakeProvider)
+
+    assert main(_storage_smoke_arguments()) == 0
+
+    repository = LocalMarketRepository(paths)
+    repository.initialize()
+    assert repository.load_instruments() == (instrument,)
+    assert repository.load_daily_bars(instrument.symbol) == (daily,)
+    assert repository.load_latest_realtime_snapshot() == (quote,)
+
+
+def test_storage_smoke_concurrent_population_cannot_be_overwritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import stock_selector.providers as providers_module
+
+    paths = AppPaths.from_project_root(tmp_path)
+    _use_project_paths(monkeypatch, paths)
+    concurrent = Instrument(
+        symbol="600001.SH",
+        name="concurrent authoritative",
+        exchange=Exchange.SSE,
+        board=Board.SH_MAIN,
+        listing_date=date(1990, 12, 19),
+        delisting_date=date(2026, 10, 18),
+        status=SecurityStatus.DELISTED,
+    )
+    raw_provider = Instrument(
+        symbol="600519.SH",
+        name="raw provider",
+        exchange=Exchange.SSE,
+        board=Board.SH_MAIN,
+        listing_date=date(2001, 8, 27),
+    )
+
+    class RacingProvider:
+        def get_instruments(self) -> tuple[Instrument, ...]:
+            other = LocalMarketRepository(paths)
+            other.initialize()
+            other.save_instruments((concurrent,))
+            return (raw_provider,)
+
+        def get_daily_bars(self, request: object) -> None:
+            pytest.fail("daily collection must not start after concurrent population")
+
+        def get_realtime_quotes(self, request: object) -> None:
+            pytest.fail("realtime collection must not start after concurrent population")
+
+    monkeypatch.setattr(providers_module, "AKShareProvider", RacingProvider)
+
+    assert main(_storage_smoke_arguments()) == 1
+
+    assert "populated concurrently" in capsys.readouterr().err
+    repository = LocalMarketRepository(paths)
+    repository.initialize()
+    assert repository.load_instruments() == (concurrent,)
+
+
+def test_instrument_sync_cli_reports_busy_distinctly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import stock_selector.instrument_sync as sync_module
+    import stock_selector.providers as providers_module
+    import stock_selector.storage as storage_module
+
+    class FakeRepository:
+        def __init__(self, paths: object) -> None:
+            pass
+
+        def initialize(self) -> None:
+            pass
+
+    class FakeProvider:
+        pass
+
+    class BusyService:
+        def __init__(self, provider: object, repository: object) -> None:
+            pass
+
+        def sync(self, request: object) -> None:
+            raise sync_module.InstrumentSyncBusyError("simulated busy")
+
+    monkeypatch.setattr(storage_module, "LocalMarketRepository", FakeRepository)
+    monkeypatch.setattr(providers_module, "AKShareProvider", FakeProvider)
+    monkeypatch.setattr(sync_module, "InstrumentMasterSyncService", BusyService)
+    arguments = ["data", "instruments-sync", "--apply", "--expected-min-total", "5"]
+    for board in Board:
+        arguments.extend(("--expected-min-board", f"{board.value}=1"))
+
+    assert main(arguments) == 1
+
+    output = capsys.readouterr().err
+    assert "Instrument sync busy: simulated busy" in output
+    assert "persistence could not be confirmed" not in output
+
+
+def test_instrument_sync_report_prints_lifecycle_and_split_readback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = SimpleNamespace(
+        mode="preview",
+        provider="fake",
+        provider_candidate_total=5,
+        effective_candidate_total=6,
+        existing_total=6,
+        candidate_board_counts={board: 1 for board in Board},
+        existing_board_counts={board: 1 for board in Board},
+        added_count=1,
+        removed_count=0,
+        provider_missing_count=1,
+        retained_historical_count=1,
+        blocked_removal_count=0,
+        lifecycle_preserved_count=1,
+        lifecycle_conflict_count=0,
+        changed_metadata_count=1,
+        persistence_performed=False,
+        readback_verified=False,
+        parquet_readback_verified=False,
+        catalog_readback_verified=False,
+    )
+
+    cli_module._print_instrument_sync_report(report)
+
+    output = capsys.readouterr().out
+    assert "Raw provider candidate total: 5" in output
+    assert "Effective merged master total: 6" in output
+    assert "Retained historical: 1" in output
+    assert "Parquet readback verified: NO" in output
+    assert "DuckDB readback verified: NO" in output
 
 
 def test_universe_cli_parser_accepts_offline_status_command() -> None:
